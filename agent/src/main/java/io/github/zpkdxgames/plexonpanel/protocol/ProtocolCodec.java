@@ -17,7 +17,7 @@ import java.util.UUID;
 import java.util.regex.Pattern;
 
 public final class ProtocolCodec {
-    public static final int VERSION = 1;
+    public static final int VERSION = 2;
     public static final int MAX_ENVELOPE_BYTES = 1_048_576;
     public static final int MAX_BODY_BYTES = 524_288;
     private static final Pattern MESSAGE_TYPE = Pattern.compile("[a-z][a-z0-9_.-]{0,95}");

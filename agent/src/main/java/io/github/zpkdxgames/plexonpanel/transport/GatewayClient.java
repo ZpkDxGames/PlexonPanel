@@ -4,6 +4,7 @@ import com.google.gson.JsonObject;
 import io.github.zpkdxgames.plexonpanel.config.PanelSettings;
 import io.github.zpkdxgames.plexonpanel.identity.DeviceIdentity;
 import io.github.zpkdxgames.plexonpanel.identity.KeyCodec;
+import io.github.zpkdxgames.plexonpanel.identity.PairingCodeGenerator;
 import io.github.zpkdxgames.plexonpanel.identity.PairingState;
 import io.github.zpkdxgames.plexonpanel.model.HelloPayload;
 import io.github.zpkdxgames.plexonpanel.protocol.DecodedMessage;
@@ -43,6 +44,8 @@ public final class GatewayClient implements MessageSink, AutoCloseable {
     private final PanelSettings.Gateway settings;
     private final DeviceIdentity identity;
     private final PairingState pairingState;
+    private final PairingCodeGenerator pairingCodeGenerator;
+    private final Map<String, Boolean> capabilities;
     private final ProtocolCodec codec;
     private final ReplayGuard replayGuard;
     private final PublicKey gatewayPublicKey;
@@ -56,6 +59,7 @@ public final class GatewayClient implements MessageSink, AutoCloseable {
     private final AtomicReference<ConnectionState> state = new AtomicReference<>(ConnectionState.DISABLED);
     private final AtomicBoolean running = new AtomicBoolean();
     private final AtomicBoolean connecting = new AtomicBoolean();
+    private final AtomicBoolean authenticated = new AtomicBoolean();
     private final AtomicBoolean closed = new AtomicBoolean();
     private final AtomicLong droppedMessages = new AtomicLong();
     private volatile WebSocket webSocket;
@@ -66,18 +70,34 @@ public final class GatewayClient implements MessageSink, AutoCloseable {
     private volatile Instant lastConnectedAt;
     private volatile Instant lastMessageAt;
     private ScheduledFuture<?> heartbeatTask;
+    private ScheduledFuture<?> authenticationTimeoutTask;
 
     public GatewayClient(
         JavaPlugin plugin,
-        PanelSettings.Gateway settings,
-        PanelSettings.RemoteActions remoteSettings,
+        PanelSettings panelSettings,
         DeviceIdentity identity,
         PairingState pairingState
     ) {
         this.plugin = plugin;
-        this.settings = settings;
+        this.settings = panelSettings.gateway();
         this.identity = identity;
         this.pairingState = pairingState;
+        this.pairingCodeGenerator = new PairingCodeGenerator();
+        PanelSettings.RemoteActions remoteSettings = panelSettings.remoteActions();
+        this.capabilities = Map.ofEntries(
+            Map.entry("telemetry", panelSettings.telemetry().enabled()),
+            Map.entry("consoleStream", panelSettings.console().streamEnabled()),
+            Map.entry("errorCapture", panelSettings.console().errorsEnabled()),
+            Map.entry("chatStream", panelSettings.chat().streamEnabled()),
+            Map.entry("chatSend", panelSettings.chat().allowDashboardSend()),
+            Map.entry("remoteActions", remoteSettings.enabled()),
+            Map.entry("consoleExecute", remoteSettings.enabled() && remoteSettings.console().enabled()),
+            Map.entry("playerMessage", remoteSettings.enabled() && remoteSettings.players().message()),
+            Map.entry("playerKick", remoteSettings.enabled() && remoteSettings.players().kick()),
+            Map.entry("playerBan", remoteSettings.enabled() && remoteSettings.players().ban()),
+            Map.entry("playerUnban", remoteSettings.enabled() && remoteSettings.players().unban()),
+            Map.entry("playerWhitelist", remoteSettings.enabled() && remoteSettings.players().whitelist())
+        );
         this.codec = new ProtocolCodec();
         this.replayGuard = new ReplayGuard(remoteSettings.maximumClockSkew(), 8192);
         this.gatewayPublicKey = settings.publicKeyBase64().isBlank()
@@ -123,24 +143,38 @@ public final class GatewayClient implements MessageSink, AutoCloseable {
         scheduleConnect(0L);
     }
 
-    public boolean requestPairingCode() {
-        if (state.get() != ConnectionState.CONNECTED) {
+    public synchronized boolean requestPairingCode() {
+        if (state.get() != ConnectionState.CONNECTED || !authenticated.get()) {
             return false;
         }
-        return send("agent.pair_request", Map.of(
-            "requestedAt", Instant.now().toString(),
+        PairingCodeGenerator.GeneratedCode code = pairingCodeGenerator.generate();
+        pairingState.beginCode(code.requestId(), code.value(), code.expiresAt());
+        boolean sent = send("agent.pairing_begin", Map.of(
+            "requestId", code.requestId(),
+            "code", code.value(),
+            "requestedAt", code.createdAt().toString(),
+            "expiresAt", code.expiresAt().toString(),
             "fingerprint", identity.fingerprint()
         ), MessagePriority.CRITICAL);
+        if (!sent) {
+            pairingState.rejectCode(code.requestId());
+        }
+        return sent;
     }
 
     public void requestUnpair() throws IOException {
-        send("agent.unpair_request", Map.of("requestedAt", Instant.now().toString()), MessagePriority.CRITICAL);
-        pairingState.clear();
+        if (!authenticated.get()
+            || !send("agent.unpair_request", Map.of("requestedAt", Instant.now().toString()), MessagePriority.CRITICAL)) {
+            throw new IOException("The gateway must be authenticated before revoking a pairing");
+        }
     }
 
     @Override
     public boolean send(String type, Object body, MessagePriority priority) {
         if (state.get() != ConnectionState.CONNECTED || !running.get()) {
+            return false;
+        }
+        if (!authenticated.get() && !isPreAuthenticationMessage(type)) {
             return false;
         }
         String encoded;
@@ -166,6 +200,10 @@ public final class GatewayClient implements MessageSink, AutoCloseable {
             .filter(message -> message.priority() != MessagePriority.CRITICAL)
             .findFirst();
         return candidate.filter(outbound::remove).isPresent();
+    }
+
+    private static boolean isPreAuthenticationMessage(String type) {
+        return "agent.hello".equals(type) || "agent.challenge_response".equals(type);
     }
 
     private void scheduleConnect(long delaySeconds) {
@@ -224,7 +262,8 @@ public final class GatewayClient implements MessageSink, AutoCloseable {
             minecraftVersion,
             System.getProperty("java.version", "unknown"),
             System.getProperty("os.name", "unknown") + " " + System.getProperty("os.arch", "unknown"),
-            pairingState.isPaired()
+            pairingState.isPaired(),
+            capabilities
         );
         send("agent.hello", payload, MessagePriority.CRITICAL);
     }
@@ -268,8 +307,31 @@ public final class GatewayClient implements MessageSink, AutoCloseable {
                 send("agent.challenge_response", Map.of("nonce", nonce, "proof", proof), MessagePriority.CRITICAL);
                 yield true;
             }
-            case "pairing.code" -> {
-                pairingState.offerCode(requiredString(body, "code"), Instant.parse(requiredString(body, "expiresAt")));
+            case "gateway.authenticated" -> {
+                authenticated.set(true);
+                cancelAuthenticationTimeout();
+                if (requiredBoolean(body, "paired")) {
+                    pairingState.markPaired();
+                } else {
+                    pairingState.clear();
+                }
+                try {
+                    connectedHandler.run();
+                } catch (RuntimeException error) {
+                    plugin.getLogger().log(Level.WARNING, "Authenticated handler failed", error);
+                }
+                yield true;
+            }
+            case "pairing.registered" -> {
+                pairingState.markCodeRegistered(
+                    requiredString(body, "requestId"),
+                    requiredString(body, "challengeId"),
+                    Instant.parse(requiredString(body, "expiresAt"))
+                );
+                yield true;
+            }
+            case "pairing.rejected" -> {
+                pairingState.rejectCode(requiredString(body, "requestId"));
                 yield true;
             }
             case "pairing.complete" -> {
@@ -303,6 +365,22 @@ public final class GatewayClient implements MessageSink, AutoCloseable {
         }, settings.heartbeatSeconds(), settings.heartbeatSeconds(), TimeUnit.SECONDS);
     }
 
+    private synchronized void scheduleAuthenticationTimeout(WebSocket expectedSocket) {
+        cancelAuthenticationTimeout();
+        authenticationTimeoutTask = scheduler.schedule(() -> {
+            if (running.get() && webSocket == expectedSocket && !authenticated.get()) {
+                handleDisconnect("Gateway authentication timed out");
+            }
+        }, Math.max(10, settings.connectTimeoutSeconds()), TimeUnit.SECONDS);
+    }
+
+    private synchronized void cancelAuthenticationTimeout() {
+        if (authenticationTimeoutTask != null) {
+            authenticationTimeoutTask.cancel(false);
+            authenticationTimeoutTask = null;
+        }
+    }
+
     private synchronized void handleDisconnect(String reason) {
         if (!running.get()) {
             return;
@@ -311,6 +389,7 @@ public final class GatewayClient implements MessageSink, AutoCloseable {
             return;
         }
         lastError = reason;
+        authenticated.set(false);
         WebSocket socket = webSocket;
         webSocket = null;
         if (socket != null && !socket.isOutputClosed()) {
@@ -320,6 +399,7 @@ public final class GatewayClient implements MessageSink, AutoCloseable {
             heartbeatTask.cancel(false);
             heartbeatTask = null;
         }
+        cancelAuthenticationTimeout();
         outbound.clear();
         reconnectAttempts = Math.min(reconnectAttempts + 1, 30);
         long factor = 1L << Math.min(reconnectAttempts - 1, 10);
@@ -354,16 +434,22 @@ public final class GatewayClient implements MessageSink, AutoCloseable {
         return gatewayPublicKey != null;
     }
 
+    public boolean isAuthenticated() {
+        return authenticated.get();
+    }
+
     @Override
     public void close() {
         if (!closed.compareAndSet(false, true)) {
             return;
         }
         running.set(false);
+        authenticated.set(false);
         state.set(ConnectionState.STOPPED);
         if (heartbeatTask != null) {
             heartbeatTask.cancel(false);
         }
+        cancelAuthenticationTimeout();
         WebSocket socket = webSocket;
         webSocket = null;
         if (socket != null && !socket.isOutputClosed()) {
@@ -390,6 +476,14 @@ public final class GatewayClient implements MessageSink, AutoCloseable {
         return value;
     }
 
+    private static boolean requiredBoolean(JsonObject object, String name) {
+        if (!object.has(name) || !object.get(name).isJsonPrimitive()
+            || !object.get(name).getAsJsonPrimitive().isBoolean()) {
+            throw new IllegalArgumentException("Missing boolean field: " + name);
+        }
+        return object.get(name).getAsBoolean();
+    }
+
     private static String rootMessage(Throwable error) {
         Throwable current = error;
         while (current.getCause() != null) {
@@ -407,18 +501,15 @@ public final class GatewayClient implements MessageSink, AutoCloseable {
         @Override
         public void onOpen(WebSocket socket) {
             webSocket = socket;
+            authenticated.set(false);
             state.set(ConnectionState.CONNECTED);
             reconnectAttempts = 0;
             lastConnectedAt = Instant.now();
             lastError = "";
             socket.request(1);
             sendHello();
+            scheduleAuthenticationTimeout(socket);
             scheduleHeartbeat();
-            try {
-                connectedHandler.run();
-            } catch (RuntimeException error) {
-                plugin.getLogger().log(Level.WARNING, "Connected handler failed", error);
-            }
         }
 
         @Override

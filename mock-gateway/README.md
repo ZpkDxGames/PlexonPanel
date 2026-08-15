@@ -1,6 +1,6 @@
 # Local gateway
 
-This dependency-free Node.js server is provided for local plugin development. It binds only to `127.0.0.1`, implements the signed protocol, issues pairing codes, and can send development actions.
+This dependency-free Node.js server is provided for local plugin development. It binds only to `127.0.0.1`, implements the signed protocol, registers plugin-generated pairing codes, and can send development actions.
 
 It is not production software: there are no user accounts, RBAC, TLS, durable storage, rate limits, or multi-tenant controls.
 
@@ -25,12 +25,12 @@ Keep remote actions disabled until a specific test needs them. Reload PlexonPane
 
 ## Complete pairing
 
-Get the server ID from `/plexonpanel status`, then redeem the displayed code:
+Redeem the displayed code:
 
 ```bash
 curl -X POST http://127.0.0.1:8787/pair \
   -H 'content-type: application/json' \
-  -d '{"serverId":"YOUR_SERVER_UUID","code":"123456"}'
+  -d '{"code":"123456"}'
 ```
 
 ## Send a safe test action

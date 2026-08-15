@@ -128,11 +128,10 @@ public final class PlexonPanelCommand implements CommandExecutor, TabCompleter {
     private void unpair(CommandSender sender) {
         AgentRuntime runtime = plugin.runtime();
         try {
-            if (runtime != null) {
-                runtime.gateway().requestUnpair();
-            } else {
-                plugin.pairingState().clear();
+            if (runtime == null) {
+                throw new IllegalStateException("The gateway runtime is unavailable");
             }
+            runtime.gateway().requestUnpair();
             plugin.messages().send(sender, "unpaired");
         } catch (Exception error) {
             fail(sender, "Unable to clear pairing state", error);
@@ -171,6 +170,7 @@ public final class PlexonPanelCommand implements CommandExecutor, TabCompleter {
         GatewayClient gateway = runtime.gateway();
         sendRow(sender, "Gateway state", gateway.state().name());
         sendRow(sender, "Gateway signature key", gateway.hasGatewayVerificationKey() ? "configured" : "missing");
+        sendRow(sender, "Gateway authenticated", Boolean.toString(gateway.isAuthenticated()));
         sendRow(sender, "Dropped messages", Long.toString(gateway.droppedMessages()));
         sendRow(sender, "Last connected", formatInstant(gateway.lastConnectedAt()));
         sendRow(sender, "Last gateway message", formatInstant(gateway.lastMessageAt()));

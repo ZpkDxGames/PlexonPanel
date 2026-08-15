@@ -1,5 +1,7 @@
 package io.github.zpkdxgames.plexonpanel.model;
 
+import java.util.Map;
+
 public record HelloPayload(
     String agentName,
     String agentVersion,
@@ -10,6 +12,7 @@ public record HelloPayload(
     String minecraftVersion,
     String javaVersion,
     String operatingSystem,
-    boolean paired
+    boolean paired,
+    Map<String, Boolean> capabilities
 ) {
 }

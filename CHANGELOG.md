@@ -4,11 +4,20 @@ All notable changes to PlexonPanel are documented here. The project follows [Sem
 
 ## [Unreleased]
 
+## [1.0.0-rc.1] - 2026-08-15
+
+### Added
+
+- Protocol v2 capability advertisement and authenticated gateway acknowledgement.
+- Plugin-generated, gateway-registered six-digit pairing PINs with five-minute expiry.
+- Pairing request correlation, collision rejection, and no plaintext PIN persistence.
+- Release-candidate tests for secure PIN generation and registration state.
+
 ### Changed
 
-- Simplified the public repository documentation and release layout.
-- Removed the unused default gateway address; new installations now start with a blank endpoint.
-- Moved contributor and security guidance into GitHub's standard `.github` location.
+- Gateway connection is not considered operational until the signed Ed25519 challenge completes.
+- Initial telemetry now waits for gateway authentication.
+- Local development gateway and envelope schema now implement protocol v2.
 
 ### Planned
 
@@ -29,5 +38,6 @@ All notable changes to PlexonPanel are documented here. The project follows [Sem
 - Local JSONL action auditing and retention.
 - Admin commands, diagnostics, unit tests, CI, protocol schema, and local test gateway.
 
-[Unreleased]: https://github.com/ZpkDxGames/PlexonPanel/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/ZpkDxGames/PlexonPanel/compare/v1.0.0-rc.1...HEAD
+[1.0.0-rc.1]: https://github.com/ZpkDxGames/PlexonPanel/compare/v0.1.0...v1.0.0-rc.1
 [0.1.0]: https://github.com/ZpkDxGames/PlexonPanel/releases/tag/v0.1.0

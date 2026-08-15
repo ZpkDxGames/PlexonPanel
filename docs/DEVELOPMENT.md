@@ -27,7 +27,10 @@ The installable plugin is written to `agent/build/libs/`.
 
 Paper state is read and changed on the server thread. System metrics, networking, log tailing, and local audit writes use bounded background workers. Remote requests are checked against the local feature settings and action policy before execution.
 
-Protocol messages use signed JSON envelopes over WebSocket. Changing required envelope fields, signature input, or action semantics requires a protocol-version change.
+Protocol v2 messages use signed JSON envelopes over WebSocket. The gateway
+must complete the Ed25519 nonce challenge before pairing, telemetry, or actions
+are accepted. Changing required envelope fields, signature input, or action
+semantics requires another protocol-version change.
 
 ## PlexonChats adapter
 

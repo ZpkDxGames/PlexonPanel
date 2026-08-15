@@ -3,7 +3,6 @@ import {
   createPrivateKey,
   createPublicKey,
   generateKeyPairSync,
-  randomInt,
   randomUUID,
   sign,
   verify,
@@ -45,10 +44,19 @@ const server = createServer(async (request, response) => {
     }
     if (request.method === 'POST' && request.url === '/pair') {
       const body = await readJsonBody(request);
-      const context = requiredContext(body.serverId);
-      if (!context.pairing || Date.now() >= context.pairing.expiresAt || body.code !== context.pairing.code) {
+      const code = typeof body.code === 'string' ? body.code : '';
+      if (!/^\d{6}$/.test(code)) {
+        return json(response, 400, { ok: false, error: 'A six-digit pairing code is required' });
+      }
+      const matches = [...contexts.values()].filter((candidate) => (
+        candidate.authenticated
+        && candidate.pairing?.code === code
+        && Date.now() < candidate.pairing.expiresAt
+      ));
+      if (matches.length !== 1) {
         return json(response, 403, { ok: false, error: 'Invalid or expired pairing code' });
       }
+      const [context] = matches;
       context.paired = true;
       pairedDevices.add(context.serverId);
       context.pairing = null;
@@ -109,6 +117,7 @@ server.on('upgrade', (request, socket) => {
     buffer: Buffer.alloc(0),
     serverId: null,
     agentPublicKey: null,
+    fingerprint: null,
     challenge: null,
     authenticated: false,
     paired: false,
@@ -220,6 +229,7 @@ function handleAgentMessage(context, text) {
       if (!verifyEnvelope(envelope, publicKey)) throw new Error('Invalid agent hello signature');
       context.serverId = envelope.serverId;
       context.agentPublicKey = publicKey;
+      context.fingerprint = body.publicKeyFingerprint;
       context.paired = pairedDevices.has(context.serverId);
       contexts.set(context.serverId, context);
       context.challenge = randomUUID();
@@ -237,13 +247,41 @@ function handleAgentMessage(context, text) {
         if (!validProof) throw new Error('Invalid challenge response');
         context.authenticated = true;
         console.log(`[agent] authenticated ${context.serverId}`);
-      } else if (envelope.type === 'agent.pair_request') {
+      } else if (envelope.type === 'agent.pairing_begin') {
         if (!context.authenticated) throw new Error('Agent must authenticate before pairing');
-        const code = randomInt(0, 1_000_000).toString().padStart(6, '0');
-        const expiresAt = Date.now() + 5 * 60_000;
-        context.pairing = { code, expiresAt };
-        sendEnvelope(context, 'pairing.code', { code, expiresAt: new Date(expiresAt).toISOString() });
-        console.log(`[pair] ${context.serverId} -> ${code}`);
+        const requestedExpiry = Date.parse(body.expiresAt);
+        const maximumExpiry = Date.now() + 5 * 60_000 + 30_000;
+        const collision = [...contexts.values()].some((candidate) => (
+          candidate !== context
+          && candidate.pairing?.code === body.code
+          && Date.now() < candidate.pairing.expiresAt
+        ));
+        if (!/^\d{6}$/.test(body.code)
+            || typeof body.requestId !== 'string'
+            || body.fingerprint !== context.fingerprint
+            || !Number.isFinite(requestedExpiry)
+            || requestedExpiry <= Date.now()
+            || requestedExpiry > maximumExpiry
+            || collision) {
+          sendEnvelope(context, 'pairing.rejected', {
+            requestId: typeof body.requestId === 'string' ? body.requestId : 'invalid',
+            reason: collision ? 'code_collision' : 'invalid_request',
+          });
+          return;
+        }
+        const challengeId = randomUUID();
+        context.pairing = {
+          code: body.code,
+          requestId: body.requestId,
+          challengeId,
+          expiresAt: requestedExpiry,
+        };
+        sendEnvelope(context, 'pairing.registered', {
+          requestId: body.requestId,
+          challengeId,
+          expiresAt: new Date(requestedExpiry).toISOString(),
+        });
+        console.log(`[pair] registered challenge for ${context.serverId}`);
       } else if (envelope.type === 'agent.unpair_request') {
         context.paired = false;
         pairedDevices.delete(context.serverId);
@@ -268,7 +306,7 @@ function decodeEnvelope(text) {
   for (const field of required) {
     if (envelope[field] === undefined || envelope[field] === null) throw new Error(`Missing envelope field ${field}`);
   }
-  if (envelope.protocolVersion !== 1) throw new Error('Unsupported protocol version');
+  if (envelope.protocolVersion !== 2) throw new Error('Unsupported protocol version');
   const body = JSON.parse(Buffer.from(envelope.body, 'base64url').toString('utf8'));
   return { envelope, body };
 }
@@ -279,7 +317,7 @@ function verifyEnvelope(envelope, publicKey) {
 
 function sendEnvelope(context, type, body) {
   const envelope = {
-    protocolVersion: 1,
+    protocolVersion: 2,
     type,
     messageId: randomUUID(),
     serverId: context.serverId,

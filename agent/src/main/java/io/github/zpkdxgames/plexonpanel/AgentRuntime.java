@@ -33,7 +33,7 @@ public final class AgentRuntime implements AutoCloseable {
         Path serverRoot
     ) {
         this.settings = settings;
-        this.gateway = new GatewayClient(plugin, settings.gateway(), settings.remoteActions(), identity, pairingState);
+        this.gateway = new GatewayClient(plugin, settings, identity, pairingState);
         this.audit = new AuditService(plugin, settings.audit(), plugin.getDataFolder().toPath());
         this.chat = new ChatStreamService(plugin, settings.chat(), gateway);
         this.console = new ConsoleStreamService(plugin, settings.console(), gateway, serverRoot);

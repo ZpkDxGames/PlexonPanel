@@ -6,7 +6,7 @@
 
 PlexonPanel is a Paper plugin for monitoring and administering a Minecraft server from a web dashboard. It reports server health, players, plugins, logs, and chat while keeping remote actions disabled until a server operator enables them.
 
-> **Project status:** the Paper plugin is available as an early preview. The hosted dashboard and public pairing service are still under development.
+> **Project status:** `1.0.0-rc.1` implements the release-candidate protocol used by the private dashboard and Cloud Run gateway. Validate it on a disposable server before production use.
 
 ## Features
 
@@ -33,14 +33,16 @@ PlexonPanel is a Paper plugin for monitoring and administering a Minecraft serve
 3. Start the server once and review `plugins/PlexonPanel/config.yml`.
 4. Enable only the data streams and remote actions you intend to use.
 
-The gateway is disabled by default. Until the hosted service is available, developers can use the loopback-only [local gateway](mock-gateway/README.md).
+The gateway is disabled by default. Configure its `wss://.../v1/agent` URL and
+pin the gateway's Ed25519 public key before enabling it. Developers can use the
+loopback-only [local gateway](mock-gateway/README.md).
 
 ## Commands
 
 | Command | Purpose |
 | --- | --- |
 | `/plexonpanel status` | Show connection and feature status |
-| `/plexonpanel pair` | Request a temporary pairing code |
+| `/plexonpanel pair` | Generate and register a one-use five-minute pairing code |
 | `/plexonpanel unpair` | Revoke the current pairing |
 | `/plexonpanel rotate confirm` | Replace the local server identity |
 | `/plexonpanel reload` | Reload and validate the configuration |
@@ -62,12 +64,23 @@ Console output, chat, player information, and network addresses can contain sens
 
 Generated identities, pairing codes, server logs, and local gateway keys must never be committed to this repository.
 
+## Pairing and reconnect behavior
+
+Each server keeps a persistent UUID and Ed25519 identity under
+`plugins/PlexonPanel/identity/`. The plugin generates the PIN locally, sends it
+only over its authenticated signed WebSocket, and displays it only after the
+gateway confirms registration. The PIN is never persisted by the plugin.
+
+Cloud Run periodically closes long WebSocket requests, so the plugin reconnects
+with bounded exponential backoff and repeats the identity challenge. Once a
+browser has claimed a PIN, restarting the Minecraft server restores the paired
+state automatically without creating a duplicate server.
+
 ## Roadmap
 
-- Hosted gateway and account authentication
-- Next.js administration dashboard
-- Public beta testing on Paper 26.2
-- SpigotMC and Modrinth publication after the hosted service is ready
+- release-candidate end-to-end deployment testing
+- public beta testing on Paper 26.2
+- SpigotMC and Modrinth publication after the hosted service is validated
 
 ## License
 

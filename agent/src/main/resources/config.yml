@@ -1,8 +1,9 @@
-# PlexonPanel 0.1.0
+# PlexonPanel 1.0.0-rc.1
 # The gateway is disabled until the hosted PlexonPanel service is configured.
 
 gateway:
   enabled: false
+  # Production example: wss://YOUR-GATEWAY.run.app/v1/agent
   url: ""
   # Base64-encoded X.509 Ed25519 public key used to verify every privileged
   # message from the gateway. Remote actions remain locked when this is empty.
