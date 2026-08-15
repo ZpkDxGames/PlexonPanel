@@ -1,0 +1,27 @@
+# Gradle
+.gradle/
+**/build/
+
+# IDEs
+.idea/
+.vscode/
+*.iml
+*.ipr
+*.iws
+
+# Runtime and test data
+run/
+logs/
+plugins/
+*.log
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Local gateway development
+mock-gateway/node_modules/
+mock-gateway/.gateway-key.json
+
+# Release archives
+PlexonPanel-*.zip

@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://plexonpanel.app/schemas/protocol/v1/envelope.json",
+  "title": "PlexonPanel protocol v1 envelope",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "protocolVersion",
+    "type",
+    "messageId",
+    "serverId",
+    "timestamp",
+    "body",
+    "signature"
+  ],
+  "properties": {
+    "protocolVersion": {
+      "const": 1
+    },
+    "type": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 96,
+      "pattern": "^[a-z][a-z0-9_.-]*$"
+    },
+    "messageId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "serverId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "maxLength": 64
+    },
+    "body": {
+      "description": "Unpadded Base64URL-encoded UTF-8 JSON object",
+      "type": "string",
+      "minLength": 2,
+      "maxLength": 1048576,
+      "pattern": "^[A-Za-z0-9_-]+$"
+    },
+    "signature": {
+      "description": "Unpadded Base64URL Ed25519 signature",
+      "type": "string",
+      "minLength": 86,
+      "maxLength": 86,
+      "pattern": "^[A-Za-z0-9_-]+$"
+    }
+  }
+}

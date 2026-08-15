@@ -1,0 +1,69 @@
+# PlexonPanel 0.1.0
+# The gateway is disabled until the hosted PlexonPanel service is configured.
+
+gateway:
+  enabled: false
+  url: "wss://gateway.plexonpanel.app/v1/agent"
+  # Base64-encoded X.509 Ed25519 public key used to verify every privileged
+  # message from the gateway. Remote actions remain locked when this is empty.
+  public-key: ""
+  require-signed-messages: true
+  connect-timeout-seconds: 10
+  heartbeat-seconds: 15
+  reconnect:
+    initial-delay-seconds: 2
+    maximum-delay-seconds: 60
+  queue-capacity: 2048
+
+telemetry:
+  enabled: true
+  server-interval-ticks: 40
+  system-interval-seconds: 5
+  plugin-interval-seconds: 60
+  include-player-location: false
+  include-player-address: false
+
+console:
+  stream-enabled: false
+  errors-enabled: true
+  poll-interval-millis: 250
+  batch-interval-millis: 300
+  batch-size: 100
+  ring-buffer-lines: 1000
+  maximum-line-bytes: 16384
+  redact-patterns:
+    - "(?i)(password|passwd|secret|token|api[-_ ]?key)\\s*[=:]\\s*\\S+"
+    - "(?i)(authorization:\\s*bearer)\\s+\\S+"
+
+chat:
+  stream-enabled: false
+  capture-vanilla-global: true
+  capture-plexonchats-global: true
+  allow-dashboard-send: false
+  allow-minimessage-from-dashboard: false
+  dashboard-prefix: "<dark_gray>[</dark_gray><gradient:#7c3aed:#22d3ee>PlexonPanel</gradient><dark_gray>]</dark_gray> <gray><actor>:</gray> "
+
+remote-actions:
+  enabled: false
+  maximum-clock-skew-seconds: 30
+  console:
+    enabled: false
+    # A command must match an allow rule and must not match a deny rule.
+    allow:
+      - "^(tps|mspt)(\\s.*)?$"
+      - "^paper version$"
+      - "^spark (health|tps)(\\s.*)?$"
+    deny:
+      - "^(stop|restart|reload|op|deop)(\\s.*)?$"
+      - "^(lp|luckperms|pex)(\\s.*)?$"
+      - ".*(password|secret|token|api[-_]?key).*"
+  players:
+    message: true
+    kick: true
+    ban: false
+    unban: false
+    whitelist: false
+
+audit:
+  local-jsonl-enabled: true
+  retention-days: 30

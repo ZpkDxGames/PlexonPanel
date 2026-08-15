@@ -1,0 +1,39 @@
+name: PlexonPanel
+version: '0.1.0'
+main: io.github.zpkdxgames.plexonpanel.PlexonPanelPlugin
+description: Secure Paper server monitoring and remote administration agent for PlexonPanel.
+api-version: '26.2'
+author: ZpkDxGames
+website: https://github.com/ZpkDxGames
+softdepend:
+  - PlexonChats
+
+commands:
+  plexonpanel:
+    description: Manage the PlexonPanel server agent.
+    usage: /<command> [status|pair|unpair|rotate|reload|diagnostics]
+    aliases: [ppanel]
+
+permissions:
+  plexonpanel.admin:
+    description: Grants access to all PlexonPanel administrative commands.
+    default: op
+    children:
+      plexonpanel.status: true
+      plexonpanel.pair: true
+      plexonpanel.unpair: true
+      plexonpanel.rotate: true
+      plexonpanel.reload: true
+      plexonpanel.diagnostics: true
+  plexonpanel.status:
+    default: op
+  plexonpanel.pair:
+    default: op
+  plexonpanel.unpair:
+    default: op
+  plexonpanel.rotate:
+    default: op
+  plexonpanel.reload:
+    default: op
+  plexonpanel.diagnostics:
+    default: op

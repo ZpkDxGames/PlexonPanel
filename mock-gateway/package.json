@@ -1,0 +1,14 @@
+{
+  "name": "plexonpanel-mock-gateway",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Loopback-only development gateway for the PlexonPanel Paper agent",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node server.mjs",
+    "check": "node --check server.mjs"
+  }
+}
