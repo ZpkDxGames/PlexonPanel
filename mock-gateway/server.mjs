@@ -126,7 +126,7 @@ server.on('upgrade', (request, socket) => {
 });
 
 server.listen(PORT, HOST, () => {
-  console.log(`PlexonPanel mock gateway: ws://${HOST}:${PORT}/v1/agent`);
+  console.log(`PlexonPanel local gateway: ws://${HOST}:${PORT}/v1/agent`);
   console.log(`HTTP controls: http://${HOST}:${PORT}`);
   console.log(`gateway.public-key: ${gatewayPublicKeyBase64}`);
   console.log('Loopback development only. Do not expose this process to a network.');

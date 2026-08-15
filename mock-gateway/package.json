@@ -1,9 +1,9 @@
 {
-  "name": "plexonpanel-mock-gateway",
+  "name": "plexonpanel-local-gateway",
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Loopback-only development gateway for the PlexonPanel Paper agent",
+  "description": "Loopback-only local gateway for PlexonPanel development",
   "engines": {
     "node": ">=20"
   },

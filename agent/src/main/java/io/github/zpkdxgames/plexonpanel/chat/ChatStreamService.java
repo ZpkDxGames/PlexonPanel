@@ -63,7 +63,7 @@ public final class ChatStreamService implements Listener, AutoCloseable {
                 plugin.getLogger().info("PlexonChats global-channel integration enabled.");
             }
         } catch (ClassNotFoundException error) {
-            plugin.getLogger().warning("PlexonChats is installed but does not yet expose the PlexonPanel integration API. See docs/PLEXONCHATS_INTEGRATION.md.");
+            plugin.getLogger().warning("PlexonChats is installed but does not expose the PlexonPanel integration API; the adapter is disabled.");
         }
     }
 

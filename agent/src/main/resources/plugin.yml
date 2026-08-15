@@ -4,7 +4,7 @@ main: io.github.zpkdxgames.plexonpanel.PlexonPanelPlugin
 description: Secure Paper server monitoring and remote administration agent for PlexonPanel.
 api-version: '26.2'
 author: ZpkDxGames
-website: https://github.com/ZpkDxGames
+website: https://github.com/ZpkDxGames/PlexonPanel
 softdepend:
   - PlexonChats
 

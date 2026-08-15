@@ -3,7 +3,7 @@
 
 gateway:
   enabled: false
-  url: "wss://gateway.plexonpanel.app/v1/agent"
+  url: ""
   # Base64-encoded X.509 Ed25519 public key used to verify every privileged
   # message from the gateway. Remote actions remain locked when this is empty.
   public-key: ""

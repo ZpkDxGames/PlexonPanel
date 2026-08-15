@@ -2,17 +2,20 @@ name: Release
 
 on:
   push:
-    branches: [main]
-    paths:
-      - .github/workflows/release.yml
-      - docs/releases/**
+    tags:
+      - 'v*'
   workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag, for example v0.1.1
+        required: true
+        type: string
 
 permissions:
   contents: write
 
 concurrency:
-  group: plexonpanel-release-v0.1.0
+  group: release-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
@@ -34,32 +37,31 @@ jobs:
         uses: gradle/actions/setup-gradle@v6
 
       - name: Verify and package
-        run: ./gradlew --no-daemon clean test javadoc :agent:jar releaseBundle
+        run: ./gradlew --no-daemon clean test javadoc :agent:jar
 
-      - name: Create checksums
-        run: |
-          sha256sum \
-            agent/build/libs/PlexonPanel-0.1.0.jar \
-            build/distributions/PlexonPanel-0.1.0-release.zip \
-            > build/distributions/SHA256SUMS.txt
-
-      - name: Publish GitHub release
+      - name: Publish release
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: v0.1.0
+          RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
         run: |
+          VERSION=$(./gradlew -q properties | sed -n 's/^version: //p')
+          EXPECTED_TAG="v${VERSION}"
+          JAR="agent/build/libs/PlexonPanel-${VERSION}.jar"
+          CHECKSUM="build/release/SHA256SUMS.txt"
+
+          if [ "$RELEASE_TAG" != "$EXPECTED_TAG" ]; then
+            echo "Release tag $RELEASE_TAG does not match project version $VERSION"
+            exit 1
+          fi
+
+          mkdir -p build/release
+          sha256sum "$JAR" > "$CHECKSUM"
+
           if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
-            gh release upload "$RELEASE_TAG" \
-              agent/build/libs/PlexonPanel-0.1.0.jar \
-              build/distributions/PlexonPanel-0.1.0-release.zip \
-              build/distributions/SHA256SUMS.txt \
-              --clobber
+            gh release upload "$RELEASE_TAG" "$JAR" "$CHECKSUM" --clobber
           else
-            gh release create "$RELEASE_TAG" \
-              agent/build/libs/PlexonPanel-0.1.0.jar \
-              build/distributions/PlexonPanel-0.1.0-release.zip \
-              build/distributions/SHA256SUMS.txt \
+            gh release create "$RELEASE_TAG" "$JAR" "$CHECKSUM" \
               --target "$GITHUB_SHA" \
-              --title "PlexonPanel 0.1.0" \
-              --notes-file docs/releases/v0.1.0.md
+              --title "PlexonPanel ${VERSION}" \
+              --generate-notes
           fi

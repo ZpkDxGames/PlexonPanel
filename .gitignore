@@ -23,5 +23,16 @@ Thumbs.db
 mock-gateway/node_modules/
 mock-gateway/.gateway-key.json
 
+# Local credentials and signing material
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+*.p12
+*.pfx
+*.jks
+*.keystore
+
 # Release archives
 PlexonPanel-*.zip

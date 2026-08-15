@@ -1,6 +1,6 @@
-# Mock gateway
+# Local gateway
 
-This dependency-free Node.js harness tests the Paper agent before the hosted gateway/dashboard exists. It binds only to `127.0.0.1`, implements the signed protocol, authenticates agent identities, issues pairing codes, and can send development actions.
+This dependency-free Node.js server is provided for local plugin development. It binds only to `127.0.0.1`, implements the signed protocol, issues pairing codes, and can send development actions.
 
 It is not production software: there are no user accounts, RBAC, TLS, durable storage, rate limits, or multi-tenant controls.
 
