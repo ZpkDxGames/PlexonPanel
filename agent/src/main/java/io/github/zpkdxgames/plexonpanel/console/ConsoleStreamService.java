@@ -75,6 +75,18 @@ public final class ConsoleStreamService implements AutoCloseable {
         return recent.snapshot();
     }
 
+    public void sendRecentSnapshot() {
+        List<ConsoleLine> lines = recent.snapshot();
+        int first = Math.max(0, lines.size() - 100);
+        for (int start = first; start < lines.size(); start += 25) {
+            int end = Math.min(lines.size(), start + 25);
+            sink.send("console.lines", Map.of(
+                "capturedAt", Instant.now().toString(),
+                "lines", List.copyOf(lines.subList(start, end))
+            ), MessagePriority.EVENT);
+        }
+    }
+
     @Override
     public void close() {
         tailer.close();

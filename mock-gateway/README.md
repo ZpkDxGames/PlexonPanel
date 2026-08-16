@@ -1,8 +1,13 @@
-# Local gateway
+# Loopback mock gateway
 
-This dependency-free Node.js server is provided for local plugin development. It binds only to `127.0.0.1`, implements the signed protocol, registers plugin-generated pairing codes, and can send development actions.
+This dependency-free Node.js server is for local plugin development. It binds
+only to `127.0.0.1`, authenticates the plugin with protocol v2, registers
+plugin-generated pairing codes, requests reconnect snapshots, and can send
+safe development actions.
 
-It is not production software: there are no user accounts, RBAC, TLS, durable storage, rate limits, or multi-tenant controls.
+It is not the production relay: it has no TLS, browser authorization, durable
+identity binding, origin controls, or multi-server abuse protection. Do not
+expose it to a LAN or the internet.
 
 ## Start
 
@@ -11,7 +16,7 @@ cd mock-gateway
 npm start
 ```
 
-Copy the printed `gateway.public-key` into the plugin config and set:
+Copy the printed `gateway.public-key` into plugin configuration:
 
 ```yaml
 gateway:
@@ -21,7 +26,9 @@ gateway:
   require-signed-messages: true
 ```
 
-Keep remote actions disabled until a specific test needs them. Reload PlexonPanel, run `/plexonpanel pair`, and note the code shown in Minecraft/console.
+The plugin appends its persistent `serverId` query automatically. Keep remote
+actions disabled until a specific test requires one. Restart/reload
+PlexonPanel, run `/plexonpanel diagnostics`, then `/plexonpanel pair`.
 
 ## Complete pairing
 
@@ -35,7 +42,8 @@ curl -X POST http://127.0.0.1:8787/pair \
 
 ## Send a safe test action
 
-Enable `remote-actions.enabled` and the relevant local action toggle. The default console policy permits `tps`:
+Enable `remote-actions.enabled` and the relevant local toggle. The default
+console policy permits `tps`:
 
 ```bash
 curl -X POST http://127.0.0.1:8787/action \
@@ -47,4 +55,5 @@ curl -X POST http://127.0.0.1:8787/action \
   }'
 ```
 
-Use `GET /health` and `GET /servers` for development diagnostics. The generated `.gateway-key.json` is ignored by Git and should remain local.
+Use `GET /health` and `GET /servers` for development diagnostics. The generated
+`.gateway-key.json` is ignored by Git and must remain local.

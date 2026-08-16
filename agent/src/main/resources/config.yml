@@ -1,12 +1,12 @@
-# PlexonPanel 1.0.0-rc.1
-# The gateway is disabled until the hosted PlexonPanel service is configured.
+# PlexonPanel 1.0.0-rc.2
+# The database-less relay is disabled until its URL and public key are configured.
 
 gateway:
   enabled: false
-  # Production example: wss://YOUR-GATEWAY.run.app/v1/agent
+  # Production example: wss://YOUR-RELAY.workers.dev/v1/agent
   url: ""
   # Base64-encoded X.509 Ed25519 public key used to verify every privileged
-  # message from the gateway. Remote actions remain locked when this is empty.
+  # message from the relay. An enabled connection is rejected when this is empty.
   public-key: ""
   require-signed-messages: true
   connect-timeout-seconds: 10
@@ -18,8 +18,8 @@ gateway:
 
 telemetry:
   enabled: true
-  server-interval-ticks: 40
-  system-interval-seconds: 5
+  server-interval-ticks: 100
+  system-interval-seconds: 10
   plugin-interval-seconds: 60
   include-player-location: false
   include-player-address: false

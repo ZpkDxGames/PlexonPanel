@@ -1,8 +1,37 @@
 # Changelog
 
-All notable changes to PlexonPanel are documented here. The project follows [Semantic Versioning](https://semver.org/).
+All notable changes to PlexonPanel are documented here. The project follows
+[Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
+
+## [1.0.0-rc.2] - 2026-08-15
+
+### Added
+
+- Database-less Cloudflare relay compatibility with the server UUID in the
+  agent WebSocket URL.
+- Relay-requested reconnect snapshots for server, system, player, plugin, and
+  up to 100 current-process redacted console lines.
+- Bounded completed-action cache so duplicate request IDs return the prior
+  result instead of executing twice.
+
+### Changed
+
+- Server telemetry defaults to five seconds and system telemetry to ten seconds
+  to keep free-tier message volume modest.
+- Relay URL validation rejects embedded credentials, queries, and fragments.
+- An enabled connection now requires signed messages and a pinned relay public
+  key.
+- Documentation now makes Paper/local browser ownership and no hosted telemetry
+  retention explicit.
+
+### Security
+
+- Reconnect snapshots remain bounded and are sent only after the signed nonce
+  challenge succeeds.
+- Scheduling failures are cached, returned once per request ID, and included in
+  the Paper-local audit.
 
 ## [1.0.0-rc.1] - 2026-08-15
 
@@ -16,13 +45,8 @@ All notable changes to PlexonPanel are documented here. The project follows [Sem
 ### Changed
 
 - Gateway connection is not considered operational until the signed Ed25519 challenge completes.
-- Initial telemetry now waits for gateway authentication.
-- Local development gateway and envelope schema now implement protocol v2.
-
-### Planned
-
-- Hosted gateway and Next.js dashboard.
-- Public Paper test-server beta.
+- Initial telemetry waits for gateway authentication.
+- Local development gateway and envelope schema implement protocol v2.
 
 ## [0.1.0] - 2026-08-14
 
@@ -38,6 +62,7 @@ All notable changes to PlexonPanel are documented here. The project follows [Sem
 - Local JSONL action auditing and retention.
 - Admin commands, diagnostics, unit tests, CI, protocol schema, and local test gateway.
 
-[Unreleased]: https://github.com/ZpkDxGames/PlexonPanel/compare/v1.0.0-rc.1...HEAD
+[Unreleased]: https://github.com/ZpkDxGames/PlexonPanel/compare/v1.0.0-rc.2...HEAD
+[1.0.0-rc.2]: https://github.com/ZpkDxGames/PlexonPanel/compare/v1.0.0-rc.1...v1.0.0-rc.2
 [1.0.0-rc.1]: https://github.com/ZpkDxGames/PlexonPanel/compare/v0.1.0...v1.0.0-rc.1
 [0.1.0]: https://github.com/ZpkDxGames/PlexonPanel/releases/tag/v0.1.0

@@ -77,7 +77,7 @@ public final class PairingState {
             throw new IllegalStateException("Pairing registration does not match the active request");
         }
         if (challengeId.isBlank() || !gatewayExpiresAt.isAfter(clock.instant())) {
-            throw new IllegalArgumentException("Gateway returned an invalid pairing registration");
+            throw new IllegalArgumentException("Relay returned an invalid pairing registration");
         }
         Instant effectiveExpiry = gatewayExpiresAt.isBefore(current.expiresAt())
             ? gatewayExpiresAt

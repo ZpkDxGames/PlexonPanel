@@ -25,15 +25,20 @@ import org.bukkit.plugin.java.JavaPlugin;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.logging.Level;
 
 public final class RemoteActionDispatcher {
     private static final int MAXIMUM_TEXT_LENGTH = 2000;
     private static final int MAXIMUM_OUTPUT_LINES = 100;
     private static final int MAXIMUM_OUTPUT_LINE_LENGTH = 4096;
+    private static final int MAXIMUM_COMPLETED_ACTIONS = 1024;
 
     private final JavaPlugin plugin;
     private final PanelSettings.RemoteActions settings;
@@ -44,6 +49,15 @@ public final class RemoteActionDispatcher {
     private final LogRedactor outputRedactor;
     private final Gson gson = new Gson();
     private final PlainTextComponentSerializer plainText = PlainTextComponentSerializer.plainText();
+    private final Set<String> inFlight = ConcurrentHashMap.newKeySet();
+    private final Map<String, ActionResult> completed = Collections.synchronizedMap(
+        new LinkedHashMap<>(MAXIMUM_COMPLETED_ACTIONS + 1, 0.75f, true) {
+            @Override
+            protected boolean removeEldestEntry(Map.Entry<String, ActionResult> eldest) {
+                return size() > MAXIMUM_COMPLETED_ACTIONS;
+            }
+        }
+    );
 
     public RemoteActionDispatcher(
         JavaPlugin plugin,
@@ -64,7 +78,7 @@ public final class RemoteActionDispatcher {
 
     public void accept(DecodedMessage message) {
         if (!"action.request".equals(message.envelope().type())) {
-            plugin.getLogger().warning("Ignored unsupported privileged gateway message type: " + message.envelope().type());
+            plugin.getLogger().warning("Ignored unsupported privileged relay message type: " + message.envelope().type());
             return;
         }
 
@@ -79,12 +93,27 @@ public final class RemoteActionDispatcher {
             return;
         }
 
+        ActionResult previous = completed.get(request.requestId());
+        if (previous != null) {
+            sendResult(previous);
+            return;
+        }
+        if (!inFlight.add(request.requestId())) {
+            return;
+        }
+
         if (!settings.enabled()) {
             complete(request, ActionOutcome.denied("REMOTE_ACTIONS_DISABLED", "Remote actions are disabled"));
             return;
         }
 
-        plugin.getServer().getScheduler().runTask(plugin, () -> executeOnMainThread(request));
+        try {
+            plugin.getServer().getScheduler().runTask(plugin, () -> executeOnMainThread(request));
+        } catch (RuntimeException error) {
+            complete(request, ActionOutcome.failed("SCHEDULER_UNAVAILABLE",
+                "The Paper scheduler could not accept the action"));
+            plugin.getLogger().log(Level.WARNING, "Unable to schedule PlexonPanel remote action", error);
+        }
     }
 
     private void executeOnMainThread(ActionRequest request) {
@@ -213,6 +242,8 @@ public final class RemoteActionDispatcher {
         ActionResult result = outcome.success()
             ? ActionResult.success(request.requestId(), request.action(), outcome.message(), outcome.output())
             : ActionResult.failure(request.requestId(), request.action(), outcome.code(), outcome.message());
+        completed.put(request.requestId(), result);
+        inFlight.remove(request.requestId());
         sendResult(result);
         audit.record(new AuditEntry(
             Instant.now().toString(),

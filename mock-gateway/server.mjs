@@ -94,7 +94,11 @@ const server = createServer(async (request, response) => {
 });
 
 server.on('upgrade', (request, socket) => {
-  if (request.url !== '/v1/agent' || request.headers.upgrade?.toLowerCase() !== 'websocket') {
+  const upgradeUrl = new URL(request.url ?? '/', `http://${HOST}:${PORT}`);
+  const expectedServerId = upgradeUrl.searchParams.get('serverId');
+  if (upgradeUrl.pathname !== '/v1/agent'
+      || !/^[0-9a-f-]{36}$/i.test(expectedServerId ?? '')
+      || request.headers.upgrade?.toLowerCase() !== 'websocket') {
     socket.end('HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n');
     return;
   }
@@ -115,6 +119,7 @@ server.on('upgrade', (request, socket) => {
   const context = {
     socket,
     buffer: Buffer.alloc(0),
+    expectedServerId,
     serverId: null,
     agentPublicKey: null,
     fingerprint: null,
@@ -227,6 +232,7 @@ function handleAgentMessage(context, text) {
         type: 'spki',
       });
       if (!verifyEnvelope(envelope, publicKey)) throw new Error('Invalid agent hello signature');
+      if (envelope.serverId !== context.expectedServerId) throw new Error('Agent URL server ID mismatch');
       context.serverId = envelope.serverId;
       context.agentPublicKey = publicKey;
       context.fingerprint = body.publicKeyFingerprint;
@@ -246,6 +252,10 @@ function handleAgentMessage(context, text) {
         );
         if (!validProof) throw new Error('Invalid challenge response');
         context.authenticated = true;
+        sendEnvelope(context, 'gateway.authenticated', {
+          authenticatedAt: new Date().toISOString(),
+          paired: context.paired,
+        });
         console.log(`[agent] authenticated ${context.serverId}`);
       } else if (envelope.type === 'agent.pairing_begin') {
         if (!context.authenticated) throw new Error('Agent must authenticate before pairing');

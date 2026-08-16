@@ -129,7 +129,7 @@ public final class PlexonPanelCommand implements CommandExecutor, TabCompleter {
         AgentRuntime runtime = plugin.runtime();
         try {
             if (runtime == null) {
-                throw new IllegalStateException("The gateway runtime is unavailable");
+                throw new IllegalStateException("The relay runtime is unavailable");
             }
             runtime.gateway().requestUnpair();
             plugin.messages().send(sender, "unpaired");
@@ -168,12 +168,12 @@ public final class PlexonPanelCommand implements CommandExecutor, TabCompleter {
             return;
         }
         GatewayClient gateway = runtime.gateway();
-        sendRow(sender, "Gateway state", gateway.state().name());
-        sendRow(sender, "Gateway signature key", gateway.hasGatewayVerificationKey() ? "configured" : "missing");
-        sendRow(sender, "Gateway authenticated", Boolean.toString(gateway.isAuthenticated()));
+        sendRow(sender, "Relay state", gateway.state().name());
+        sendRow(sender, "Relay signature key", gateway.hasGatewayVerificationKey() ? "configured" : "missing");
+        sendRow(sender, "Relay authenticated", Boolean.toString(gateway.isAuthenticated()));
         sendRow(sender, "Dropped messages", Long.toString(gateway.droppedMessages()));
         sendRow(sender, "Last connected", formatInstant(gateway.lastConnectedAt()));
-        sendRow(sender, "Last gateway message", formatInstant(gateway.lastMessageAt()));
+        sendRow(sender, "Last relay message", formatInstant(gateway.lastMessageAt()));
         sendRow(sender, "Recent console lines", Integer.toString(runtime.console().recentLines().size()));
         if (!gateway.lastError().isBlank()) {
             sendRow(sender, "Last error", gateway.lastError());

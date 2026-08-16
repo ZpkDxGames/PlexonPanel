@@ -125,7 +125,7 @@ public final class GatewayClient implements MessageSink, AutoCloseable {
 
     public void start() {
         if (closed.get()) {
-            throw new IllegalStateException("Gateway client is closed");
+            throw new IllegalStateException("Relay client is closed");
         }
         if (!settings.enabled()) {
             state.set(ConnectionState.DISABLED);
@@ -133,7 +133,7 @@ public final class GatewayClient implements MessageSink, AutoCloseable {
         }
         if (settings.url() == null) {
             state.set(ConnectionState.DISABLED);
-            lastError = "Gateway URL is not configured";
+            lastError = "Relay URL is not configured";
             return;
         }
         if (!running.compareAndSet(false, true)) {
@@ -165,7 +165,7 @@ public final class GatewayClient implements MessageSink, AutoCloseable {
     public void requestUnpair() throws IOException {
         if (!authenticated.get()
             || !send("agent.unpair_request", Map.of("requestedAt", Instant.now().toString()), MessagePriority.CRITICAL)) {
-            throw new IOException("The gateway must be authenticated before revoking a pairing");
+            throw new IOException("The relay must be authenticated before revoking a pairing");
         }
     }
 
@@ -223,7 +223,7 @@ public final class GatewayClient implements MessageSink, AutoCloseable {
             .connectTimeout(Duration.ofSeconds(settings.connectTimeoutSeconds()))
             .header("User-Agent", "PlexonPanel/" + plugin.getPluginMeta().getVersion())
             .header("X-PlexonPanel-Protocol", Integer.toString(ProtocolCodec.VERSION))
-            .buildAsync(settings.url(), new GatewayWebSocketListener())
+            .buildAsync(agentEndpoint(), new GatewayWebSocketListener())
             .whenComplete((socket, error) -> {
                 connecting.set(false);
                 if (error != null) {
@@ -276,20 +276,20 @@ public final class GatewayClient implements MessageSink, AutoCloseable {
             }
             if (gatewayPublicKey == null) {
                 if (settings.requireSignedMessages()) {
-                    throw new SecurityException("Gateway public key is not configured");
+                    throw new SecurityException("Relay public key is not configured");
                 }
             } else if (!codec.verify(message.envelope(), gatewayPublicKey)) {
-                throw new SecurityException("Invalid gateway message signature");
+                throw new SecurityException("Invalid relay message signature");
             }
             if (!replayGuard.accept(codec.messageId(message.envelope()), codec.timestamp(message.envelope()))) {
-                throw new SecurityException("Expired or replayed gateway message");
+                throw new SecurityException("Expired or replayed relay message");
             }
             lastMessageAt = Instant.now();
             if (handleControlMessage(message)) {
                 return;
             }
             if (gatewayPublicKey == null) {
-                throw new SecurityException("Privileged messages require a configured gateway public key");
+                throw new SecurityException("Privileged messages require a configured relay public key");
             }
             inboundHandler.accept(message);
         } catch (Exception error) {
@@ -315,11 +315,11 @@ public final class GatewayClient implements MessageSink, AutoCloseable {
                 } else {
                     pairingState.clear();
                 }
-                try {
-                    connectedHandler.run();
-                } catch (RuntimeException error) {
-                    plugin.getLogger().log(Level.WARNING, "Authenticated handler failed", error);
-                }
+                runConnectedHandler("Authenticated handler failed");
+                yield true;
+            }
+            case "gateway.snapshot_request" -> {
+                runConnectedHandler("Snapshot refresh handler failed");
                 yield true;
             }
             case "pairing.registered" -> {
@@ -369,7 +369,7 @@ public final class GatewayClient implements MessageSink, AutoCloseable {
         cancelAuthenticationTimeout();
         authenticationTimeoutTask = scheduler.schedule(() -> {
             if (running.get() && webSocket == expectedSocket && !authenticated.get()) {
-                handleDisconnect("Gateway authentication timed out");
+                handleDisconnect("Relay authentication timed out");
             }
         }, Math.max(10, settings.connectTimeoutSeconds()), TimeUnit.SECONDS);
     }
@@ -378,6 +378,18 @@ public final class GatewayClient implements MessageSink, AutoCloseable {
         if (authenticationTimeoutTask != null) {
             authenticationTimeoutTask.cancel(false);
             authenticationTimeoutTask = null;
+        }
+    }
+
+    private java.net.URI agentEndpoint() {
+        return java.net.URI.create(settings.url() + "?serverId=" + identity.serverId());
+    }
+
+    private void runConnectedHandler(String failureMessage) {
+        try {
+            connectedHandler.run();
+        } catch (RuntimeException error) {
+            plugin.getLogger().log(Level.WARNING, failureMessage, error);
         }
     }
 
@@ -517,7 +529,7 @@ public final class GatewayClient implements MessageSink, AutoCloseable {
             if (fragments.length() + data.length() > ProtocolCodec.MAX_ENVELOPE_BYTES) {
                 fragments.setLength(0);
                 socket.request(1);
-                plugin.getLogger().warning("Rejected oversized gateway WebSocket message");
+                plugin.getLogger().warning("Rejected oversized relay WebSocket message");
                 return null;
             }
             fragments.append(data);
@@ -542,7 +554,7 @@ public final class GatewayClient implements MessageSink, AutoCloseable {
         @Override
         public CompletionStage<?> onClose(WebSocket socket, int statusCode, String reason) {
             if (running.get()) {
-                scheduler.execute(() -> handleDisconnect("Gateway closed connection (" + statusCode + "): " + reason));
+                scheduler.execute(() -> handleDisconnect("Relay closed connection (" + statusCode + "): " + reason));
             }
             return null;
         }

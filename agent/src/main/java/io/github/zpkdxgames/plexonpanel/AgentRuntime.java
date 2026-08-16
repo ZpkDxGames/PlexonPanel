@@ -47,7 +47,10 @@ public final class AgentRuntime implements AutoCloseable {
             chat
         );
         gateway.setInboundHandler(actions::accept);
-        gateway.setConnectedHandler(telemetry::sendInitialSnapshots);
+        gateway.setConnectedHandler(() -> {
+            telemetry.sendInitialSnapshots();
+            console.sendRecentSnapshot();
+        });
     }
 
     public void start() {
