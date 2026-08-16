@@ -4,11 +4,11 @@ import java.util.Map;
 
 public record HelloPayload(
     String agentName,
-    String agentVersion,
+    String pluginVersion,
     int protocolVersion,
     String publicKey,
     String publicKeyFingerprint,
-    String serverSoftware,
+    String paperVersion,
     String minecraftVersion,
     String javaVersion,
     String operatingSystem,
