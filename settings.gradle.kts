@@ -19,3 +19,5 @@ rootProject.name = "PlexonPanel"
 
 include("agent")
 include("integrations:plexonchats-api")
+
+include("protocol", "host-agent")

@@ -9,6 +9,7 @@ java {
 }
 
 dependencies {
+    implementation(project(":protocol"))
     compileOnly("io.papermc.paper:paper-api:26.2.build.112-stable")
     compileOnly(project(":integrations:plexonchats-api"))
 
@@ -28,6 +29,7 @@ tasks.test {
 }
 
 tasks.jar {
+    dependsOn(":protocol:jar")
     archiveBaseName.set("PlexonPanel")
     archiveVersion.set(project.version.toString())
     isPreserveFileTimestamps = false

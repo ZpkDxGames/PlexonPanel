@@ -13,8 +13,8 @@ public record PlayerSnapshot(
     boolean op,
     boolean whitelisted,
     Position position,
-    String address
-) {
-    public record Position(double x, double y, double z, float yaw, float pitch) {
-    }
+    String address,
+    int food,
+    long onlineDurationMillis) {
+  public record Position(double x, double y, double z, float yaw, float pitch) {}
 }

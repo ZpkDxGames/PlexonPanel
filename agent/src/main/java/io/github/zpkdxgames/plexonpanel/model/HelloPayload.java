@@ -13,6 +13,6 @@ public record HelloPayload(
     String javaVersion,
     String operatingSystem,
     boolean paired,
-    Map<String, Boolean> capabilities
-) {
-}
+    Map<String, Boolean> capabilities,
+    String agentKind,
+    String hostPublicKey) {}

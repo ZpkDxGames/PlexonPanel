@@ -8,6 +8,6 @@ public record PluginSnapshot(
     String mainClass,
     List<String> authors,
     String website,
-    boolean enabled
-) {
-}
+    boolean enabled,
+    List<String> dependencies,
+    List<String> softDependencies) {}
