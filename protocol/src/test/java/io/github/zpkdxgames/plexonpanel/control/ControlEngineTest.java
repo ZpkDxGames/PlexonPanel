@@ -103,6 +103,48 @@ class ControlEngineTest {
     }
   }
 
+  @Test
+  void failedResultAuditDoesNotMisreportCompletedWorkAsAnExecutionFailure() throws Exception {
+    String server = UUID.randomUUID().toString();
+    var devices = new DeviceRegistry(root.resolve("access.json"), server);
+    String pair = UUID.randomUUID().toString();
+    devices.begin(pair, "Owner", Scopes.ALL, Instant.now().plusSeconds(60), 1);
+    var device = devices.consume(pair, UUID.randomUUID().toString(), "Owner test");
+    Path directory = root.resolve("audit");
+    var audit = new LocalAudit(directory, 30);
+    var responses = new LinkedBlockingQueue<JsonObject>();
+    try (var engine =
+        new ControlEngine(
+            devices,
+            Map.of("console.execute.allowed", true),
+            audit,
+            null,
+            (action, parameters, actor) -> {
+              Files.move(directory, root.resolve("disconnected-audit-volume"));
+              return Map.of();
+            },
+            (type, body, priority) -> {
+              responses.add(new Gson().toJsonTree(body).getAsJsonObject());
+              return true;
+            },
+            () -> true,
+            server)) {
+      engine.accept(
+          request(
+              server,
+              device,
+              devices.snapshot().generation(),
+              UUID.randomUUID().toString(),
+              "console.execute",
+              new JsonObject()));
+      var result = responses.poll(3, TimeUnit.SECONDS);
+      assertNotNull(result);
+      assertEquals("NOT_AVAILABLE", result.get("status").getAsString());
+      assertEquals("AUDIT_UNAVAILABLE", result.get("code").getAsString());
+      assertTrue(result.get("message").getAsString().contains("operation completed"));
+    }
+  }
+
   static DecodedMessage request(
       String server,
       DeviceRegistry.Device d,

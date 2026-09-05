@@ -15,6 +15,11 @@ tasks.jar {
     isReproducibleFileOrder = true
     duplicatesStrategy = DuplicatesStrategy.EXCLUDE
     from({ configurations.runtimeClasspath.get().map { if (it.isDirectory) it else zipTree(it) } })
+    from(rootProject.layout.projectDirectory.file("THIRD_PARTY_NOTICES.md")) { into("META-INF") }
+    from(rootProject.layout.projectDirectory.file("licenses/Apache-2.0.txt")) {
+        into("META-INF/licenses")
+        rename { "gson-Apache-2.0.txt" }
+    }
     exclude("META-INF/*.SF", "META-INF/*.DSA", "META-INF/*.RSA", "module-info.class")
     manifest { attributes("Main-Class" to application.mainClass.get(), "Implementation-Version" to project.version) }
 }

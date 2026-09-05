@@ -147,7 +147,10 @@ public final class ControlEngine implements AutoCloseable {
               : status.equals("CONFLICT")
                   ? "STALE_FILE"
                   : status.equals("DENIED") ? "INVALID_PARAMETERS" : "OPERATION_FAILED";
-      if (operationCompleted) { status = "NOT_AVAILABLE"; code = "AUDIT_UNAVAILABLE"; }
+      if (operationCompleted) {
+        status = "NOT_AVAILABLE";
+        code = "AUDIT_UNAVAILABLE";
+      }
       try {
         audit.append(
             entry(id, deviceId, device, action, parameters, status, code, started, Map.of()));
@@ -155,20 +158,23 @@ public final class ControlEngine implements AutoCloseable {
         code = "AUDIT_UNAVAILABLE";
       }
       String message =
-          operationCompleted ? "The operation completed but its result could not be recorded. Verify local state before retrying." : switch (code) {
-            case "CAPABILITY_DISABLED" -> "This capability is disabled in local policy.";
-            case "SCOPE_DENIED", "OWNER_REQUIRED" ->
-                "This device does not have the required scope or role.";
-            case "DEVICE_REVOKED", "DEVICE_EXPIRED" -> "This device must be paired again.";
-            case "CONFIRMATION_REQUIRED" -> "Confirm this operation before submitting it.";
-            case "STALE_FILE" -> "The file changed. Reload it and review your edits.";
-            case "DUPLICATE_REQUEST" ->
-                "This request ID was already used; the action was not repeated.";
-            case "RATE_LIMITED", "BUSY" -> "Too many requests. Wait before trying again.";
-            default ->
-                "The operation could not be completed. Check local policy, parameters and the"
-                    + " server log.";
-          };
+          operationCompleted
+              ? "The operation completed but its result could not be recorded. Verify local state"
+                    + " before retrying."
+              : switch (code) {
+                case "CAPABILITY_DISABLED" -> "This capability is disabled in local policy.";
+                case "SCOPE_DENIED", "OWNER_REQUIRED" ->
+                    "This device does not have the required scope or role.";
+                case "DEVICE_REVOKED", "DEVICE_EXPIRED" -> "This device must be paired again.";
+                case "CONFIRMATION_REQUIRED" -> "Confirm this operation before submitting it.";
+                case "STALE_FILE" -> "The file changed. Reload it and review your edits.";
+                case "DUPLICATE_REQUEST" ->
+                    "This request ID was already used; the action was not repeated.";
+                case "RATE_LIMITED", "BUSY" -> "Too many requests. Wait before trying again.";
+                default ->
+                    "The operation could not be completed. Check local policy, parameters and the"
+                        + " server log.";
+              };
       reply(id, action, deviceId, status, code, message, Map.of());
     }
   }

@@ -7,4 +7,6 @@ public record ChatRecord(
     String senderUuid,
     String senderName,
     String content,
-    String source) {}
+    String source
+) {
+}

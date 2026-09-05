@@ -100,10 +100,14 @@ public final class ProtocolCodec {
     }
     JsonObject body;
     try {
-      body = strictObject(StandardCharsets.UTF_8.newDecoder()
-          .onMalformedInput(java.nio.charset.CodingErrorAction.REPORT)
-          .onUnmappableCharacter(java.nio.charset.CodingErrorAction.REPORT)
-          .decode(java.nio.ByteBuffer.wrap(decodedBody)).toString());
+      body =
+          strictObject(
+              StandardCharsets.UTF_8
+                  .newDecoder()
+                  .onMalformedInput(java.nio.charset.CodingErrorAction.REPORT)
+                  .onUnmappableCharacter(java.nio.charset.CodingErrorAction.REPORT)
+                  .decode(java.nio.ByteBuffer.wrap(decodedBody))
+                  .toString());
     } catch (java.nio.charset.CharacterCodingException error) {
       throw new IllegalArgumentException("Protocol body is not valid UTF-8", error);
     }

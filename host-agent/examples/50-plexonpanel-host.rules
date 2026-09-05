@@ -1,0 +1,9 @@
+// Root-owned /etc/polkit-1/rules.d/50-plexonpanel-host.rules.
+polkit.addRule(function(action, subject) {
+    if (subject.user === "plexonpanel-host" &&
+        action.id === "org.freedesktop.systemd1.manage-units" &&
+        action.lookup("unit") === "plexoncraft.service" &&
+        ["start", "stop", "restart"].indexOf(action.lookup("verb")) !== -1) {
+        return polkit.Result.YES;
+    }
+});

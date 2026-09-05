@@ -9,4 +9,6 @@ public record AuditEntry(
     String target,
     boolean allowed,
     boolean success,
-    String resultCode) {}
+    String resultCode
+) {
+}

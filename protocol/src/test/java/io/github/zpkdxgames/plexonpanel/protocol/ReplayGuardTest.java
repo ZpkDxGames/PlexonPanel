@@ -29,4 +29,13 @@ class ReplayGuardTest {
     assertFalse(guard.accept(UUID.randomUUID(), now.plusSeconds(31)));
     assertTrue(guard.accept(UUID.randomUUID(), now.plusSeconds(30)));
   }
+
+  @Test
+  void aFullWindowFailsClosedWithoutEvictingAcceptedIds() {
+    UUID first = UUID.randomUUID();
+    assertTrue(guard.accept(first, now));
+    for (int i = 1; i < 10; i++) assertTrue(guard.accept(UUID.randomUUID(), now));
+    assertFalse(guard.accept(UUID.randomUUID(), now));
+    assertFalse(guard.accept(first, now));
+  }
 }
