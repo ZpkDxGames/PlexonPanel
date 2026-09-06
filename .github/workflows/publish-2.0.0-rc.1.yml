@@ -42,6 +42,30 @@ jobs:
           assert not any(r["ref"] == "refs/tags/" + os.environ["RELEASE_TAG"] for r in refs), "Tag already exists; refusing to overwrite"
           print("Verified source commit, successful x64/ARM64 jobs, and unused prerelease tag.")
           PY
+      - name: Check out the exact tested source
+        uses: actions/checkout@v7
+        with:
+          ref: 0342dc3ccb3c3bdf72db90071abfe06d6c4b3334
+          persist-credentials: false
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "25"
+      - uses: gradle/actions/setup-gradle@v6
+      - name: Reproduce the packaged artifacts from the tested source
+        run: |
+          ./gradlew --no-daemon :agent:jar :host-agent:jar
+          python3 scripts/package-release.py
+          python3 - <<'PY'
+          import subprocess
+          from pathlib import Path
+          status = subprocess.check_output(["git", "status", "--porcelain", "-z"]).split(b"\0")
+          entries = [entry for entry in status if entry]
+          # The baseline committed CRLF bytes for this wrapper; Git's clean filter flags it.
+          assert entries in ([], [b" M gradlew.bat"]), entries
+          assert Path("gradlew.bat").read_bytes() == subprocess.check_output(["git", "show", "HEAD:gradlew.bat"])
+          print("All tracked source bytes verified; Windows wrapper line-ending status is explained.")
+          PY
       - name: Download the exact tested artifacts
         run: |
           gh run download "$BUILD_RUN_ID" --repo "$GH_REPO" \
@@ -57,7 +81,10 @@ jobs:
           assert all(p.is_file() and not p.is_symlink() for p in root.iterdir())
           manifest = json.loads((root / "release-manifest.json").read_text())
           assert manifest["sourceCommit"] == os.environ["SOURCE_SHA"]
-          assert manifest["workingTreeModified"] is False
+          assert isinstance(manifest["workingTreeModified"], bool)
+          for name in expected:
+              assert (root / name).read_bytes() == (Path("build/release") / name).read_bytes(), "Fresh build differs: " + name
+          print("All five release assets match the fresh source build byte for byte.")
           assert manifest["version"] == "2.0.0" and manifest["protocolVersion"] == 3 and manifest["java"] == 25
           checked = set()
           for line in (root / "SHA256SUMS.txt").read_text().splitlines():
@@ -110,6 +137,8 @@ jobs:
           ### Validation and remaining acceptance
 
           The attached files are the exact artifacts from [successful x64 and ARM64 CI](https://github.com/ZpkDxGames/PlexonPanel/actions/runs/33999337727), built from commit 0342dc3ccb3c3bdf72db90071abfe06d6c4b3334. Java tests, Javadoc, and packaging passed on both runners. The matching dashboard/relay checks also passed.
+
+          The release job also rebuilt the same source and verified byte-for-byte matches for both JARs, examples, checksums, and the source manifest. The manifest records workingTreeModified=true because the baseline Windows wrapper has stored CRLF line endings; its bytes were verified against Git, with no other source changes.
 
           **Production acceptance is pending:** live Paper and Ubuntu host operation, deployed Cloudflare/Vercel pairing, real rclone transfers, interrupted-restore recovery, and a 30-minute stability run. See [the acceptance guide](https://github.com/ZpkDxGames/PlexonPanel/blob/0342dc3ccb3c3bdf72db90071abfe06d6c4b3334/docs/VALIDATION.md).
 
