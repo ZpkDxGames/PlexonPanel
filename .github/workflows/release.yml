@@ -3,11 +3,11 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: Existing reviewed tag (v2.0.0)
+        description: Existing reviewed tag (v3.0.0)
         required: true
         type: string
       acceptance_verified:
-        description: All live Paper, ARM64, cloud, rclone and stability evidence was reviewed
+        description: All live presence, compatibility, Paper, ARM64, cloud, rclone and stability evidence was reviewed
         required: true
         type: boolean
         default: false
@@ -18,7 +18,7 @@ concurrency:
   cancel-in-progress: false
 jobs:
   draft:
-    if: inputs.acceptance_verified && inputs.tag == 'v2.0.0'
+    if: inputs.acceptance_verified && inputs.tag == 'v3.0.0'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
@@ -31,8 +31,14 @@ jobs:
           import json
           from pathlib import Path
           gates=json.loads(Path('docs/release-gates.json').read_text())
-          required={'paperDisposable','ubuntuArm64','cloudflareVercel','rclone','restoreCrashRecovery','stability30Minutes'}
-          assert gates['version']=='2.0.0' and set(gates['gates'])==required
+          required={
+            'paperDisposable','ubuntuArm64','cloudflareVercel','rclone',
+            'restoreCrashRecovery','stability30Minutes',
+            'playerPresenceLifecycle','orphanSessionRecovery',
+            'mixedVersionProtocol3','realtimeReconciliation',
+            'privacyScopeValidation'
+          }
+          assert gates['version']=='3.0.0' and set(gates['gates'])==required
           assert all(g['passed'] is True and g['evidence'].strip() for g in gates['gates'].values()), 'Live acceptance is incomplete'
           PY
       - uses: actions/setup-java@v5
@@ -48,4 +54,4 @@ jobs:
           RELEASE_TAG: ${{ inputs.tag }}
         run: |
           gh release create "$RELEASE_TAG" build/release/* --verify-tag --draft \
-            --title "PlexonPanel 2.0.0" --notes-file CHANGELOG.md
+            --title "PlexonPanel 3.0.0" --notes-file CHANGELOG.md

@@ -1,6 +1,6 @@
 # Protocol 3 contract
 
-Product version 2.0.0, wire version 3. Routes retain `/v1`; protocol 2 is explicitly incompatible. Paper and host initiate WSS `/v1/agent?serverId=<uuid>&agentKind=PAPER|HOST` with `X-PlexonPanel-Protocol: 3`.
+Product/bundle version 3.0.0, wire version 3. Routes retain `/v1`; protocol 2 is explicitly incompatible. Paper and host initiate WSS `/v1/agent?serverId=<uuid>&agentKind=PAPER|HOST` with `X-PlexonPanel-Protocol: 3`.
 
 ## Envelope
 
@@ -46,6 +46,22 @@ Browser sends `{type:"dashboard.action",requestId,action,parameters,agentKind?}`
 
 Parameters: at most 16 keys / 49,152 bytes. Per-device limits: 20 actions or 160 chunks per 10 seconds, 32 pending requests; room limit 64 pending. Agents have independent bounded gates. Intent UUIDs survive process restart through the local audit replay window. Commands/messages/file bodies are excluded from audit parameters.
 
-Inventory batches use snapshotId, offset, complete and truncated, targeting ≤48 KiB. Clients discard mismatched/out-of-order batches. Recipient filters independently remove player location/address, full-console levels and disabled events. Host cannot spoof Paper telemetry.
+Inventory batches use `snapshotId`, `capturedAt`, `offset`, `complete`, and `truncated`, targeting ≤48 KiB. Clients stage a snapshot until its complete batch, discard mismatched/out-of-order batches, replay only newer presence deltas, and clear online players at an authenticated-session boundary. Recipient filters independently remove player location/address, history-only fields, full-console levels, and disabled events. Host cannot spoof Paper telemetry or player presence.
+
+### Player-presence additions in 3.0
+
+These are additive protocol-3 messages; older bodies remain valid and consumers must ignore unknown optional fields.
+
+| Name | Direction | Authority and bounds |
+| --- | --- | --- |
+| `players.presence` | Paper event | Immediate minimal `JOINED`/`LEFT` delta; requires `players.view`; history-only fields are removed without `players.history.view`. |
+| `players.history.list` | Dashboard action | Requires immutable `players.history.view` grant and current Paper capability. Query/status/date/cursor fields are strict; page size defaults to 50 and is at most 100. Result is private and transient. |
+| `players.snapshot.request` | Dashboard action | Maps to `players.view`, accepts no parameters, is limited independently to once per device per five seconds, and coalesces concurrent Paper captures. |
+
+Presence timestamps are UTC ISO-8601 instants. UUID is identity; the name is bounded plain account metadata. `sessionEndedAt` and `sessionDurationMillis` remain null when unknown. Termination is one of `OPEN`, `QUIT`, `KICK`, or `UNKNOWN_DISCONNECT`. A `JOINED` observation represents an event actually seen by the enabled plugin; enable/reload reconciliation does not manufacture a login event. On startup, an orphaned prior session is closed as unknown-disconnect while preserving the last definitely observed instant rather than guessing an exact logout.
+
+`inventory.players` may add `sessionId` and `sessionStartedAt`. `firstSeenAt` and `lastLoginAt` are included only when persistent history is locally enabled and the recipient holds `players.history.view`. `players.history.list` returns newest-first `entries`, nullable `nextCursor`, `hasMore`, `boundedWindow`, `capturedAt`, and `historyEnabled`. Cursors are opaque and bound to the original filter/window; they never contain a caller-selected path.
+
+Presence event bodies, player inventory bodies, and history action results are excluded from Durable Object persistence. Action results remain routed only to the requesting device.
 
 Transfers use start → ordered 16 KiB chunks → cancellation/expiry, with final SHA-256 verification. File bodies and action results are transient. Durable Object storage contains identity/access/pairing coordination only; bounded socket attachments retain pending routing metadata across hibernation. Cloudflare's attachment limit is [16,384 bytes](https://developers.cloudflare.com/durable-objects/best-practices/websockets/); signed session sequences avoid unbounded replay arrays.

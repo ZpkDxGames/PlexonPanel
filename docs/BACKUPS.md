@@ -21,7 +21,7 @@ The host verifies SHA-256, takes an emergency backup, validates bounded ZIP entr
 On recovery-required, leave Paper stopped, inspect local journal/logs, repair storage/permissions and run:
 
 ```sh
-sudo -u plexonpanel-host /usr/bin/java -jar /opt/plexonpanel-host/plexonpanel-host-2.0.0.jar /etc/plexonpanel-host/host-config.json --recover-restore
+sudo -u plexonpanel-host /usr/bin/java -jar /opt/plexonpanel-host/plexonpanel-host-3.0.0.jar /etc/plexonpanel-host/host-config.json --recover-restore
 ```
 
 Recovery restores saved originals and removes new targets; repeating it after interruption preserves originals already recovered. Malformed/unknown journals fail closed. Never delete a journal to bypass recovery. Validate files and gameplay before deliberately starting Paper. Actual ARM64/systemd/rclone interruption tests remain release gates.

@@ -147,6 +147,7 @@ class PresenceJournalTest {
     journal.appendAndApply(first, 0L);
     PresenceRecord second = joined(UUID.randomUUID().toString(), "Two", START.plusSeconds(1));
     journal.appendAndApply(second, 0L);
+    clock.set(START.plusSeconds(2));
     PresenceRecord third = joined(UUID.randomUUID().toString(), "Three", START.plusSeconds(2));
     journal.appendAndApply(third, 0L);
     try (var files = Files.list(journal.directory())) {

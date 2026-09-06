@@ -246,7 +246,13 @@ public final class PresenceJournal {
     if (limit < 1 || limit > settings.maximumPageSize())
       throw new IllegalArgumentException("Invalid limit");
     Instant capturedAt = clock.instant();
-    Instant retentionStart = capturedAt.minusSeconds(settings.retentionDays() * 86400L);
+    // Retention is enforced by UTC journal day. A day-aligned query window keeps an opaque
+    // pagination cursor stable while the wall clock advances between pages.
+    Instant retentionStart =
+        LocalDate.ofInstant(capturedAt, ZoneOffset.UTC)
+            .minusDays(settings.retentionDays() - 1L)
+            .atStartOfDay(ZoneOffset.UTC)
+            .toInstant();
     Cursor cursor = decodeCursor(query.cursor(), retentionStart, capturedAt);
     Instant requestedFrom = query.from();
     if (requestedFrom == null && cursor != null) requestedFrom = Instant.parse(cursor.windowFrom());
