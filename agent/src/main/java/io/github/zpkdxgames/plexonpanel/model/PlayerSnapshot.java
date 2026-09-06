@@ -15,6 +15,10 @@ public record PlayerSnapshot(
     Position position,
     String address,
     int food,
-    long onlineDurationMillis) {
+    long onlineDurationMillis,
+    String sessionId,
+    String sessionStartedAt,
+    String firstSeenAt,
+    String lastLoginAt) {
   public record Position(double x, double y, double z, float yaw, float pitch) {}
 }

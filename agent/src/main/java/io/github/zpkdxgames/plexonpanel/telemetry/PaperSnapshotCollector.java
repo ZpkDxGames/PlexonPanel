@@ -4,6 +4,7 @@ import io.github.zpkdxgames.plexonpanel.config.PanelSettings;
 import io.github.zpkdxgames.plexonpanel.model.PlayerSnapshot;
 import io.github.zpkdxgames.plexonpanel.model.PluginSnapshot;
 import io.github.zpkdxgames.plexonpanel.model.ServerSnapshot;
+import io.github.zpkdxgames.plexonpanel.presence.PlayerPresenceService;
 import io.papermc.paper.plugin.configuration.PluginMeta;
 import java.net.InetSocketAddress;
 import java.time.Clock;
@@ -23,15 +24,22 @@ public final class PaperSnapshotCollector {
   private final Server server;
   private final PanelSettings.Telemetry settings;
   private final Clock clock;
+  private final PlayerPresenceService presence;
   private final PlainTextComponentSerializer plainText = PlainTextComponentSerializer.plainText();
 
-  public PaperSnapshotCollector(Server server, PanelSettings.Telemetry settings) {
-    this(server, settings, Clock.systemUTC());
+  public PaperSnapshotCollector(
+      Server server, PanelSettings.Telemetry settings, PlayerPresenceService presence) {
+    this(server, settings, presence, Clock.systemUTC());
   }
 
-  PaperSnapshotCollector(Server server, PanelSettings.Telemetry settings, Clock clock) {
+  PaperSnapshotCollector(
+      Server server,
+      PanelSettings.Telemetry settings,
+      PlayerPresenceService presence,
+      Clock clock) {
     this.server = server;
     this.settings = settings;
+    this.presence = presence;
     this.clock = clock;
   }
 
@@ -65,6 +73,13 @@ public final class PaperSnapshotCollector {
     List<PlayerSnapshot> result = new ArrayList<>(Math.min(513, server.getOnlinePlayers().size()));
     for (Player player : server.getOnlinePlayers()) {
       if (result.size() >= 513) break;
+      result.add(playerSnapshot(player));
+    }
+    result.sort(Comparator.comparing(PlayerSnapshot::name, String.CASE_INSENSITIVE_ORDER));
+    return List.copyOf(result);
+  }
+
+  public PlayerSnapshot playerSnapshot(Player player) {
       Location location = player.getLocation();
       PlayerSnapshot.Position position =
           settings.includePlayerLocation()
@@ -87,8 +102,13 @@ public final class PaperSnapshotCollector {
       AttributeInstance maxHealthAttribute = player.getAttribute(Attribute.MAX_HEALTH);
       double maximumHealth =
           maxHealthAttribute == null ? player.getHealth() : maxHealthAttribute.getValue();
-      result.add(
-          new PlayerSnapshot(
+      PlayerPresenceService.SnapshotMetadata metadata =
+          presence.snapshotMetadata(player.getUniqueId().toString());
+      long onlineDurationMillis =
+          metadata.sessionStartedAt() == null
+              ? Math.max(0, clock.millis() - player.getLastLogin())
+              : Math.max(0, clock.millis() - java.time.Instant.parse(metadata.sessionStartedAt()).toEpochMilli());
+      return new PlayerSnapshot(
               player.getUniqueId().toString(),
               player.getName(),
               bounded(plainText.serialize(player.displayName()), 128),
@@ -103,10 +123,11 @@ public final class PaperSnapshotCollector {
               position,
               address,
               player.getFoodLevel(),
-              Math.max(0, clock.millis() - player.getLastLogin())));
-    }
-    result.sort(Comparator.comparing(PlayerSnapshot::name, String.CASE_INSENSITIVE_ORDER));
-    return List.copyOf(result);
+              onlineDurationMillis,
+              metadata.sessionId(),
+              metadata.sessionStartedAt(),
+              metadata.firstSeenAt(),
+              metadata.lastLoginAt());
   }
 
   public List<java.util.Map<String, Object>> worldSnapshots() {

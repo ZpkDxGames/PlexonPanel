@@ -27,6 +27,7 @@ public final class PlexonPanelPlugin extends JavaPlugin {
   @Override
   public void onEnable() {
     saveDefaultConfig();
+    migrateConfigDefaults();
     try {
       Path dataDirectory = getDataFolder().toPath();
       identityStore = new IdentityStore(dataDirectory);
@@ -39,8 +40,9 @@ public final class PlexonPanelPlugin extends JavaPlugin {
         java.nio.file.Files.writeString(marker, "3\n");
         getLogger()
             .info(
-                "PlexonPanel 2.0 protocol migration preserves the server UUID and key. Existing"
-                    + " browser credentials require re-pairing for scoped access.");
+                "PlexonPanel initialized signed wire protocol 3 while preserving the server UUID"
+                    + " and identity key. Product 3.0 keeps existing scoped device grants"
+                    + " unchanged.");
       }
       gui = new io.github.zpkdxgames.plexonpanel.ui.AdminGui(this);
 
@@ -76,6 +78,7 @@ public final class PlexonPanelPlugin extends JavaPlugin {
 
   public synchronized void reloadAgent() throws java.io.IOException {
     reloadConfig();
+    migrateConfigDefaults();
     PanelSettings candidateSettings = PanelSettings.load(getConfig());
     AgentRuntime next = createRuntime(candidateSettings, identity);
     AgentRuntime previous = runtime;
@@ -148,5 +151,10 @@ public final class PlexonPanelPlugin extends JavaPlugin {
 
   public Messages messages() {
     return messages;
+  }
+
+  private void migrateConfigDefaults() {
+    getConfig().options().copyDefaults(true);
+    saveConfig();
   }
 }

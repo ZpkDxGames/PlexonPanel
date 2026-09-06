@@ -11,6 +11,7 @@ public final class Scopes {
           "overview.view",
           "telemetry.view",
           "players.view",
+          "players.history.view",
           "players.location",
           "players.address",
           "console.view.errors",
@@ -96,6 +97,8 @@ public final class Scopes {
     actions.put("devices.list", "devices.view");
     actions.put("devices.revoke", "devices.revoke");
     actions.put("settings.view", "settings.view");
+    actions.put("players.history.list", "players.history.view");
+    actions.put("players.snapshot.request", "players.view");
     ACTIONS = Map.copyOf(actions);
     Set<String> observer =
         Set.of(
@@ -110,6 +113,7 @@ public final class Scopes {
     Set<String> moderator =
         plus(
             observer,
+            "players.history.view",
             "chat.view",
             "chat.send",
             "player.message",

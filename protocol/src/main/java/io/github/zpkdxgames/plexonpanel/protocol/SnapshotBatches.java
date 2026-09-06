@@ -12,7 +12,13 @@ public final class SnapshotBatches {
   private SnapshotBatches() {}
 
   public static List<Map<String, Object>> split(String field, List<?> values, int maximum) {
-    String id = UUID.randomUUID().toString(), captured = Instant.now().toString();
+    return split(field, values, maximum, Instant.now().toString());
+  }
+
+  public static List<Map<String, Object>> split(
+      String field, List<?> values, int maximum, String capturedAt) {
+    String id = UUID.randomUUID().toString();
+    String captured = Instant.parse(capturedAt).toString();
     List<Map<String, Object>> result = new ArrayList<>();
     List<Object> batch = new ArrayList<>();
     int bytes = 0, offset = 0;

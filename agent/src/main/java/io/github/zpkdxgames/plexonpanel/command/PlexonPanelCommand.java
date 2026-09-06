@@ -293,6 +293,15 @@ public final class PlexonPanelCommand implements CommandExecutor, TabCompleter {
         gateway.hasGatewayVerificationKey() ? "configured" : "missing");
     sendRow(sender, "Relay authenticated", Boolean.toString(gateway.isAuthenticated()));
     sendRow(sender, "Dropped messages", Long.toString(gateway.droppedMessages()));
+    Map<String, Object> telemetry = runtime.telemetry().diagnostics();
+    sendRow(sender, "Skipped snapshots", telemetry.get("skippedSnapshots").toString());
+    sendRow(
+        sender,
+        "Dropped presence events",
+        telemetry.get("droppedPresenceEvents").toString());
+    Map<String, Object> presence = runtime.presence().diagnostics();
+    sendRow(sender, "Presence history", presence.get("state").toString());
+    sendRow(sender, "Presence writer queue", presence.get("queueDepth").toString());
     sendRow(sender, "Last connected", formatInstant(gateway.lastConnectedAt()));
     sendRow(sender, "Last relay message", formatInstant(gateway.lastMessageAt()));
     sendRow(
