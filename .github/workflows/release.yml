@@ -1,67 +1,51 @@
-name: Release
-
+name: Prepare gated draft release
 on:
-  push:
-    tags:
-      - 'v*'
   workflow_dispatch:
     inputs:
       tag:
-        description: Release tag, for example v0.1.1
+        description: Existing reviewed tag (v2.0.0)
         required: true
         type: string
-
+      acceptance_verified:
+        description: All live Paper, ARM64, cloud, rclone and stability evidence was reviewed
+        required: true
+        type: boolean
+        default: false
 permissions:
   contents: write
-
 concurrency:
-  group: release-${{ github.ref }}
+  group: plexonpanel-release
   cancel-in-progress: false
-
 jobs:
-  publish:
-    runs-on: ubuntu-latest
+  draft:
+    if: inputs.acceptance_verified && inputs.tag == 'v2.0.0'
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
-
     steps:
-      - name: Check out source
-        uses: actions/checkout@v7
-
-      - name: Set up Java 25
-        uses: actions/setup-java@v5
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.tag }}
+      - name: Require recorded acceptance
+        run: |
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          gates=json.loads(Path('docs/release-gates.json').read_text())
+          required={'paperDisposable','ubuntuArm64','cloudflareVercel','rclone','restoreCrashRecovery','stability30Minutes'}
+          assert gates['version']=='2.0.0' and set(gates['gates'])==required
+          assert all(g['passed'] is True and g['evidence'].strip() for g in gates['gates'].values()), 'Live acceptance is incomplete'
+          PY
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
-          java-version: '25'
-
-      - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v6
-
-      - name: Verify and package
-        run: ./gradlew --no-daemon clean test javadoc :agent:jar
-
-      - name: Publish release
+          java-version: "25"
+      - uses: gradle/actions/setup-gradle@v6
+      - run: ./gradlew --no-daemon clean test javadoc :agent:jar :host-agent:jar
+      - run: python3 scripts/package-release.py
+      - name: Create draft for final operator review
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+          RELEASE_TAG: ${{ inputs.tag }}
         run: |
-          VERSION=$(./gradlew -q properties | sed -n 's/^version: //p')
-          EXPECTED_TAG="v${VERSION}"
-          JAR="agent/build/libs/PlexonPanel-${VERSION}.jar"
-          CHECKSUM="build/release/SHA256SUMS.txt"
-
-          if [ "$RELEASE_TAG" != "$EXPECTED_TAG" ]; then
-            echo "Release tag $RELEASE_TAG does not match project version $VERSION"
-            exit 1
-          fi
-
-          mkdir -p build/release
-          sha256sum "$JAR" > "$CHECKSUM"
-
-          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
-            gh release upload "$RELEASE_TAG" "$JAR" "$CHECKSUM" --clobber
-          else
-            gh release create "$RELEASE_TAG" "$JAR" "$CHECKSUM" \
-              --target "$GITHUB_SHA" \
-              --title "PlexonPanel ${VERSION}" \
-              --generate-notes
-          fi
+          gh release create "$RELEASE_TAG" build/release/* --verify-tag --draft \
+            --title "PlexonPanel 2.0.0" --notes-file CHANGELOG.md

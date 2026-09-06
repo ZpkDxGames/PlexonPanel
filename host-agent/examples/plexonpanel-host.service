@@ -1,0 +1,32 @@
+[Unit]
+Description=PlexonPanel outbound host companion
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=plexonpanel-host
+Group=plexonpanel-host
+SupplementaryGroups=plexonpanel-access plexoncraft
+WorkingDirectory=/var/lib/plexonpanel-host
+ExecStart=/usr/bin/java -Xms32m -Xmx256m -jar /opt/plexonpanel-host/plexonpanel-host-2.0.0.jar /etc/plexonpanel-host/host-config.json
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectHome=true
+ProtectSystem=strict
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+CapabilityBoundingSet=
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+ReadWritePaths=/var/lib/plexonpanel-host /var/backups/plexonpanel /opt/plexoncraft/server
+
+[Install]
+WantedBy=multi-user.target

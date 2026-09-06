@@ -4,6 +4,12 @@ import io.github.zpkdxgames.plexonpanel.AgentRuntime;
 import io.github.zpkdxgames.plexonpanel.PlexonPanelPlugin;
 import io.github.zpkdxgames.plexonpanel.identity.PairingState;
 import io.github.zpkdxgames.plexonpanel.transport.GatewayClient;
+import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.logging.Level;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
 import org.bukkit.command.Command;
@@ -14,211 +20,336 @@ import org.bukkit.entity.Player;
 import org.bukkit.scheduler.BukkitRunnable;
 import org.jetbrains.annotations.NotNull;
 
-import java.time.Instant;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Locale;
-import java.util.Map;
-import java.util.logging.Level;
-
 public final class PlexonPanelCommand implements CommandExecutor, TabCompleter {
-    private static final List<String> SUBCOMMANDS = List.of("status", "pair", "unpair", "rotate", "reload", "diagnostics");
+  private static final List<String> SUBCOMMANDS =
+      List.of(
+          "status",
+          "gui",
+          "pair",
+          "devices",
+          "revoke",
+          "revoke-all",
+          "capabilities",
+          "audit",
+          "unpair",
+          "rotate",
+          "reload",
+          "diagnostics");
 
-    private final PlexonPanelPlugin plugin;
+  private final PlexonPanelPlugin plugin;
 
-    public PlexonPanelCommand(PlexonPanelPlugin plugin) {
-        this.plugin = plugin;
+  public PlexonPanelCommand(PlexonPanelPlugin plugin) {
+    this.plugin = plugin;
+  }
+
+  @Override
+  public boolean onCommand(
+      @NotNull CommandSender sender,
+      @NotNull Command command,
+      @NotNull String label,
+      @NotNull String[] arguments) {
+    String subcommand =
+        arguments.length == 0
+            ? (sender instanceof Player ? "gui" : "status")
+            : arguments[0].toLowerCase(Locale.ROOT);
+    if (!SUBCOMMANDS.contains(subcommand)) {
+      plugin.messages().send(sender, "help");
+      return true;
+    }
+    if (!sender.hasPermission(
+        "plexonpanel." + (subcommand.equals("revoke-all") ? "revoke" : subcommand))) {
+      plugin.messages().send(sender, "no-permission");
+      return true;
     }
 
-    @Override
-    public boolean onCommand(
-        @NotNull CommandSender sender,
-        @NotNull Command command,
-        @NotNull String label,
-        @NotNull String[] arguments
-    ) {
-        String subcommand = arguments.length == 0 ? "status" : arguments[0].toLowerCase(Locale.ROOT);
-        if (!SUBCOMMANDS.contains(subcommand)) {
-            plugin.messages().send(sender, "help");
-            return true;
-        }
-        if (!sender.hasPermission("plexonpanel." + subcommand)) {
-            plugin.messages().send(sender, "no-permission");
-            return true;
-        }
-
-        switch (subcommand) {
-            case "status" -> showStatus(sender);
-            case "pair" -> requestPairing(sender);
-            case "unpair" -> unpair(sender);
-            case "rotate" -> rotate(sender, arguments);
-            case "reload" -> reload(sender);
-            case "diagnostics" -> showDiagnostics(sender);
-            default -> throw new IllegalStateException("Unreachable subcommand: " + subcommand);
-        }
-        return true;
+    switch (subcommand) {
+      case "status" -> showStatus(sender);
+      case "gui" -> {
+        if (sender instanceof Player player) plugin.gui().open(player);
+        else showStatus(sender);
+      }
+      case "pair" ->
+          requestPairing(
+              sender,
+              arguments.length > 1 ? arguments[1] : plugin.runtime().policy().defaultRole());
+      case "devices" -> listDevices(sender);
+      case "revoke" -> {
+        if (arguments.length != 2)
+          sender.sendMessage(Component.text("Usage: /plexonpanel revoke <device-id>"));
+        else revoke(sender, arguments[1]);
+      }
+      case "revoke-all" -> unpair(sender);
+      case "capabilities" ->
+          plugin
+              .runtime()
+              .policy()
+              .capabilities()
+              .forEach(
+                  (scope, enabled) -> sendRow(sender, scope, enabled ? "enabled" : "disabled"));
+      case "audit" ->
+          sender.sendMessage(
+              Component.text(
+                  "Authoritative audit: plugins/PlexonPanel/audit. Scoped browsing is available on"
+                      + " the dashboard.",
+                  NamedTextColor.AQUA));
+      case "unpair" -> unpair(sender);
+      case "rotate" -> rotate(sender, arguments);
+      case "reload" -> reload(sender);
+      case "diagnostics" -> showDiagnostics(sender);
+      default -> throw new IllegalStateException("Unreachable subcommand: " + subcommand);
     }
+    return true;
+  }
 
-    private void showStatus(CommandSender sender) {
-        AgentRuntime runtime = plugin.runtime();
-        sender.sendMessage(Component.text("PlexonPanel " + plugin.getPluginMeta().getVersion(), NamedTextColor.AQUA));
-        sendRow(sender, "Connection", runtime == null ? "STOPPED" : runtime.gateway().state().name());
-        sendRow(sender, "Paired", Boolean.toString(plugin.pairingState().isPaired()));
-        sendRow(sender, "Server ID", plugin.identity().serverId().toString());
-        sendRow(sender, "Fingerprint", plugin.identity().fingerprint());
-        if (runtime != null) {
-            sendRow(sender, "Telemetry", enabled(runtime.settings().telemetry().enabled()));
-            sendRow(sender, "Console stream", enabled(runtime.settings().console().streamEnabled()));
-            sendRow(sender, "Chat stream", enabled(runtime.settings().chat().streamEnabled()));
-            sendRow(sender, "Remote actions", enabled(runtime.settings().remoteActions().enabled()));
-        }
+  private void showStatus(CommandSender sender) {
+    AgentRuntime runtime = plugin.runtime();
+    sender.sendMessage(
+        Component.text("PlexonPanel " + plugin.getPluginMeta().getVersion(), NamedTextColor.AQUA));
+    sendRow(sender, "Connection", runtime == null ? "STOPPED" : runtime.gateway().state().name());
+    sendRow(sender, "Paired", Boolean.toString(plugin.pairingState().isPaired()));
+    sendRow(sender, "Server ID", plugin.identity().serverId().toString());
+    sendRow(sender, "Fingerprint", plugin.identity().fingerprint());
+    if (runtime != null) {
+      sendRow(sender, "Telemetry", enabled(runtime.settings().telemetry().enabled()));
+      sendRow(sender, "Console stream", enabled(runtime.settings().console().streamEnabled()));
+      sendRow(sender, "Chat stream", enabled(runtime.settings().chat().streamEnabled()));
+      sendRow(sender, "Remote actions", enabled(runtime.settings().remoteActions().enabled()));
     }
+  }
 
-    private void requestPairing(CommandSender sender) {
-        AgentRuntime runtime = plugin.runtime();
-        if (runtime == null || !runtime.settings().gateway().enabled()) {
-            plugin.messages().send(sender, "gateway-disabled");
-            return;
-        }
-        if (plugin.pairingState().isPaired()) {
-            plugin.messages().send(sender, "already-paired");
-            return;
-        }
-        if (!runtime.gateway().requestPairingCode()) {
-            plugin.messages().send(sender, "gateway-unavailable");
-            return;
-        }
-        plugin.messages().send(sender, "pair-requested");
-        waitForPairingCode(sender);
+  public void requestPairing(CommandSender sender, String requestedRole) {
+    AgentRuntime runtime = plugin.runtime();
+    if (runtime == null || !runtime.settings().gateway().enabled()) {
+      plugin.messages().send(sender, "gateway-disabled");
+      return;
     }
-
-    private void waitForPairingCode(CommandSender sender) {
-        new BukkitRunnable() {
-            private int attempts;
-
-            @Override
-            public void run() {
-                if (sender instanceof Player player && !player.isOnline()) {
-                    cancel();
-                    return;
-                }
-                if (plugin.pairingState().isPaired()) {
-                    plugin.messages().send(sender, "pair-complete");
-                    cancel();
-                    return;
-                }
-                var code = plugin.pairingState().activeCode();
-                if (code.isPresent()) {
-                    PairingState.PairingCode value = code.orElseThrow();
-                    plugin.messages().send(sender, "pair-code", Map.of(
-                        "code", value.value(),
-                        "expires", value.expiresAt().toString()
-                    ));
-                    cancel();
-                    return;
-                }
-                if (++attempts >= 10) {
-                    plugin.messages().send(sender, "pair-timeout");
-                    cancel();
-                }
-            }
-        }.runTaskTimer(plugin, 20L, 20L);
+    String role;
+    try {
+      role = runtime.policy().roleName(requestedRole);
+    } catch (IllegalArgumentException error) {
+      sender.sendMessage(
+          Component.text(
+              "Unknown role. Available: " + runtime.policy().roles().keySet(), NamedTextColor.RED));
+      return;
     }
-
-    private void unpair(CommandSender sender) {
-        AgentRuntime runtime = plugin.runtime();
-        try {
-            if (runtime != null) {
-                runtime.gateway().requestUnpair();
-            } else {
-                plugin.pairingState().clear();
-            }
-            plugin.messages().send(sender, "unpaired");
-        } catch (Exception error) {
-            fail(sender, "Unable to clear pairing state", error);
-        }
+    sendRow(sender, "Pairing role", role);
+    sendRow(
+        sender,
+        "Granted scopes",
+        String.join(", ", new java.util.TreeSet<>(runtime.policy().roles().get(role))));
+    if (!role.equals("Observer"))
+      sender.sendMessage(
+          Component.text(
+              "Privileged device: only share this code with the intended operator. Local capability"
+                  + " limits still apply.",
+              NamedTextColor.GOLD));
+    if (!runtime.gateway().requestPairingCode(role)) {
+      plugin.messages().send(sender, "gateway-unavailable");
+      return;
     }
+    plugin.messages().send(sender, "pair-requested");
+    waitForPairingCode(sender);
+  }
 
-    private void rotate(CommandSender sender, String[] arguments) {
-        if (arguments.length < 2 || !"confirm".equalsIgnoreCase(arguments[1])) {
-            plugin.messages().send(sender, "rotate-warning");
-            return;
+  private void waitForPairingCode(CommandSender sender) {
+    new BukkitRunnable() {
+      private int attempts;
+
+      @Override
+      public void run() {
+        if (sender instanceof Player player && !player.isOnline()) {
+          cancel();
+          return;
         }
-        try {
-            plugin.rotateIdentity();
-            plugin.messages().send(sender, "rotated");
-        } catch (Exception error) {
-            fail(sender, "Unable to rotate PlexonPanel identity", error);
+        var code = plugin.pairingState().activeCode();
+        if (code.isPresent()) {
+          PairingState.PairingCode value = code.orElseThrow();
+          plugin
+              .messages()
+              .send(
+                  sender,
+                  "pair-code",
+                  Map.of(
+                      "code", value.value(),
+                      "expires", value.expiresAt().toString()));
+          cancel();
+          return;
         }
+        if (++attempts >= 10) {
+          plugin.messages().send(sender, "pair-timeout");
+          cancel();
+        }
+      }
+    }.runTaskTimer(plugin, 20L, 20L);
+  }
+
+  private void listDevices(CommandSender sender) {
+    plugin
+        .getServer()
+        .getScheduler()
+        .runTaskAsynchronously(
+            plugin,
+            () -> {
+              try {
+                var state = plugin.runtime().devices().snapshot();
+                plugin
+                    .getServer()
+                    .getScheduler()
+                    .runTask(
+                        plugin,
+                        () -> {
+                          for (var device : state.devices())
+                            sendRow(
+                                sender, device.name() + " / " + device.role(), device.deviceId());
+                        });
+              } catch (Exception error) {
+                plugin.getLogger().warning("Could not load local devices");
+              }
+            });
+  }
+
+  private void revoke(CommandSender sender, String id) {
+    plugin
+        .getServer()
+        .getScheduler()
+        .runTaskAsynchronously(
+            plugin,
+            () -> {
+              try {
+                plugin.runtime().gateway().revokeDevice(id);
+                plugin
+                    .getServer()
+                    .getScheduler()
+                    .runTask(
+                        plugin,
+                        () ->
+                            sender.sendMessage(
+                                Component.text("Device revoked locally.", NamedTextColor.GREEN)));
+              } catch (Exception error) {
+                plugin
+                    .getServer()
+                    .getScheduler()
+                    .runTask(plugin, () -> fail(sender, "Unable to revoke device", error));
+              }
+            });
+  }
+
+  private void unpair(CommandSender sender) {
+    plugin
+        .getServer()
+        .getScheduler()
+        .runTaskAsynchronously(
+            plugin,
+            () -> {
+              try {
+                plugin.runtime().gateway().requestUnpair();
+                plugin
+                    .getServer()
+                    .getScheduler()
+                    .runTask(plugin, () -> plugin.messages().send(sender, "unpaired"));
+              } catch (Exception error) {
+                plugin
+                    .getServer()
+                    .getScheduler()
+                    .runTask(plugin, () -> fail(sender, "Unable to revoke all devices", error));
+              }
+            });
+  }
+
+  private void rotate(CommandSender sender, String[] arguments) {
+    if (arguments.length < 2 || !"confirm".equalsIgnoreCase(arguments[1])) {
+      plugin.messages().send(sender, "rotate-warning");
+      return;
     }
-
-    private void reload(CommandSender sender) {
-        try {
-            plugin.reloadAgent();
-            plugin.messages().send(sender, "reloaded");
-        } catch (Exception error) {
-            fail(sender, "Unable to reload PlexonPanel", error);
-        }
+    try {
+      plugin.rotateIdentity();
+      plugin.messages().send(sender, "rotated");
+    } catch (Exception error) {
+      fail(sender, "Unable to rotate PlexonPanel identity", error);
     }
+  }
 
-    private void showDiagnostics(CommandSender sender) {
-        plugin.messages().send(sender, "diagnostics-header");
-        AgentRuntime runtime = plugin.runtime();
-        if (runtime == null) {
-            sendRow(sender, "Runtime", "stopped");
-            return;
-        }
-        GatewayClient gateway = runtime.gateway();
-        sendRow(sender, "Gateway state", gateway.state().name());
-        sendRow(sender, "Gateway signature key", gateway.hasGatewayVerificationKey() ? "configured" : "missing");
-        sendRow(sender, "Dropped messages", Long.toString(gateway.droppedMessages()));
-        sendRow(sender, "Last connected", formatInstant(gateway.lastConnectedAt()));
-        sendRow(sender, "Last gateway message", formatInstant(gateway.lastMessageAt()));
-        sendRow(sender, "Recent console lines", Integer.toString(runtime.console().recentLines().size()));
-        if (!gateway.lastError().isBlank()) {
-            sendRow(sender, "Last error", gateway.lastError());
-        }
+  private void reload(CommandSender sender) {
+    try {
+      plugin.reloadAgent();
+      plugin.messages().send(sender, "reloaded");
+    } catch (Exception error) {
+      fail(sender, "Unable to reload PlexonPanel", error);
     }
+  }
 
-    private void fail(CommandSender sender, String logMessage, Exception error) {
-        plugin.getLogger().log(Level.WARNING, logMessage, error);
-        plugin.messages().send(sender, "operation-failed");
+  private void showDiagnostics(CommandSender sender) {
+    plugin.messages().send(sender, "diagnostics-header");
+    AgentRuntime runtime = plugin.runtime();
+    if (runtime == null) {
+      sendRow(sender, "Runtime", "stopped");
+      return;
     }
+    GatewayClient gateway = runtime.gateway();
+    sendRow(sender, "Relay state", gateway.state().name());
+    sendRow(
+        sender,
+        "Relay signature key",
+        gateway.hasGatewayVerificationKey() ? "configured" : "missing");
+    sendRow(sender, "Relay authenticated", Boolean.toString(gateway.isAuthenticated()));
+    sendRow(sender, "Dropped messages", Long.toString(gateway.droppedMessages()));
+    sendRow(sender, "Last connected", formatInstant(gateway.lastConnectedAt()));
+    sendRow(sender, "Last relay message", formatInstant(gateway.lastMessageAt()));
+    sendRow(
+        sender, "Recent console lines", Integer.toString(runtime.console().recentLines().size()));
+    if (!gateway.lastError().isBlank()) {
+      sendRow(sender, "Last error", gateway.lastError());
+    }
+  }
 
-    private static void sendRow(CommandSender sender, String label, String value) {
-        sender.sendMessage(Component.text(" • " + label + ": ", NamedTextColor.GRAY)
+  private void fail(CommandSender sender, String logMessage, Exception error) {
+    plugin.getLogger().log(Level.WARNING, logMessage, error);
+    plugin.messages().send(sender, "operation-failed");
+  }
+
+  private static void sendRow(CommandSender sender, String label, String value) {
+    sender.sendMessage(
+        Component.text(" • " + label + ": ", NamedTextColor.GRAY)
             .append(Component.text(value, NamedTextColor.WHITE)));
-    }
+  }
 
-    private static String enabled(boolean value) {
-        return value ? "enabled" : "disabled";
-    }
+  private static String enabled(boolean value) {
+    return value ? "enabled" : "disabled";
+  }
 
-    private static String formatInstant(Instant instant) {
-        return instant == null ? "never" : instant.toString();
-    }
+  private static String formatInstant(Instant instant) {
+    return instant == null ? "never" : instant.toString();
+  }
 
-    @Override
-    public List<String> onTabComplete(
-        @NotNull CommandSender sender,
-        @NotNull Command command,
-        @NotNull String alias,
-        @NotNull String[] arguments
-    ) {
-        if (arguments.length == 1) {
-            String prefix = arguments[0].toLowerCase(Locale.ROOT);
-            List<String> matches = new ArrayList<>();
-            for (String subcommand : SUBCOMMANDS) {
-                if (subcommand.startsWith(prefix) && sender.hasPermission("plexonpanel." + subcommand)) {
-                    matches.add(subcommand);
-                }
-            }
-            return matches;
+  @Override
+  public List<String> onTabComplete(
+      @NotNull CommandSender sender,
+      @NotNull Command command,
+      @NotNull String alias,
+      @NotNull String[] arguments) {
+    if (arguments.length == 1) {
+      String prefix = arguments[0].toLowerCase(Locale.ROOT);
+      List<String> matches = new ArrayList<>();
+      for (String subcommand : SUBCOMMANDS) {
+        if (subcommand.startsWith(prefix)
+            && sender.hasPermission(
+                "plexonpanel." + (subcommand.equals("revoke-all") ? "revoke" : subcommand))) {
+          matches.add(subcommand);
         }
-        if (arguments.length == 2 && "rotate".equalsIgnoreCase(arguments[0])
-            && "confirm".startsWith(arguments[1].toLowerCase(Locale.ROOT))) {
-            return List.of("confirm");
-        }
-        return List.of();
+      }
+      return matches;
     }
+    if (arguments.length == 2 && "pair".equalsIgnoreCase(arguments[0]) && plugin.runtime() != null)
+      return plugin.runtime().policy().roles().keySet().stream()
+          .filter(
+              name ->
+                  name.toLowerCase(Locale.ROOT).startsWith(arguments[1].toLowerCase(Locale.ROOT)))
+          .toList();
+    if (arguments.length == 2
+        && "rotate".equalsIgnoreCase(arguments[0])
+        && "confirm".startsWith(arguments[1].toLowerCase(Locale.ROOT))) {
+      return List.of("confirm");
+    }
+    return List.of();
+  }
 }

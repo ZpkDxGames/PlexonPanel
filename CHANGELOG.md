@@ -1,33 +1,12 @@
 # Changelog
 
-All notable changes to PlexonPanel are documented here. The project follows [Semantic Versioning](https://semver.org/).
+## 2.0.0 — review candidate, production acceptance pending
 
-## [Unreleased]
+- Protocol 3, local role/scoped grants, capability intersection, live revocation, signed connection sequences and restart-aware duplicate suppression.
+- Paper 26.2/Java 25 telemetry, typed controls, console/chat policy and holder-owned inventory GUI.
+- Restricted conflict-aware file editing and verified bounded transfers.
+- Optional non-root systemd companion, local/rclone backups and stopped-server restore with emergency archive/idempotent journal recovery.
+- Matching responsive twelve-section dashboard, isolated server workspaces, explicit connectivity and actual operation results.
+- Cross-language fixtures, security/visual/runtime checks, review artifacts and gated draft release workflow.
 
-### Changed
-
-- Simplified the public repository documentation and release layout.
-- Removed the unused default gateway address; new installations now start with a blank endpoint.
-- Moved contributor and security guidance into GitHub's standard `.github` location.
-
-### Planned
-
-- Hosted gateway and Next.js dashboard.
-- Public Paper test-server beta.
-
-## [0.1.0] - 2026-08-14
-
-### Added
-
-- Paper 26.2/Java 25 plugin workspace.
-- Persistent Ed25519 device identity and one-time pairing flow.
-- Signed, replay-protected WebSocket protocol.
-- CPU, RAM, disk, JVM, TPS, tick-time, player, and plugin telemetry.
-- Bounded/redacted console and error streaming.
-- Paper chat capture plus optional PlexonChats global-channel contract.
-- Opt-in console, player, whitelist, ban, and dashboard-chat actions.
-- Local JSONL action auditing and retention.
-- Admin commands, diagnostics, unit tests, CI, protocol schema, and local test gateway.
-
-[Unreleased]: https://github.com/ZpkDxGames/PlexonPanel/compare/v0.1.0...HEAD
-[0.1.0]: https://github.com/ZpkDxGames/PlexonPanel/releases/tag/v0.1.0
+Migration preserves server identity, invalidates unscoped browser tokens and requires local re-pairing. Upgrade all components together; see docs/MIGRATION.md.

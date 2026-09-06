@@ -1,15 +1,18 @@
 package io.github.zpkdxgames.plexonpanel.model;
 
+import java.util.Map;
+
 public record HelloPayload(
     String agentName,
-    String agentVersion,
+    String pluginVersion,
     int protocolVersion,
     String publicKey,
     String publicKeyFingerprint,
-    String serverSoftware,
+    String paperVersion,
     String minecraftVersion,
     String javaVersion,
     String operatingSystem,
-    boolean paired
-) {
-}
+    boolean paired,
+    Map<String, Boolean> capabilities,
+    String agentKind,
+    String hostPublicKey) {}

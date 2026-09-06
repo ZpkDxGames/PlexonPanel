@@ -1,11 +1,12 @@
-# PlexonPanel 0.1.0
-# The gateway is disabled until the hosted PlexonPanel service is configured.
+# PlexonPanel 2.0.0 — local policy is authoritative
+# The database-less relay is disabled until its URL and public key are configured.
 
 gateway:
   enabled: false
+  # Production example: wss://YOUR-RELAY.workers.dev/v1/agent
   url: ""
   # Base64-encoded X.509 Ed25519 public key used to verify every privileged
-  # message from the gateway. Remote actions remain locked when this is empty.
+  # message from the relay. An enabled connection is rejected when this is empty.
   public-key: ""
   require-signed-messages: true
   connect-timeout-seconds: 10
@@ -13,12 +14,12 @@ gateway:
   reconnect:
     initial-delay-seconds: 2
     maximum-delay-seconds: 60
-  queue-capacity: 2048
+  queue-capacity: 256
 
 telemetry:
   enabled: true
-  server-interval-ticks: 40
-  system-interval-seconds: 5
+  server-interval-ticks: 100
+  system-interval-seconds: 10
   plugin-interval-seconds: 60
   include-player-location: false
   include-player-address: false
@@ -48,6 +49,7 @@ remote-actions:
   maximum-clock-skew-seconds: 30
   console:
     enabled: false
+    mode: ALLOWLIST_WITH_CONFIRMATION
     # A command must match an allow rule and must not match a deny rule.
     allow:
       - "^(tps|mspt)(\\s.*)?$"
@@ -58,12 +60,49 @@ remote-actions:
       - "^(lp|luckperms|pex)(\\s.*)?$"
       - ".*(password|secret|token|api[-_]?key).*"
   players:
-    message: true
-    kick: true
+    message: false
+    kick: false
     ban: false
     unban: false
     whitelist: false
+    teleport: false
+    gamemode: false
+    heal: false
+    feed: false
+    kill: false
+    op: false # Also deop; requires Owner.
+  plugin-reload-commands: {}
 
 audit:
-  local-jsonl-enabled: true
+  # Security auditing is mandatory in 2.0, regardless of the old enabled switch.
   retention-days: 30
+
+access:
+  default-pair-role: Observer
+  device-credential-days: 30 # 1–30; codes last five minutes and are single use.
+  allow-dashboard-revoke: false
+  roles: {} # Custom role: Name: {scopes: [overview.view, telemetry.view]}
+
+files:
+  enabled: false
+  roots:
+    server:
+      path: /opt/plexoncraft/server
+      read: true
+      write: false
+  permissions:
+    list: true
+    read: true
+    download: true
+    write: false
+    create: false
+    rename: false
+    delete: false
+    upload: false
+
+host:
+  public-key: "" # Independent host public key; never a private key.
+
+backups:
+  enabled: false # Authorize Paper save/flush leases for the optional host.
+  allow-host-schedule: false

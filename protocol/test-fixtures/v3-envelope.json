@@ -1,0 +1,20 @@
+{
+  "description": "Public test vector. Generated ephemeral private key was discarded; this identity is not used by a server.",
+  "publicKey": "MCowBQYDK2VwAyEAvE5fjhWXSeUjPvXMK0zrQQOhyoo3ULGet49ojc8ipC4=",
+  "envelope": {
+    "protocolVersion": 3,
+    "type": "telemetry.system",
+    "messageId": "3f05f2c7-22a4-4796-b80d-dbb71dfbdfd0",
+    "serverId": "2b5c70ec-361c-4d50-8b66-6d1bc28bba63",
+    "timestamp": "2026-09-05T12:00:00Z",
+    "body": "eyJtZXNzYWdlIjoiUHJvdG9jb2wgMyDinJMiLCJob3N0Q3B1UGVyY2VudCI6MCwiX3Nlc3Npb24iOiJkM2IyYzkwMy01ODUyLTRlMjMtYTZmNi0yNjYxN2IxY2ZlMmQiLCJfc2VxdWVuY2UiOjl9",
+    "signature": "-umkVqQhXnrqA2DmZ8iayHIIXFHUkQS7lWabNjUwe5sYRmtZsdzWCVM9w8tf_NBOLv1OETe3ztOJ-I1_ZADgCA"
+  },
+  "canonical": "3\ntelemetry.system\n3f05f2c7-22a4-4796-b80d-dbb71dfbdfd0\n2b5c70ec-361c-4d50-8b66-6d1bc28bba63\n2026-09-05T12:00:00Z\neyJtZXNzYWdlIjoiUHJvdG9jb2wgMyDinJMiLCJob3N0Q3B1UGVyY2VudCI6MCwiX3Nlc3Npb24iOiJkM2IyYzkwMy01ODUyLTRlMjMtYTZmNi0yNjYxN2IxY2ZlMmQiLCJfc2VxdWVuY2UiOjl9",
+  "body": {
+    "message": "Protocol 3 ✓",
+    "hostCpuPercent": 0,
+    "_session": "d3b2c903-5852-4e23-a6f6-26617b1cfe2d",
+    "_sequence": 9
+  }
+}

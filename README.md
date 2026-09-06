@@ -1,76 +1,35 @@
-# PlexonPanel
+# PlexonPanel 2.0.0
 
-[![Build](https://github.com/ZpkDxGames/PlexonPanel/actions/workflows/build.yml/badge.svg)](https://github.com/ZpkDxGames/PlexonPanel/actions/workflows/build.yml)
-[![Release](https://img.shields.io/github/v/release/ZpkDxGames/PlexonPanel)](https://github.com/ZpkDxGames/PlexonPanel/releases/latest)
-[![License](https://img.shields.io/github/license/ZpkDxGames/PlexonPanel)](LICENSE)
+An outbound-only control room for Paper 26.2 / Java 25, with an optional non-root Linux host companion. **Review candidate: production acceptance remains pending.** See [validation](docs/VALIDATION.md).
 
-PlexonPanel is a Paper plugin for monitoring and administering a Minecraft server from a web dashboard. It reports server health, players, plugins, logs, and chat while keeping remote actions disabled until a server operator enables them.
+The Paper agent provides telemetry, bounded console/chat streams, typed player controls, plugin inventory, restricted file operations and a local inventory GUI. The host companion stays online while Paper stops and adds fixed-unit systemd lifecycle, local/rclone backups and stopped-server restore. Both connect to the protocol 3 relay in the [dashboard repository](https://github.com/ZpkDxGames/PlexonPanel-Dashboard).
 
-> **Project status:** the Paper plugin is available as an early preview. The hosted dashboard and public pairing service are still under development.
+Every action requires a valid current device grant, its exact role/scopes and the executing agent's local capability. Owner cannot override a local denial. New installations disable mutations, full console, chat sending, files, host lifecycle and backups. Existing rc.2 settings are preserved and require review during migration.
 
-## Features
+## Build and install
 
-- CPU, memory, disk, JVM, TPS, tick-time, and player-count monitoring
-- Player and installed-plugin information
-- Redacted warning and error reporting
-- Optional console and global-chat streaming
-- Optional remote player, whitelist, ban, chat, and console actions
-- Local action audit logs and per-feature privacy controls
-- Optional PlexonChats global-channel adapter
-
-## Requirements
-
-| Component | Version |
-| --- | --- |
-| Paper | 26.2 (`26.2.build.112-stable`) |
-| Java | 25 |
-| PlexonChats | Optional; integration API support required |
-
-## Installation
-
-1. Download the JAR from the [latest release](https://github.com/ZpkDxGames/PlexonPanel/releases/latest).
-2. Place it in the Paper server's `plugins/` directory.
-3. Start the server once and review `plugins/PlexonPanel/config.yml`.
-4. Enable only the data streams and remote actions you intend to use.
-
-The gateway is disabled by default. Until the hosted service is available, developers can use the loopback-only [local gateway](mock-gateway/README.md).
-
-## Commands
-
-| Command | Purpose |
-| --- | --- |
-| `/plexonpanel status` | Show connection and feature status |
-| `/plexonpanel pair` | Request a temporary pairing code |
-| `/plexonpanel unpair` | Revoke the current pairing |
-| `/plexonpanel rotate confirm` | Replace the local server identity |
-| `/plexonpanel reload` | Reload and validate the configuration |
-| `/plexonpanel diagnostics` | Show safe connection diagnostics |
-
-These commands require their matching `plexonpanel.*` permission and default to server operators.
-
-## Building
-
-```bash
-./gradlew clean test :agent:jar
+```sh
+./gradlew --no-daemon clean test javadoc :agent:jar :host-agent:jar
+python3 scripts/package-release.py
 ```
 
-The plugin is written to `agent/build/libs/PlexonPanel-<version>.jar`. Additional development information is available in [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md).
+Outputs are `agent/build/libs/PlexonPanel-2.0.0.jar`, `host-agent/build/libs/plexonpanel-host-2.0.0.jar` and the JARs, examples, source manifest and `SHA256SUMS.txt` in `build/release/`. CI uploads review artifacts from Ubuntu x64 and ARM64 builds; these do not replace live acceptance.
 
-## Privacy and security
+1. Use a disposable Paper 26.2 server on Java 25. Stop it, install the Paper JAR in `plugins/`, then start once to create configuration and identity.
+2. Configure the relay WSS `/v1/agent` endpoint and public key in `plugins/PlexonPanel/config.yml`; enable the gateway and restart. Keep mutations off.
+3. Verify `/plexonpanel status` and the existing server fingerprint. Run `/plexonpanel pair Observer` locally and claim the one-use five-minute code in the dashboard.
+4. Verify telemetry, Observer denials and local revocation before enabling individual capabilities. Install the optional host only through the guide below.
 
-Console output, chat, player information, and network addresses can contain sensitive data. Review [PRIVACY.md](PRIVACY.md) and the [security policy](.github/SECURITY.md) before connecting a production server.
+`/plexonpanel` opens the player GUI; console use shows status. Commands include `gui`, `status`, `pair [role]`, `devices`, `revoke <device-id>`, `revoke-all`, `capabilities`, `audit`, `reload`, `diagnostics`, plus retained local identity controls. Permissions default to operators. Four immutable built-in roles and optional locally configured custom scopes are supported.
 
-Generated identities, pairing codes, server logs, and local gateway keys must never be committed to this repository.
+## Guides
 
-## Roadmap
+- [Configuration, files and troubleshooting](docs/OPERATIONS.md)
+- [Roles and scopes](docs/ACCESS.md)
+- [Host, backups and restore](docs/HOST_AGENT.md)
+- [Protocol 3](docs/PROTOCOL.md)
+- [Migration and rollback](docs/MIGRATION.md)
+- [Validation/release gates](docs/VALIDATION.md)
+- [Development](docs/DEVELOPMENT.md), [security](.github/SECURITY.md), [privacy](PRIVACY.md), [changes](CHANGELOG.md)
 
-- Hosted gateway and account authentication
-- Next.js administration dashboard
-- Public beta testing on Paper 26.2
-- SpigotMC and Modrinth publication after the hosted service is ready
-
-## License
-
-PlexonPanel is released under the [MIT License](LICENSE).
-
-Created by [ZpkDxGames](https://github.com/ZpkDxGames).
+No Firebase, telemetry database, inbound Minecraft administration port, generic shell or RCON is required. Cloudflare stores authorization/pairing coordination only. Historical charts are bounded browser state; audit stays local.

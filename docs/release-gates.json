@@ -1,0 +1,29 @@
+{
+  "version": "2.0.0",
+  "gates": {
+    "paperDisposable": {
+      "passed": false,
+      "evidence": ""
+    },
+    "ubuntuArm64": {
+      "passed": false,
+      "evidence": ""
+    },
+    "cloudflareVercel": {
+      "passed": false,
+      "evidence": ""
+    },
+    "rclone": {
+      "passed": false,
+      "evidence": ""
+    },
+    "restoreCrashRecovery": {
+      "passed": false,
+      "evidence": ""
+    },
+    "stability30Minutes": {
+      "passed": false,
+      "evidence": ""
+    }
+  }
+}

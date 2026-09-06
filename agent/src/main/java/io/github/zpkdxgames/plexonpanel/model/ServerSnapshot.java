@@ -11,8 +11,7 @@ public record ServerSnapshot(
     int maximumPlayers,
     List<Double> tps,
     double averageTickMillis,
+    double minimumSampleTickMillis,
     double p95TickMillis,
     double maximumSampleTickMillis,
-    long currentTick
-) {
-}
+    long currentTick) {}

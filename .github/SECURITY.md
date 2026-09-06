@@ -1,18 +1,7 @@
 # Security policy
 
-Only the latest published PlexonPanel release receives security fixes while the project is in preview.
+Remote mutations are disabled by default. Valid current scoped grants and local capabilities are checked by relay and agent; Owner cannot override local policy. Op/deop and restore require the built-in Owner role. There is no generic shell, arbitrary unit/executable, RCON or database execution. Durable audit intent precedes privileged work.
 
-## Reporting a vulnerability
+Report vulnerabilities privately through GitHub security advisories if enabled, otherwise an established private channel to the repository owner. Never post real credentials, keys, codes, player data, raw logs or file bodies.
 
-Use GitHub's private vulnerability reporting or security-advisory feature for this repository. Do not publish exploits, credentials, pairing codes, server addresses, logs, or player data in an issue.
-
-Include the affected version, impact, reproduction steps, and a suggested mitigation when possible. Replace private information with safe examples.
-
-## Operator guidance
-
-- Use `wss://` for remote connections; plain `ws://` is limited to loopback development.
-- Pin the gateway public key before enabling the connection.
-- Keep console access and destructive player actions disabled unless they are required.
-- Review command filters and redaction patterns before connecting a production server.
-- Protect `plugins/PlexonPanel/identity/device.key` and rotate the identity after suspected exposure.
-- Maintain independent server backups and host-level access controls.
+Tests cover signatures/replay, capabilities/scopes, revocation, bounded inputs/transfers, stale writes, symlink/traversal protection and ZIP/recovery behavior. Live OS/cloud/plugin-stack security still requires [acceptance](../docs/VALIDATION.md). For an incident disable mutations locally, revoke affected devices, preserve local evidence and coordinate any signing-key rotation. Deleting identity files is not a normal repair.

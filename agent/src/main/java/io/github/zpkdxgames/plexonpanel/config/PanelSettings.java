@@ -32,11 +32,14 @@ public record PanelSettings(
         if (gateway.initialReconnectDelaySeconds() > gateway.maximumReconnectDelaySeconds()) {
             throw new IllegalArgumentException("gateway reconnect initial delay cannot exceed maximum delay");
         }
+        if (gateway.enabled() && (!gateway.requireSignedMessages() || gateway.publicKeyBase64().isBlank())) {
+            throw new IllegalArgumentException("enabled gateways require signed messages and a pinned gateway.public-key");
+        }
 
         Telemetry telemetry = new Telemetry(
             config.getBoolean("telemetry.enabled", true),
-            bounded(config.getLong("telemetry.server-interval-ticks", 40), 20, 72_000, "telemetry.server-interval-ticks"),
-            bounded(config.getLong("telemetry.system-interval-seconds", 5), 1, 3600, "telemetry.system-interval-seconds"),
+            bounded(config.getLong("telemetry.server-interval-ticks", 100), 20, 72_000, "telemetry.server-interval-ticks"),
+            bounded(config.getLong("telemetry.system-interval-seconds", 10), 1, 3600, "telemetry.system-interval-seconds"),
             bounded(config.getLong("telemetry.plugin-interval-seconds", 60), 10, 86_400, "telemetry.plugin-interval-seconds"),
             config.getBoolean("telemetry.include-player-location", false),
             config.getBoolean("telemetry.include-player-address", false)
@@ -98,6 +101,12 @@ public record PanelSettings(
         }
         if (uri.getHost() == null || uri.getHost().isBlank()) {
             throw new IllegalArgumentException("gateway.url must include a host");
+        }
+        if (!"/v1/agent".equals(uri.getPath())) {
+            throw new IllegalArgumentException("gateway.url must end with /v1/agent");
+        }
+        if (uri.getUserInfo() != null || uri.getRawQuery() != null || uri.getFragment() != null) {
+            throw new IllegalArgumentException("gateway.url must not contain credentials, a query, or a fragment");
         }
         return uri;
     }

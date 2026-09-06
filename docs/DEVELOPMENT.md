@@ -1,52 +1,11 @@
 # Development
 
-## Requirements
+Use Java 25 and Gradle wrapper 9.7.0. `protocol` contains pure Java identity/security/files/audit/metrics, `agent` integrates Paper, `host-agent` provides the non-root OS adapter, and `integrations/plexonchats-api` is an optional compile-only event API.
 
-- Java 25
-- Paper 26.2 for server testing
-- Node.js 20 or newer only when using the local gateway
+Run `./gradlew --no-daemon test javadoc :agent:jar :host-agent:jar`, then `python3 scripts/package-release.py`. Paper API is pinned to 26.2.build.112-stable. Gson 2.14.0 and its license are bundled in both JARs; no native dependency is required.
 
-The Gradle wrapper supplies the required Gradle version.
+In the dashboard repository use Node 24, `npm ci`, `npm run check`, and `npm run relay:smoke`. Smoke uses actual local workerd with temporary keys and no account credentials. The historical rc.2 mock gateway intentionally refuses protocol 3 operation.
 
-## Build and test
+Keep Java and both TypeScript scope/action copies aligned. Preserve the identical public-only wire fixture. Do not remove server-side authorization to resolve a UI denial. Bukkit capture stays on-thread; I/O/compression/process/network work uses bounded workers. No shell or arbitrary units/paths/executables.
 
-```bash
-./gradlew clean test javadoc :agent:jar
-```
-
-The installable plugin is written to `agent/build/libs/`.
-
-## Project layout
-
-- `agent/` contains the Paper plugin and its tests.
-- `integrations/plexonchats-api/` contains the optional public contract used by the PlexonChats adapter.
-- `protocol/envelope.schema.json` describes the signed WebSocket envelope.
-- `mock-gateway/` contains a loopback-only development server.
-
-## Runtime boundaries
-
-Paper state is read and changed on the server thread. System metrics, networking, log tailing, and local audit writes use bounded background workers. Remote requests are checked against the local feature settings and action policy before execution.
-
-Protocol messages use signed JSON envelopes over WebSocket. Changing required envelope fields, signature input, or action semantics requires a protocol-version change.
-
-## PlexonChats adapter
-
-The optional adapter expects PlexonChats to expose the contract under `com.antondev.chats.api`. If that contract is unavailable, PlexonPanel continues without the adapter and standard Paper chat capture remains available.
-
-## Local gateway
-
-```bash
-cd mock-gateway
-npm start
-```
-
-The gateway binds to `127.0.0.1` and is intended only for local development. Follow [mock-gateway/README.md](../mock-gateway/README.md) for pairing and action examples.
-
-## Releases
-
-1. Update the project version and `CHANGELOG.md`.
-2. Run the full build and test command.
-3. Test the JAR on a disposable Paper 26.2 server.
-4. Push a matching `vX.Y.Z` tag or run the release workflow manually.
-
-GitHub publishes the JAR and its SHA-256 checksum. Source archives are provided automatically by GitHub.
+Never commit runtime identities, grants, generated tokens, backups or real service credentials. Record non-secret live evidence in VALIDATION.md and release-gates.json before release.
