@@ -24,6 +24,7 @@ public final class ProtocolCodec {
       Set.of("protocolVersion", "type", "messageId", "serverId", "timestamp", "body", "signature");
 
   private final Gson gson;
+  private final Gson presenceGson;
   private final Clock clock;
 
   public ProtocolCodec() {
@@ -31,10 +32,11 @@ public final class ProtocolCodec {
   }
 
   ProtocolCodec(Clock clock) {
-    // Protocol bodies use explicit nulls for nullable wire fields. In particular,
-    // players.presence JOINED events carry null session end/duration values and
-    // the relay validates that distinction from a malformed non-null value.
-    this.gson = new GsonBuilder().disableHtmlEscaping().serializeNulls().create();
+    this.gson = new GsonBuilder().disableHtmlEscaping().create();
+    // Presence has protocol-defined nullable fields. Keep explicit nulls only
+    // for that event family so unrelated wire bodies retain their established
+    // serialization shape.
+    this.presenceGson = new GsonBuilder().disableHtmlEscaping().serializeNulls().create();
     this.clock = clock;
   }
 
@@ -44,7 +46,8 @@ public final class ProtocolCodec {
     Objects.requireNonNull(identity, "identity");
     validateMessageType(type);
 
-    byte[] bodyBytes = gson.toJson(body).getBytes(StandardCharsets.UTF_8);
+    Gson bodyGson = "players.presence".equals(type) ? presenceGson : gson;
+    byte[] bodyBytes = bodyGson.toJson(body).getBytes(StandardCharsets.UTF_8);
     if (bodyBytes.length > MAX_BODY_BYTES) {
       throw new IllegalArgumentException("Protocol body exceeds " + MAX_BODY_BYTES + " bytes");
     }
