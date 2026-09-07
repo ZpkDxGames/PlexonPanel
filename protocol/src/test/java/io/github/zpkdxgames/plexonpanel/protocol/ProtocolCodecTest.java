@@ -33,7 +33,7 @@ class ProtocolCodecTest {
   }
 
   @Test
-  void signedBodiesPreserveExplicitNullsRequiredByWireContracts() throws Exception {
+  void signedPresenceBodiesPreserveExplicitNullsRequiredByWireContract() throws Exception {
     DeviceIdentity identity = identity();
     ProtocolCodec codec = new ProtocolCodec(Clock.fixed(NOW, ZoneOffset.UTC));
     Map<String, Object> body = new LinkedHashMap<>();
@@ -48,6 +48,21 @@ class ProtocolCodecTest {
     assertTrue(decoded.body().get("sessionEndedAt").isJsonNull());
     assertTrue(decoded.body().has("sessionDurationMillis"));
     assertTrue(decoded.body().get("sessionDurationMillis").isJsonNull());
+  }
+
+  @Test
+  void unrelatedBodiesKeepEstablishedNullOmissionShape() throws Exception {
+    DeviceIdentity identity = identity();
+    ProtocolCodec codec = new ProtocolCodec(Clock.fixed(NOW, ZoneOffset.UTC));
+    Map<String, Object> body = new LinkedHashMap<>();
+    body.put("value", 42);
+    body.put("optional", null);
+
+    DecodedMessage decoded =
+        codec.decode(codec.encodeSigned("telemetry.test", body, identity));
+
+    assertEquals(42, decoded.body().get("value").getAsInt());
+    assertFalse(decoded.body().has("optional"));
   }
 
   @Test
