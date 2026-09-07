@@ -1,8 +1,24 @@
-# 2.0 to 3.0 migration and rollback
+# Migration and rollback
+
+## 3.0.0 to 3.0.1
+
+PlexonPanel 3.0.1 is a local capability-policy and deployment hardening update. It keeps signed wire protocol 3, `/v1` routes, the Paper UUID/Ed25519 identity, Host pinning and existing device records. No existing grant is silently expanded.
+
+The conservative install defaults remain conservative. Full-control deployments can opt into `agent/examples/config-full-control.yml` and `host-agent/examples/host-config-full-control.json`; review [FULL_CONTROL.md](FULL_CONTROL.md) before applying them.
+
+Upgrade both JARs together during maintenance. Stop Paper for the Paper JAR replacement and update the Host service JAR path to `plexonpanel-host-3.0.1.jar` before restarting the Host companion. Preserve the existing identity and access registry.
+
+After applying a full-control local policy, inspect Access with a newly paired Owner. If an applicable capability is locally enabled while `This Device` says Not granted, the credential predates that scope. Revoke that device, generate a new pairing code and pair it again with the intended role. Do not edit the existing credential or registry scopes in place.
+
+Host continues to reject Paper-only scopes; Paper continues not to claim `server.start`, `server.stop` or `server.restart`. `plugins.reload` now advertises only when at least one configured plugin reload command is executable under the same local console allow/deny policy. No generic `/reload` is introduced.
+
+Do not copy successful 3.0.0 live-release evidence into 3.0.1. The 3.0.1 release gates must be recorded again, including a disposable full-capability Access-matrix check and representative high-risk confirmation tests.
+
+## 2.0 to 3.0
 
 PlexonPanel 3.0.0 keeps signed wire protocol 3, `/v1` routes, the Paper UUID/Ed25519 identity, the Host pin, and every existing device grant. The migration adds missing configuration defaults without overwriting existing values. It never enables persistent history and never adds `players.history.view` to an issued credential.
 
-## Upgrade
+### Upgrade
 
 1. Schedule maintenance and privately back up the known-good JARs, `config.yml`, identity, access registry, Host configuration, and any recovery journals. Do not place them in dashboard transfers or release evidence.
 2. Review the new `telemetry` cadence/event keys and `player-history` section. Leave `player-history.enabled: false` until the privacy purpose, retention period, filesystem protection, and authorized roles have been approved locally.
