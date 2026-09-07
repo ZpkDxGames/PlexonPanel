@@ -19,7 +19,8 @@ gateway:
 telemetry:
   enabled: true
   # Server health is captured on Paper's main thread, then serialized off-thread.
-  # Keep this at 20 ticks or higher. Raise it if load testing shows an MSPT impact.
+  # Values as low as 5 ticks (250 ms) are supported for lightweight TPS/MSPT
+  # snapshots. The conservative public default remains 40 ticks.
   server-interval-ticks: 40
   player-snapshot-interval-seconds: 30
   system-interval-seconds: 5
