@@ -37,6 +37,7 @@ for rel in [
 archive = out / f"PlexonPanel-{version}-examples.zip"
 examples = [
     root / "agent/src/main/resources/config.yml",
+    *sorted((root / "agent/examples").glob("*")),
     *sorted((root / "host-agent/examples").glob("*")),
     *sorted((root / "docs").glob("*.md")),
     root / "README.md",
