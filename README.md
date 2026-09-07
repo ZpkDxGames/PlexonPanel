@@ -1,8 +1,18 @@
-# PlexonPanel 3.0.0
+# PlexonPanel 3.0.1
 
-PlexonPanel is an outbound-only control room for Paper 26.2 on Java 25, with an optional non-root Linux host companion. Version 3.0 adds Paper-authoritative player presence history, immediate join/leave roster deltas, independently scheduled telemetry, and full-snapshot reconciliation. The signed wire contract remains **protocol 3** and routes remain under `/v1`.
+PlexonPanel is an outbound-only control room for Paper 26.2 on Java 25, with an optional non-root Linux host companion. Version 3.0.1 makes every currently implemented Paper and Host capability locally enable-able through explicit full-control presets while preserving the truthful authority split, immutable device grants and the signed **protocol 3** wire contract under `/v1`.
 
 **Release status:** review candidate. Automated checks do not replace the pending live acceptance gates in [validation](docs/VALIDATION.md), and the stable release must remain blocked until those gates contain real evidence.
+
+## Full local capabilities
+
+The installable defaults remain conservative. The intended PlexonCraft full-control deployment can instead use [Paper full-control](agent/examples/config-full-control.yml) and [Host full-control](host-agent/examples/host-config-full-control.json). Read [full local capability deployment](docs/FULL_CONTROL.md) before applying them.
+
+Paper remains authoritative for players, console, chat, player actions and plugins. Host remains authoritative for systemd lifecycle and the complete backup family. Both expose files/telemetry/audit/devices/settings only where real handlers exist. Host still rejects Paper-only scope families and Paper still does not claim `server.start`, `server.stop` or `server.restart`.
+
+`plugins.reload` is advertised only when at least one explicit plugin reload mapping is actually executable under the local console allow/deny policy. The supplied preset exposes only PlexonPanel's own `/plexonpanel reload` path; generic Bukkit/Paper `/reload` is not enabled.
+
+Existing protocol-3 credentials keep their original immutable scopes. If Access shows a local capability enabled but `This Device: Not granted`, revoke and re-pair that intended device. A newly paired Owner receives the current canonical `Scopes.ALL`; Owner still cannot override a local denial.
 
 ## Privacy-first player presence
 
@@ -23,20 +33,20 @@ Existing protocol-3 credentials retain their old scopes and are never silently u
 python3 scripts/package-release.py
 ```
 
-Expected outputs are `agent/build/libs/PlexonPanel-3.0.0.jar`, `host-agent/build/libs/plexonpanel-host-3.0.0.jar`, and these review assets in `build/release/`:
+Expected outputs are `agent/build/libs/PlexonPanel-3.0.1.jar`, `host-agent/build/libs/plexonpanel-host-3.0.1.jar`, and these review assets in `build/release/`:
 
-- `PlexonPanel-3.0.0.jar`
-- `plexonpanel-host-3.0.0.jar`
-- `PlexonPanel-3.0.0-examples.zip`
+- `PlexonPanel-3.0.1.jar`
+- `plexonpanel-host-3.0.1.jar`
+- `PlexonPanel-3.0.1-examples.zip`
 - `release-manifest.json`
 - `SHA256SUMS.txt`
 
 Install the Paper JAR only while the server is stopped. Start once to create configuration and identity, then configure the pinned relay WSS URL/public key. Verify `/plexonpanel status`, `/plexonpanel capabilities`, and `/plexonpanel diagnostics` before enabling mutations or history. Preserve the existing UUID, fingerprint, identity files, and `access/devices.json` during upgrades.
 
-The optional Host artifact is rebuilt at 3.0.0 because all Gradle modules share one bundle version; it gains no player-history capability and never reads Paper player data.
+If the Host companion is used, update its JAR to 3.0.1 in the same maintenance window and preserve its identity/configuration. Its authority remains separate from Paper; it never gains player, console, chat or plugin capabilities.
 
 ## Security boundary
 
-Every action intersects the immutable device grant with the executing agent's current local capability. Owner cannot override a local denial. New installations disable mutations, full console, chat sending, files, host lifecycle, backups, and persistent player history. No Firebase, telemetry database, inbound Minecraft administration port, generic shell, or RCON is required. Cloudflare retains identity/access/pairing coordination only—not telemetry, inventories, presence events, history results, file bodies, or action results.
+Every action intersects the immutable device grant with the executing agent's current local capability. Owner cannot override a local denial. Public defaults disable mutations, full console, chat sending, files, host lifecycle, backups, and persistent player history. Full-control examples still retain confirmations, audit, command allow/deny rules, path confinement, backup effective gating, service-name validation, bounded payloads/queues and signed transport. No Firebase, telemetry database, inbound Minecraft administration port, generic shell, or RCON is required.
 
 See [configuration](docs/CONFIGURATION.md), [operations](docs/OPERATIONS.md), [roles and scopes](docs/ACCESS.md), [protocol 3](docs/PROTOCOL.md), [migration and rollback](docs/MIGRATION.md), [privacy](PRIVACY.md), and [validation/release gates](docs/VALIDATION.md).
