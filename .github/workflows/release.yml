@@ -32,7 +32,8 @@ jobs:
           from pathlib import Path
           gates=json.loads(Path('docs/release-gates.json').read_text())
           required={
-            'paperDisposable','ubuntuArm64','cloudflareVercel','rclone',
+            'paperDisposable','fullCapabilityAccessMatrix','highRiskConfirmationAudit',
+            'ubuntuArm64','cloudflareVercel','rclone',
             'restoreCrashRecovery','stability30Minutes',
             'playerPresenceLifecycle','orphanSessionRecovery',
             'mixedVersionProtocol3','realtimeReconciliation',
