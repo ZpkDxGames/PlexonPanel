@@ -1,6 +1,8 @@
 # Configuration and operations
 
-[config.yml](../agent/src/main/resources/config.yml) is the authoritative Paper example. Reload local policy with `/plexonpanel reload`; restart for JAR upgrades. Never use generic Bukkit hot reload.
+[config.yml](../agent/src/main/resources/config.yml) is the authoritative conservative Paper example. Reload local policy with `/plexonpanel reload`; restart for JAR upgrades. Never use generic Bukkit hot reload.
+
+For the intended PlexonCraft full-capability deployment, use the separate [Paper full-control](../agent/examples/config-full-control.yml) and [Host full-control](../host-agent/examples/host-config-full-control.json) examples and review [FULL_CONTROL.md](FULL_CONTROL.md). Enabling these examples does not remove device scopes, confirmations, audit, console allow/deny rules, file confinement, backup gating or Paper/Host authority boundaries. After enabling new local capabilities, re-pair only devices that legitimately need missing immutable scopes.
 
 | Setting                                                                     | Effect                                                                               |
 | --------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
@@ -15,12 +17,18 @@
 | `remote-actions.enabled`                                                    | Master Paper mutation switch, including file writes and chat sends.                  |
 | `remote-actions.console.enabled/mode/allow/deny`                            | DISABLED, ALLOWLIST or ALLOWLIST_WITH_CONFIRMATION. Deny wins; no unrestricted mode. |
 | `remote-actions.players.<action>`                                           | Independent typed actions; op/deop also require Owner.                               |
-| `remote-actions.plugin-reload-commands`                                     | Exact plugin → fixed local command, checked by console policy.                       |
+| `remote-actions.plugin-reload-commands`                                     | Exact plugin → fixed local command, checked by console policy before it is advertised. |
 | `files.enabled/roots/permissions`                                           | Named roots, writable-root opt-in and independent action switches.                   |
 | `access.*`                                                                  | Local pairing role, 1–30-day grants, custom scopes, optional remote revoke.          |
 | `host.public-key`                                                           | Independent host key trusted by Paper.                                               |
 | `backups.enabled/allow-host-schedule`                                       | Save leases and separate unattended-backup authorization.                            |
 | `audit.retention-days`                                                      | 1–365 days; security auditing is mandatory despite the old enabled switch.           |
+
+## Full-control deployment checks
+
+Before production, confirm Paper reports its supported scopes only, Host reports its supported scopes only, and a newly paired Owner receives the current canonical scope set. Host must still reject `players.*`, `player.*`, `console.*`, `chat.*` and `plugins.*`; Paper must still leave `server.start`, `server.stop` and `server.restart` disabled. A blue/non-applicable matrix cell is correct when that agent has no handler.
+
+The Host runtime user needs explicit permission for the configured systemd unit. Full Host file capability stays under `serverRoot`; do not broaden it to `/`. Backups remain effective only when `backups.enabled` is true, and restore additionally requires `restoreEnabled`. Test stop/restart and restore only on disposable data or a planned maintenance target.
 
 ## Player presence lifecycle
 
@@ -59,6 +67,7 @@ Disconnect rejects pending actions with an unknown outcome and never resends the
 | Agent offline              | Paper and host are separate processes; host presence does not mean Paper runs.            |
 | Expired/revoked credential | Generate a fresh role-bound code locally.                                                 |
 | Capability unavailable     | Local policy, current scopes and correct source agent.                                    |
+| Local enabled / device denied | Revoke and re-pair that intended device; immutable grants are never edited in place.   |
 | History tab unavailable    | Distinguish an old grant, disabled `player-history.enabled`, and a pre-3.0 Paper agent.    |
 | Presence degraded          | `/plexonpanel diagnostics`; inspect directory safety/permissions, storage, and queue load. |
 | Roster reconciling         | Wait for the complete Paper snapshot; repeated manual refresh is limited to five seconds. |
