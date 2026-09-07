@@ -2,6 +2,14 @@
 
 The installable Paper default is [config.yml](../agent/src/main/resources/config.yml); the Host example is [host-config.json](../host-agent/examples/host-config.json). Local files are authoritative and no browser role—including Owner—can override them. The 3.0 loader copies only missing defaults into an existing configuration; it preserves every existing gateway, key, identity, access, stream, file, backup, and remote-action value.
 
+## 3.0.1 full-control examples
+
+PlexonCraft deployments that intentionally want every locally implemented capability can start from [Paper full-control](../agent/examples/config-full-control.yml) and [Host full-control](../host-agent/examples/host-config-full-control.json). These examples are deliberately separate from the conservative public defaults. They preserve protocol 3, immutable grants, command allow/deny policy, confirmations, audit, SafeFiles confinement, backup gating and the Paper/Host authority split. See [full local capability deployment](FULL_CONTROL.md) before applying either example.
+
+Paper's preset enables history, player location/address, full console/chat paths, all implemented player actions, file operations, backup coordination and device revoke. Host's preset enables its lifecycle, file, backup, audit/device/settings capabilities. Host still rejects Paper-only scopes and Paper still does not advertise Host lifecycle authority.
+
+`plugins.reload` is effective only when at least one explicitly configured reload command also passes the console allow/deny policy. The supplied preset exposes `plexonpanel reload` for PlexonPanel itself; it never exposes generic Bukkit/Paper `/reload`.
+
 ## Realtime telemetry
 
 | Key | Default | Accepted range / meaning |
