@@ -14,7 +14,7 @@ class HelloPayloadTest {
     HelloPayload payload =
         new HelloPayload(
             "PlexonPanel",
-            "2.0.0",
+            "3.0.0",
             3,
             "agent-public-key",
             "agent-fingerprint",
@@ -29,7 +29,7 @@ class HelloPayloadTest {
 
     JsonObject serialized = new Gson().toJsonTree(payload).getAsJsonObject();
 
-    assertEquals("2.0.0", serialized.get("pluginVersion").getAsString());
+    assertEquals("3.0.0", serialized.get("pluginVersion").getAsString());
     assertEquals("Paper 26.2", serialized.get("paperVersion").getAsString());
     assertFalse(serialized.has("agentVersion"));
     assertFalse(serialized.has("serverSoftware"));

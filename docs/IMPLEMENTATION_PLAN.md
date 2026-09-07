@@ -1,15 +1,15 @@
-# PlexonPanel 2.0 implementation
+# PlexonPanel 3.0.0 implementation
 
-Baselines: Paper `2e3bbf34c486cbc595b1d6b503281f4fc0c72f19`; dashboard `d1583af58017ee2aad2538a0ae5cec74f97e71b3`.
+Baselines: plugin `6317bfbba1990cd8a96852b03f8097a524f745db`; dashboard `98166f7d9b3851a1c96d160c2b5eefc3b231c58f`.
 
-1. Preserve the outbound Ed25519 transport, persistent UUID/key, bounded streams, local command policy, PlexonChats integration and database-less relay.
-2. Extract a shared Java protocol/security/files/audit module. Introduce explicit protocol 3, scoped device grants issued locally, replay/rate limits, capability negotiation and local revocation.
-3. Expand Paper telemetry and typed controls, local pairing commands and inventory GUI. Keep all sensitive capabilities disabled unless configured locally.
-4. Add a restricted path policy and atomic conflict-checked text operations. Deny secrets, identities, symlinks and active binaries. Keep file contents out of relay storage and audits.
-5. Add the optional non-root systemd companion, fixed service operations, local/rclone backups, retention and stopped-server restore with emergency snapshot/rollback.
-6. Integrate the responsive Next.js control room, scoped actions, actual completion results, file conflict/confirmation flows, audit and access views.
-7. Verify subsystem tests, builds and cross-language protocol fixtures; update migration/deployment/privacy documentation and CI.
-8. Push reviewable 2.0 branches. Merge, tag, release and deploy only after the specified end-to-end and ARM64 acceptance gates pass.
+1. Preserve protocol 3, the outbound Ed25519 transport, Paper/Host identity pins, existing grants, bounded queues, local policy and database-less relay design.
+2. Add Paper-authoritative join/leave events, honest reload/crash semantics and a bounded, private, disabled-by-default local presence journal.
+3. Split telemetry cadences, capture Bukkit values on the primary thread, send presence on a dedicated bounded worker and reconcile with complete snapshots.
+4. Add `players.history.view`, `players.history.list` and `players.snapshot.request` with independent Paper and relay enforcement, strict bounds and immutable existing grants.
+5. Route transient presence/history without Durable Object persistence, strip history-only fields for unauthorized devices and keep action results private.
+6. Integrate responsive Online/History player views, stable cursor pagination, truthful unavailable states, UTC tooltips and read-only offline details in Dashboard 2.2.0.
+7. Verify Java 25 on Ubuntu x64/ARM64, workerd relay smoke, dashboard tests/builds, reproducible artifacts and release metadata.
+8. Open paired review branches; merge, tag, release and deploy only after every live acceptance gate has approved evidence.
 
 ## Verification
 
