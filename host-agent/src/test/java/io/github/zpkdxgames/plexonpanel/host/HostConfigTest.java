@@ -20,6 +20,10 @@ class HostConfigTest {
     b.addProperty("retentionCount", 3);
     b.addProperty("intervalMinutes", 0);
     b.addProperty("maximumBytes", 1048576);
+    b.addProperty("restoreEnabled", false);
+    b.addProperty("rcloneExecutable", "/usr/bin/rclone");
+    b.addProperty("rcloneRemote", "");
+    b.addProperty("rcloneConfig", root.resolve("rclone.conf").toString());
     var c = new JsonObject();
     c.addProperty("serverId", UUID.randomUUID().toString());
     c.addProperty("serverName", "Test");
@@ -47,6 +51,85 @@ class HostConfigTest {
     return HostConfig.load(p);
   }
 
+  Set<String> hostSupported() {
+    return Set.of(
+        "telemetry.view",
+        "server.status",
+        "settings.view",
+        "audit.view.self",
+        "audit.view",
+        "devices.view",
+        "devices.revoke",
+        "server.start",
+        "server.stop",
+        "server.restart",
+        "files.list",
+        "files.read",
+        "files.download",
+        "files.write",
+        "files.create",
+        "files.rename",
+        "files.delete",
+        "files.upload",
+        "backup.view",
+        "backup.create",
+        "backup.download",
+        "backup.delete",
+        "backup.restore");
+  }
+
+  JsonObject fullControlConfig() throws Exception {
+    JsonObject c = config();
+    JsonObject caps = c.getAsJsonObject("capabilities");
+    for (String scope : hostSupported()) caps.addProperty(scope, true);
+    JsonObject backups = c.getAsJsonObject("backups");
+    backups.addProperty("enabled", true);
+    backups.addProperty("restoreEnabled", true);
+    return c;
+  }
+
+  @Test
+  void fullControlEnablesEveryHostSupportedScope() throws Exception {
+    HostConfig loaded = load(fullControlConfig());
+    Map<String, Boolean> capabilities = loaded.effectiveCapabilities();
+    for (String scope : hostSupported())
+      assertTrue(capabilities.get(scope), () -> "Expected Host capability: " + scope);
+  }
+
+  @Test
+  void hostStillRejectsPaperOnlyScopes() throws Exception {
+    for (String scope :
+        List.of(
+            "overview.view",
+            "players.view",
+            "player.op",
+            "chat.send",
+            "console.execute.allowed",
+            "plugins.reload")) {
+      JsonObject c = config();
+      c.getAsJsonObject("capabilities").addProperty(scope, true);
+      assertThrows(IllegalArgumentException.class, () -> load(c), scope);
+    }
+  }
+
+  @Test
+  void backupCapabilitiesRemainEffectivelyGated() throws Exception {
+    JsonObject disabled = fullControlConfig();
+    disabled.getAsJsonObject("backups").addProperty("enabled", false);
+    Map<String, Boolean> off = load(disabled).effectiveCapabilities();
+    for (String scope :
+        List.of(
+            "backup.view", "backup.create", "backup.download", "backup.delete", "backup.restore"))
+      assertFalse(off.get(scope), scope);
+
+    JsonObject noRestore = fullControlConfig();
+    noRestore.getAsJsonObject("backups").addProperty("restoreEnabled", false);
+    Map<String, Boolean> partial = load(noRestore).effectiveCapabilities();
+    assertTrue(partial.get("backup.create"));
+    assertTrue(partial.get("backup.view"));
+    assertFalse(partial.get("backup.restore"));
+  }
+
   @Test
   void defaultsCannotInvokeShellOrUnconfiguredServices() throws Exception {
     assertFalse(load(config()).effectiveCapabilities().get("server.start"));
@@ -67,7 +150,6 @@ class HostConfigTest {
     var b = c.getAsJsonObject("backups");
     b.addProperty("rcloneRemote", "offsite:plexon");
     b.addProperty("rcloneExecutable", "/bin/sh");
-    b.addProperty("rcloneConfig", root.resolve("rclone.conf").toString());
     assertThrows(IllegalArgumentException.class, () -> load(c));
   }
 
