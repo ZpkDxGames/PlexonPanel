@@ -13,6 +13,8 @@ import java.util.*;
  * Local authority shared by Paper and the optional same-host companion. Contains no bearer tokens.
  */
 public final class DeviceRegistry {
+  private static final String SHARED_FILE_MODE = "rw-rw----";
+
   public record Device(
       String deviceId,
       String name,
@@ -188,14 +190,36 @@ public final class DeviceRegistry {
       State next = operation.apply(previous);
       if (!Files.exists(path) || next != previous) {
         AtomicFiles.writeUtf8(path, gson.toJson(next));
-        try {
-          Files.setPosixFilePermissions(path, PosixFilePermissions.fromString("rw-rw----"));
-          Files.setPosixFilePermissions(lock, PosixFilePermissions.fromString("rw-rw----"));
-        } catch (UnsupportedOperationException ignoredPermissions) {
-          /* Non-POSIX development platform. */
-        }
+        enforceSharedFileMode(path);
+        enforceSharedFileMode(lock);
       }
       return next;
+    }
+  }
+
+  /**
+   * Paper and Host intentionally access the same registry as different Linux users. A shared file
+   * may therefore already have the required 0660 mode while the current process is not its owner.
+   * Linux permits group read/write in that case but rejects chmod with EPERM. Accept that ownership
+   * hand-off only when the existing POSIX mode is already exactly the required private shared mode.
+   */
+  private static void enforceSharedFileMode(Path target) throws IOException {
+    try {
+      Files.setPosixFilePermissions(target, PosixFilePermissions.fromString(SHARED_FILE_MODE));
+    } catch (UnsupportedOperationException ignoredPermissions) {
+      /* Non-POSIX development platform. */
+    } catch (IOException permissionError) {
+      try {
+        String actual =
+            PosixFilePermissions.toString(
+                Files.getPosixFilePermissions(target, LinkOption.NOFOLLOW_LINKS));
+        if (!SHARED_FILE_MODE.equals(actual)) throw permissionError;
+      } catch (UnsupportedOperationException ignoredPermissions) {
+        throw permissionError;
+      } catch (IOException verificationError) {
+        permissionError.addSuppressed(verificationError);
+        throw permissionError;
+      }
     }
   }
 }
