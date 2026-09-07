@@ -29,6 +29,7 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.logging.Level;
 import java.util.logging.Logger;
+import java.util.regex.Pattern;
 
 /**
  * Main-thread-safe facade around the thread-confined presence journal. Bukkit listeners only update
@@ -51,6 +52,8 @@ public final class PlayerPresenceService implements AutoCloseable {
   private static final int WRITER_QUEUE_CAPACITY = 1024;
   private static final Set<String> QUERY_FIELDS =
       Set.of("query", "status", "from", "to", "cursor", "limit");
+  private static final Pattern UTC_INSTANT =
+      Pattern.compile("^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,9})?Z$");
 
   private final Path pluginDataDirectory;
   private final PanelSettings.PlayerHistory settings;
@@ -110,10 +113,13 @@ public final class PlayerPresenceService implements AutoCloseable {
   public void start(Collection<ObservedPlayer> currentlyOnline) {
     if (closed.get() || !started.compareAndSet(false, true)) return;
     Collection<ObservedPlayer> captured = List.copyOf(currentlyOnline);
+    Map<String, LiveSession> initialSessions = new HashMap<>();
     for (ObservedPlayer player : captured) {
       validateObserved(player);
       String sessionId = UUID.randomUUID().toString();
-      live.put(player.uuid(), new LiveSession(sessionId, player.sessionStartedAt(), player.name()));
+      LiveSession session = new LiveSession(sessionId, player.sessionStartedAt(), player.name());
+      initialSessions.put(player.uuid(), session);
+      live.put(player.uuid(), session);
     }
     if (!settings.enabled()) {
       initialized.complete(null);
@@ -128,13 +134,16 @@ public final class PlayerPresenceService implements AutoCloseable {
             summaryCache.clear();
             summaryCache.putAll(next.summaries());
             for (Map.Entry<String, PresenceJournal.OpenSession> entry : recovered.entrySet()) {
+              LiveSession initial = initialSessions.get(entry.getKey());
               live.computeIfPresent(
                   entry.getKey(),
                   (ignored, current) ->
-                      new LiveSession(
-                          entry.getValue().sessionId(),
-                          entry.getValue().startedAt(),
-                          entry.getValue().name()));
+                      current.equals(initial)
+                          ? new LiveSession(
+                              entry.getValue().sessionId(),
+                              entry.getValue().startedAt(),
+                              entry.getValue().name())
+                          : current);
             }
             initialized.complete(null);
           } catch (Exception error) {
@@ -221,6 +230,9 @@ public final class PlayerPresenceService implements AutoCloseable {
     if (!QUERY_FIELDS.containsAll(parameters.keySet()))
       throw new IllegalArgumentException("Unknown players.history.list parameter");
     String text = JsonFields.optional(parameters, "query", "", 64).strip();
+    for (int i = 0; i < text.length(); i++)
+      if (Character.isISOControl(text.charAt(i)))
+        throw new IllegalArgumentException("Invalid query");
     String statusText = JsonFields.optional(parameters, "status", "ALL", 16);
     PresenceJournal.Status status;
     try {
@@ -241,14 +253,16 @@ public final class PlayerPresenceService implements AutoCloseable {
                 settings.defaultPageSize(),
                 1,
                 settings.maximumPageSize());
-    if (!settings.enabled())
-      return Map.of(
-          "entries", List.of(),
-          "nextCursor", "",
-          "hasMore", false,
-          "boundedWindow", false,
-          "capturedAt", clock.instant().toString(),
-          "historyEnabled", false);
+    if (!settings.enabled()) {
+      Map<String, Object> disabled = new LinkedHashMap<>();
+      disabled.put("entries", List.of());
+      disabled.put("nextCursor", null);
+      disabled.put("hasMore", false);
+      disabled.put("boundedWindow", false);
+      disabled.put("capturedAt", clock.instant().toString());
+      disabled.put("historyEnabled", false);
+      return Collections.unmodifiableMap(disabled);
+    }
     awaitInitialization();
     PresenceJournal.Page page =
         call(
@@ -365,6 +379,8 @@ public final class PlayerPresenceService implements AutoCloseable {
     String value = JsonFields.optional(parameters, key, "", 40);
     if (value.isBlank()) return null;
     try {
+      if (!UTC_INSTANT.matcher(value).matches())
+        throw new IllegalArgumentException("Invalid " + key);
       return Instant.parse(value);
     } catch (RuntimeException invalid) {
       throw new IllegalArgumentException("Invalid " + key, invalid);

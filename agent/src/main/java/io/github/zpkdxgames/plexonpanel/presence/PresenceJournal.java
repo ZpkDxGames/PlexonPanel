@@ -37,6 +37,7 @@ import java.util.Objects;
 import java.util.PriorityQueue;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.TimeUnit;
 import java.util.regex.Pattern;
 
 /**
@@ -72,6 +73,7 @@ public final class PresenceJournal {
   private static final int MAX_RECORD_BYTES = 4096;
   private static final int MAX_CURSOR_BYTES = 512;
   private static final int MAX_JOURNAL_FILES = 512;
+  private static final long QUERY_TIME_BUDGET_NANOS = TimeUnit.SECONDS.toNanos(5);
   private static final Pattern JOURNAL_NAME =
       Pattern.compile("presence-[0-9]{4}-[0-9]{2}-[0-9]{2}(?:-[0-9]{1,20})?\\.jsonl");
   private static final Comparator<PresenceRecord> EVENT_ORDER =
@@ -196,7 +198,11 @@ public final class PresenceJournal {
   public synchronized boolean appendAndApply(
       PresenceRecord record, Long totalPlayTimeMillis, String firstSeenAt) throws IOException {
     validateRecord(record);
-    Instant.parse(firstSeenAt);
+    Instant firstSeen = Instant.parse(firstSeenAt);
+    if (firstSeen.isAfter(Instant.parse(record.sessionStartedAt()).plusSeconds(5)))
+      throw new IllegalArgumentException("Invalid first seen time");
+    if (totalPlayTimeMillis != null && totalPlayTimeMillis < 0)
+      throw new IllegalArgumentException("Invalid play time");
     if (eventIds.contains(record.eventId())) return false;
     if (!summaries.containsKey(record.uuid())
         && summaries.size() >= settings.maximumPlayerSummaries())
@@ -273,9 +279,16 @@ public final class PresenceJournal {
     Comparator<PresenceRecord> ascending = EVENT_ORDER;
     PriorityQueue<PresenceRecord> newest = new PriorityQueue<>(ascending);
     long budget = settings.queryByteBudget();
+    long scannedRecords = 0;
+    long deadline = System.nanoTime() + QUERY_TIME_BUDGET_NANOS;
     List<Path> paths = journalFilesNewestFirst();
     if (paths.size() >= MAX_JOURNAL_FILES) bounded = true;
+    scan:
     for (Path path : paths) {
+      if (System.nanoTime() >= deadline) {
+        bounded = true;
+        break;
+      }
       long bytes = Files.size(path);
       if (bytes > budget) {
         bounded = true;
@@ -285,7 +298,15 @@ public final class PresenceJournal {
       try (BufferedReader reader = Files.newBufferedReader(path, StandardCharsets.UTF_8)) {
         String line;
         while ((line = reader.readLine()) != null) {
+          if (System.nanoTime() >= deadline) {
+            bounded = true;
+            break scan;
+          }
           if (line.isBlank()) continue;
+          if (++scannedRecords > settings.maximumEvents()) {
+            bounded = true;
+            break scan;
+          }
           if (line.getBytes(StandardCharsets.UTF_8).length > MAX_RECORD_BYTES) {
             bounded = true;
             continue;
@@ -390,7 +411,8 @@ public final class PresenceJournal {
       boundedOnLoad = true;
     }
     eventIds.clear();
-    records.forEach(record -> rememberEvent(record.eventId()));
+    for (int i = records.size() - 1; i >= 0; i--)
+      rememberEvent(records.get(i).eventId());
     eventCount = records.size();
     return records;
   }
@@ -465,31 +487,20 @@ public final class PresenceJournal {
     if (excess <= 0) return;
     List<Path> paths = journalFilesOldestFirst();
     for (Path path : paths) {
-      List<String> valid = new ArrayList<>();
-      try (BufferedReader reader = Files.newBufferedReader(path, StandardCharsets.UTF_8)) {
-        String line;
-        while ((line = reader.readLine()) != null) {
-          if (line.isBlank() || line.getBytes(StandardCharsets.UTF_8).length > MAX_RECORD_BYTES)
-            continue;
-          try {
-            PresenceRecord record = gson.fromJson(line, PresenceRecord.class);
-            validateRecord(record);
-            valid.add(gson.toJson(record));
-          } catch (RuntimeException ignored) {
-          }
-        }
-      }
+      List<PresenceRecord> valid = readValidRecords(path);
       if (valid.size() <= excess && paths.size() > 1) {
         Files.delete(path);
-        eventCount -= valid.size();
+        forgetEvents(valid);
         excess -= valid.size();
       } else {
         int remove = Math.min(excess, valid.size());
         String replacement =
-            valid.subList(remove, valid.size()).stream().map(value -> value + "\n").reduce("", String::concat);
+            valid.subList(remove, valid.size()).stream()
+                .map(value -> gson.toJson(value) + "\n")
+                .reduce("", String::concat);
         AtomicFiles.writeUtf8(path, replacement);
         setPermissions(path, "rw-------");
-        eventCount -= remove;
+        forgetEvents(valid.subList(0, remove));
         break;
       }
       if (excess <= 0) break;
@@ -501,7 +512,11 @@ public final class PresenceJournal {
         LocalDate.ofInstant(clock.instant(), ZoneOffset.UTC).minusDays(settings.retentionDays() - 1L);
     for (Path path : journalFilesOldestFirst()) {
       LocalDate day = journalDay(path);
-      if (day != null && day.isBefore(oldest)) Files.delete(path);
+      if (day != null && day.isBefore(oldest)) {
+        List<PresenceRecord> removed = eventCount == 0 ? List.of() : readValidRecords(path);
+        Files.delete(path);
+        forgetEvents(removed);
+      }
     }
     lastCleanupDay = LocalDate.ofInstant(clock.instant(), ZoneOffset.UTC);
   }
@@ -659,6 +674,29 @@ public final class PresenceJournal {
       iterator.next();
       iterator.remove();
     }
+  }
+
+  private List<PresenceRecord> readValidRecords(Path path) throws IOException {
+    List<PresenceRecord> valid = new ArrayList<>();
+    try (BufferedReader reader = Files.newBufferedReader(path, StandardCharsets.UTF_8)) {
+      String line;
+      while ((line = reader.readLine()) != null) {
+        if (line.isBlank() || line.getBytes(StandardCharsets.UTF_8).length > MAX_RECORD_BYTES)
+          continue;
+        try {
+          PresenceRecord record = gson.fromJson(line, PresenceRecord.class);
+          validateRecord(record);
+          valid.add(record);
+        } catch (RuntimeException ignored) {
+        }
+      }
+    }
+    return valid;
+  }
+
+  private void forgetEvents(Collection<PresenceRecord> records) {
+    records.forEach(record -> eventIds.remove(record.eventId()));
+    eventCount = Math.max(0, eventCount - records.size());
   }
 
   private static PlayerPresenceSummary mergeSummary(

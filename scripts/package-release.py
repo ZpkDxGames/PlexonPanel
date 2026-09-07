@@ -52,10 +52,15 @@ artifacts.append(archive)
 commit = subprocess.check_output(
     ["git", "rev-parse", "HEAD"], cwd=root, text=True
 ).strip()
-dirty = bool(
-    subprocess.check_output(
-        ["git", "status", "--porcelain"], cwd=root, text=True
-    ).strip()
+# Generated build products are intentionally untracked and excluded by the package allowlist.
+# Only a tracked source modification makes a release checkout dirty.
+dirty = (
+    subprocess.run(
+        ["git", "diff-index", "--quiet", "HEAD", "--"],
+        cwd=root,
+        check=False,
+    ).returncode
+    != 0
 )
 manifest = out / "release-manifest.json"
 manifest.write_text(

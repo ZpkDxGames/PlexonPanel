@@ -114,6 +114,29 @@ class PresenceJournalTest {
   }
 
   @Test
+  void reloadKeepsNewestRetainedEventIdsIdempotent() throws Exception {
+    MutableClock clock = new MutableClock(START);
+    PresenceJournal first = new PresenceJournal(temporary, settings(2, 100, 8192, 30), clock);
+    first.initialize(List.of());
+    PresenceRecord older = joined(UUID.randomUUID().toString(), "Older", START);
+    PresenceRecord newer = joined(UUID.randomUUID().toString(), "Newer", START.plusSeconds(1));
+    first.appendAndApply(older, 0L);
+    first.appendAndApply(newer, 0L);
+
+    PresenceJournal reloaded = new PresenceJournal(temporary, settings(2, 100, 8192, 30), clock);
+    reloaded.initialize(
+        List.of(
+            new ObservedPlayer(
+                older.uuid(), "Older", older.sessionStartedAt(), START.toString(), 0L),
+            new ObservedPlayer(
+                newer.uuid(), "Newer", newer.sessionStartedAt(), START.toString(), 0L)));
+    clock.set(START.plusSeconds(2));
+    reloaded.appendAndApply(
+        joined(UUID.randomUUID().toString(), "Newest", clock.instant()), 0L);
+    assertFalse(reloaded.appendAndApply(newer, 0L));
+  }
+
+  @Test
   void truncatedTailIsBoundedWithoutDiscardingCompleteRecords() throws Exception {
     MutableClock clock = new MutableClock(START);
     PresenceJournal journal = new PresenceJournal(temporary, settings(100, 100, 8192, 30), clock);
@@ -168,6 +191,11 @@ class PresenceJournalTest {
           files.anyMatch(
               path -> path.getFileName().toString().startsWith("presence-2026-09-01")));
     }
+    PresenceJournal.Page retained =
+        journal.query(
+            new PresenceJournal.Query("", PresenceJournal.Status.ALL, null, null, null, 10));
+    assertEquals(1, retained.entries().size());
+    assertEquals(later.eventId(), retained.entries().getFirst().eventId());
   }
 
   @Test
@@ -206,6 +234,12 @@ class PresenceJournalTest {
             null,
             PresenceTermination.OPEN);
     assertThrows(IllegalArgumentException.class, () -> journal.appendAndApply(invalid, 0L));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> journal.appendAndApply(valid, -1L, START.toString()));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> journal.appendAndApply(valid, 0L, START.plusSeconds(10).toString()));
     assertEquals(
         1,
         journal
@@ -272,6 +306,15 @@ class PresenceJournalTest {
     assertEquals(
         PlayerPresenceService.PersistenceState.DISABLED,
         noHistory.joined(id, "NoDisk", START, START, 0L).persistenceState());
+    assertNull(noHistory.query(new com.google.gson.JsonObject()).get("nextCursor"));
+    assertEquals(
+        false, noHistory.query(new com.google.gson.JsonObject()).get("historyEnabled"));
+    com.google.gson.JsonObject controlQuery = new com.google.gson.JsonObject();
+    controlQuery.addProperty("query", "bad\nquery");
+    assertThrows(IllegalArgumentException.class, () -> noHistory.query(controlQuery));
+    com.google.gson.JsonObject offsetDate = new com.google.gson.JsonObject();
+    offsetDate.addProperty("from", "2026-09-01T12:00:00+00:00");
+    assertThrows(IllegalArgumentException.class, () -> noHistory.query(offsetDate));
     noHistory.close();
     assertFalse(Files.exists(temporary.resolve("disabled").resolve("presence")));
 
