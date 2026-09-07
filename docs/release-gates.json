@@ -5,6 +5,14 @@
       "passed": false,
       "evidence": ""
     },
+    "fullCapabilityAccessMatrix": {
+      "passed": false,
+      "evidence": ""
+    },
+    "highRiskConfirmationAudit": {
+      "passed": false,
+      "evidence": ""
+    },
     "ubuntuArm64": {
       "passed": false,
       "evidence": ""
