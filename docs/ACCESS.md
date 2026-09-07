@@ -2,6 +2,12 @@
 
 The local operator chooses a role when issuing a five-minute one-use code. Built-in roles are immutable. Effective permission intersects current grant with local capability at both relay and agent. Owner never overrides policy. Custom roles use access.roles.<Name>.scopes; unknown scopes fail startup. Existing grant scopes are immutable: revoke and re-pair to change them. Op/deop and restore require literal Owner even for custom scope sets.
 
+## 3.0.1 local authority
+
+The full-control presets make every currently implemented capability locally enable-able without pretending both agents have the same authority. Paper owns players, console, chat, player actions and plugins. Host does not advertise those scopes. Host owns `server.start`, `server.stop`, `server.restart` and the complete backup family. Paper exposes `server.status` and may expose `backup.create` only for Paper save/flush coordination. Files, telemetry, audit, devices and settings are available on each agent where handlers exist. See [full local capability deployment](FULL_CONTROL.md) for the complete matrix.
+
+If Access shows a local capability enabled but `This Device: Not granted`, the device credential is stale for that scope. Do not mutate it in place. Revoke the intended device and pair it again with the intended role. A newly issued Owner grant contains the current canonical `Scopes.ALL`; an existing Owner grant keeps exactly the scopes it originally received.
+
 | Scope                     | Observer | Moderator | Administrator | Owner |
 | ------------------------- | :------: | :-------: | :-----------: | :---: |
 | `audit.view`              |    —     |     —     |       ✓       |   ✓   |
