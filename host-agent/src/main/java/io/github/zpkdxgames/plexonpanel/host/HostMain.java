@@ -17,6 +17,9 @@ import java.util.concurrent.atomic.*;
 import java.util.concurrent.locks.ReentrantLock;
 
 public final class HostMain {
+  private static final long FAST_TELEMETRY_MILLIS = 250L;
+  private static final long SERVICE_STATUS_SECONDS = 5L;
+
   private HostMain() {}
 
   public static void main(String[] args) throws Exception {
@@ -78,6 +81,7 @@ public final class HostMain {
             Set.of("server"));
     SystemMetrics metrics = new SystemMetrics(root);
     ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
+    ScheduledExecutorService telemetryScheduler = Executors.newSingleThreadScheduledExecutor();
     ThreadPoolExecutor scheduledBackups =
         new ThreadPoolExecutor(
             1,
@@ -199,11 +203,21 @@ public final class HostMain {
             connection::authenticated,
             config.serverId());
     AtomicLong sentRevision = new AtomicLong(-1);
-    Runnable snapshot =
+    Runnable fastSnapshot =
         () -> {
           if (!connection.authenticated()) return;
           try {
-            connection.send("telemetry.system", metrics.collect(), MessagePriority.TELEMETRY);
+            var sample = new LinkedHashMap<>(metrics.collect());
+            sample.put("sourceIntervalMillis", FAST_TELEMETRY_MILLIS);
+            connection.send("telemetry.system", sample, MessagePriority.TELEMETRY);
+          } catch (Exception e) {
+            System.err.println("Host telemetry unavailable: " + e.getClass().getSimpleName());
+          }
+        };
+    Runnable serviceSnapshot =
+        () -> {
+          if (!connection.authenticated()) return;
+          try {
             var status = new HashMap<>(service.status());
             status.put("paperConnected", paper.get());
             status.put("recoveryRequired", backups.recoveryRequired());
@@ -211,7 +225,7 @@ public final class HostMain {
             var state = devices.snapshot();
             if (sentRevision.getAndSet(state.revision()) != state.revision()) engine.syncAccess();
           } catch (Exception e) {
-            System.err.println("Host snapshot unavailable: " + e.getClass().getSimpleName());
+            System.err.println("Host service snapshot unavailable: " + e.getClass().getSimpleName());
           }
         };
     connection.handlers(
@@ -228,9 +242,13 @@ public final class HostMain {
         },
         () -> {
           sentRevision.set(-1);
-          scheduler.execute(snapshot);
+          telemetryScheduler.execute(fastSnapshot);
+          scheduler.execute(serviceSnapshot);
         });
-    scheduler.scheduleWithFixedDelay(snapshot, 5, 5, TimeUnit.SECONDS);
+    telemetryScheduler.scheduleWithFixedDelay(
+        fastSnapshot, FAST_TELEMETRY_MILLIS, FAST_TELEMETRY_MILLIS, TimeUnit.MILLISECONDS);
+    scheduler.scheduleWithFixedDelay(
+        serviceSnapshot, SERVICE_STATUS_SECONDS, SERVICE_STATUS_SECONDS, TimeUnit.SECONDS);
     if (config.backups().enabled() && config.backups().intervalMinutes() > 0) {
       scheduler.scheduleWithFixedDelay(
           () -> {
@@ -321,6 +339,7 @@ public final class HostMain {
                   leases.close();
                   transfers.close();
                   connection.close();
+                  telemetryScheduler.shutdownNow();
                   scheduler.shutdownNow();
                 }));
     connection.start();
