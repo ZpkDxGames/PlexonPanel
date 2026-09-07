@@ -1,5 +1,6 @@
 package io.github.zpkdxgames.plexonpanel.config;
 
+import io.github.zpkdxgames.plexonpanel.action.CommandPolicy;
 import io.github.zpkdxgames.plexonpanel.files.*;
 import io.github.zpkdxgames.plexonpanel.security.Scopes;
 import java.nio.file.*;
@@ -108,11 +109,19 @@ public record ControlPolicy(
     Map<String, String> reloads = new TreeMap<>();
     var reloadConfig = config.getConfigurationSection("remote-actions.plugin-reload-commands");
     if (reloadConfig != null)
-      for (String key : reloadConfig.getKeys(false))
-        reloads.put(key, reloadConfig.getString(key, ""));
+      for (String key : reloadConfig.getKeys(false)) {
+        String command = reloadConfig.getString(key, "").strip();
+        if (!command.isBlank()) reloads.put(key, command);
+      }
+    CommandPolicy commandPolicy =
+        new CommandPolicy(
+            settings.remoteActions().console().allowPatterns(),
+            settings.remoteActions().console().denyPatterns());
+    boolean executableReload =
+        reloads.values().stream().anyMatch(command -> commandPolicy.evaluate(command).allowed());
     c.put(
         "plugins.reload",
-        remote && !reloads.isEmpty() && Boolean.TRUE.equals(c.get("console.execute.allowed")));
+        remote && executableReload && Boolean.TRUE.equals(c.get("console.execute.allowed")));
     return new ControlPolicy(
         Map.copyOf(c),
         Collections.unmodifiableMap(roles),
