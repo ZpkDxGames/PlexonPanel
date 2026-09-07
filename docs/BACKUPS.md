@@ -1,6 +1,6 @@
 # Backups and restore
 
-Install the host according to [HOST_AGENT](HOST_AGENT.md) before enabling backup capabilities.
+Install the host according to [HOST_AGENT](HOST_AGENT.md) before enabling backup capabilities. The 3.0.1 [full-control Host example](../host-agent/examples/host-config-full-control.json) enables the complete backup family, but effective capability still depends on the backup subsystem gates described below.
 
 ## Backups
 
@@ -14,14 +14,14 @@ Rclone uses only fixed `/usr/bin/rclone`, configured remote:path and a protected
 
 ## Restore and recovery
 
-Restore requires literal Owner, host backup.restore, local restoreEnabled, a stopped service and disconnected Paper. The UI obtains a one-minute device/archive-bound nonce, requires the typed configured server name and separate final confirmation.
+Restore requires literal Owner, `backup.restore`, local `restoreEnabled`, a stopped service and disconnected Paper. A configured `backup.restore: true` capability is still effectively false when `backups.enabled` or `restoreEnabled` is false. The UI obtains a one-minute device/archive-bound nonce, requires the typed configured server name and separate final confirmation.
 
 The host verifies SHA-256, takes an emergency backup, validates bounded ZIP entries, stages on the server filesystem and journals original target existence before renames. Traversal, links, protected targets and expansion-limit violations fail. Plugin folders and root JARs are individual targets; panel identity stays protected. Restore never starts Paper automatically. Emergency archives cannot be deleted by the browser.
 
 On recovery-required, leave Paper stopped, inspect local journal/logs, repair storage/permissions and run:
 
 ```sh
-sudo -u plexonpanel-host /usr/bin/java -jar /opt/plexonpanel-host/plexonpanel-host-3.0.0.jar /etc/plexonpanel-host/host-config.json --recover-restore
+sudo -u plexonpanel-host /usr/bin/java -jar /opt/plexonpanel-host/plexonpanel-host-3.0.1.jar /etc/plexonpanel-host/host-config.json --recover-restore
 ```
 
 Recovery restores saved originals and removes new targets; repeating it after interruption preserves originals already recovered. Malformed/unknown journals fail closed. Never delete a journal to bypass recovery. Validate files and gameplay before deliberately starting Paper. Actual ARM64/systemd/rclone interruption tests remain release gates.

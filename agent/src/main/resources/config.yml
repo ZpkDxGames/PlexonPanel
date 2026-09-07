@@ -1,4 +1,4 @@
-# PlexonPanel 3.0.0 — local policy is authoritative
+# PlexonPanel 3.0.1 — local policy is authoritative
 # The database-less relay is disabled until its URL and public key are configured.
 
 gateway:

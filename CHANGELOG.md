@@ -1,5 +1,16 @@
 # Changelog
 
+## 3.0.1 — review candidate, live acceptance pending
+
+- Added explicit Paper and Host full-control examples for the intended PlexonCraft deployment while keeping conservative public defaults unchanged.
+- Enabled the full truthful Paper capability set through local policy: history/location/address, console/chat, all implemented player actions, plugin config/reload, SafeFiles operations, backup coordination, device revoke, audit and settings.
+- Enabled the full truthful Host capability set through configuration: telemetry, lifecycle, files, complete backup family, audit, devices and settings; Host still rejects Paper-only scopes.
+- Fixed `plugins.reload` capability advertisement so at least one configured reload command must actually pass the same local console allow/deny policy used at execution time. The supplied preset exposes only `plexonpanel reload`, never generic `/reload`.
+- Added Paper policy tests, Host authority tests and backup effective-gating tests. Existing protocol tests continue to enforce immutable grants, Owner/local-policy intersection and unknown-scope rejection.
+- Preserved protocol 3, Ed25519 signing/pinning, immutable device grants, high-risk confirmations, audit, file confinement, service-name validation, backup gating, bounded queues/payloads and replay/clock protections.
+- Added full-capability migration/access/operations documentation, including the required revoke/re-pair path when local policy is enabled but an existing device lacks a scope.
+- Bumped coordinated Paper/Host bundle metadata and gated build/release assets to 3.0.1. Stable publication remains blocked on fresh live acceptance evidence.
+
 ## 3.0.0 — review candidate, live acceptance pending
 
 - Added Paper-authoritative `JOINED`/`LEFT` presence observations with per-session IDs, honest unknown-disconnect semantics, bounded daily/size-rotated JSONL storage, atomic summaries, retention cleanup, stable cursor pagination, and history disabled by default.

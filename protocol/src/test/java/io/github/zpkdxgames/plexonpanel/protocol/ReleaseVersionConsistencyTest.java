@@ -10,7 +10,7 @@ import java.util.regex.Pattern;
 import org.junit.jupiter.api.Test;
 
 class ReleaseVersionConsistencyTest {
-  private static final String EXPECTED_VERSION = "3.0.0";
+  private static final String EXPECTED_VERSION = "3.0.1";
 
   @Test
   void releaseMetadataAndArtifactNamesAgreeWithTheRootVersion() throws Exception {

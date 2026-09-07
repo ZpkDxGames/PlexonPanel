@@ -42,6 +42,13 @@ class DeviceRegistryTest {
   }
 
   @Test
+  void newlyIssuedOwnerReceivesCanonicalAllScopes() throws Exception {
+    var r = registry();
+    var owner = grant(r, "Owner");
+    assertEquals(Scopes.ALL, owner.scopes());
+  }
+
+  @Test
   void observerCannotBorrowModeratorScopes() throws Exception {
     var r = registry();
     var observer = grant(r, "Observer");

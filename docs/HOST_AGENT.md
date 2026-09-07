@@ -1,6 +1,6 @@
 # Optional Linux host companion
 
-The host runs Java 25 as a dedicated non-root Linux user, with no inbound listener. It owns an independent Ed25519 identity and can operate only locally configured paths, executable and exact systemd unit. The 3.0.0 artifact is a coordinated rebuild; it adds no player-history capability and never scans Paper player data. The example intentionally disables all mutations/files/backups and rejects its unconfigured placeholders.
+The host runs Java 25 as a dedicated non-root Linux user, with no inbound listener. It owns an independent Ed25519 identity and can operate only locally configured paths, executable and exact systemd unit. Version 3.0.1 adds an explicit [full-control Host example](../host-agent/examples/host-config-full-control.json) while preserving the conservative [public example](../host-agent/examples/host-config.json). Host still has no player, console, chat or plugin authority and never scans Paper player data.
 
 ## Ubuntu 24.04 installation
 
@@ -15,13 +15,17 @@ Use a disposable server first. Adjust the example user, paths and `plexoncraft.s
 7. Initialize as the host user:
 
 ```sh
-sudo -u plexonpanel-host /usr/bin/java -jar /opt/plexonpanel-host/plexonpanel-host-3.0.0.jar --init /var/lib/plexonpanel-host
+sudo -u plexonpanel-host /usr/bin/java -jar /opt/plexonpanel-host/plexonpanel-host-3.0.1.jar --init /var/lib/plexonpanel-host
 ```
 
 Copy only its printed public key to Paper `host.public-key`; copy the existing Paper UUID to host config. Both use the relay public key and WSS `/v1/agent` URL. Reload Paper locally.
 
 8. Review/install the example service and polkit rule as root-owned files. The rule permits only start/stop/restart of exactly `plexoncraft.service` for the host user, with no wildcard or shell. Keep companion lifetime independent from Paper.
-9. Reload systemd and start the host locally. Validate monitoring first, then selectively enable capabilities. Restart completes only after service startup and authenticated Paper reconnection.
+9. Reload systemd and start the host locally. Validate monitoring first, then selectively enable capabilities or intentionally apply the full-control example. Restart completes only after service startup and authenticated Paper reconnection.
+
+## Full local Host capabilities
+
+The 3.0.1 full-control example enables telemetry, server status/start/stop/restart, all implemented file operations, the complete backup family, audit, devices and settings. Effective backup capability still requires `backups.enabled`; restore additionally requires `restoreEnabled`. HostConfig continues rejecting Paper-only scope families. File operations remain confined under `serverRoot`, and lifecycle actions remain bound to the validated exact systemd service name.
 
 ## Backups
 
@@ -42,7 +46,7 @@ The host verifies SHA-256, takes an emergency backup, validates bounded ZIP entr
 On recovery-required, leave Paper stopped, inspect local journal/logs, repair storage/permissions and run:
 
 ```sh
-sudo -u plexonpanel-host /usr/bin/java -jar /opt/plexonpanel-host/plexonpanel-host-3.0.0.jar /etc/plexonpanel-host/host-config.json --recover-restore
+sudo -u plexonpanel-host /usr/bin/java -jar /opt/plexonpanel-host/plexonpanel-host-3.0.1.jar /etc/plexonpanel-host/host-config.json --recover-restore
 ```
 
-Recovery restores saved originals and removes new targets; repeating it after interruption preserves originals already recovered. Malformed/unknown journals fail closed. Never delete a journal to bypass recovery. Validate files and gameplay before deliberately starting Paper. Actual ARM64/systemd/rclone interruption tests remain release gates.
+Recovery restores saved originals and removes new targets; repeating it after interruption preserves originals already recovered. Malformed/unknown journals fail closed. Never delete a journal to bypass recovery. Validate files and gameplay before deliberately starting Paper. Actual systemd/rclone interruption tests remain release gates.

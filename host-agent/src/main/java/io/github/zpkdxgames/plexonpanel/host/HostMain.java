@@ -28,7 +28,7 @@ public final class HostMain {
     }
     if (args.length < 1 || args.length > 2)
       throw new IllegalArgumentException(
-          "Usage: java -jar plexonpanel-host-3.0.0.jar <host-config.json> [--recover-restore]");
+          "Usage: java -jar plexonpanel-host.jar <host-config.json> [--recover-restore]");
     if (!System.getProperty("os.name").equals("Linux")
         || ProcessHandle.current().info().user().orElse("root").equals("root"))
       throw new SecurityException("Run the host companion as a dedicated non-root Linux user");

@@ -1,0 +1,136 @@
+# PlexonPanel 3.0.1 — PlexonCraft full local capability preset
+#
+# This file intentionally enables every capability that the Paper agent can
+# truthfully execute. It is NOT the public default. Copy only the settings you
+# intend to use into plugins/PlexonPanel/config.yml and configure the relay and
+# Host public keys before enabling their connections.
+#
+# Protocol 3, immutable device grants, local capability checks, confirmation,
+# audit, path confinement, command allow/deny rules, and signed transport remain
+# mandatory. Existing paired devices do not gain newly added scopes; re-pair an
+# intended Owner device after applying this policy when its grant is stale.
+
+gateway:
+  enabled: false
+  url: ""
+  public-key: ""
+  require-signed-messages: true
+  connect-timeout-seconds: 10
+  heartbeat-seconds: 15
+  reconnect:
+    initial-delay-seconds: 2
+    maximum-delay-seconds: 60
+  queue-capacity: 256
+
+telemetry:
+  enabled: true
+  server-interval-ticks: 40
+  player-snapshot-interval-seconds: 30
+  system-interval-seconds: 5
+  world-interval-seconds: 10
+  plugin-interval-seconds: 60
+  send-player-presence-events: true
+  suppress-unchanged-inventories: true
+  include-player-location: true
+  include-player-address: true
+
+player-history:
+  enabled: true
+  retention-days: 30
+  maximum-events: 100000
+  maximum-player-summaries: 50000
+  maximum-journal-file-bytes: 8388608
+  query-byte-budget: 33554432
+  default-page-size: 50
+  maximum-page-size: 100
+  shutdown-flush-seconds: 5
+
+console:
+  stream-enabled: true
+  errors-enabled: true
+  poll-interval-millis: 250
+  batch-interval-millis: 300
+  batch-size: 100
+  ring-buffer-lines: 1000
+  maximum-line-bytes: 16384
+  redact-patterns:
+    - "(?i)(password|passwd|secret|token|api[-_ ]?key)\\s*[=:]\\s*\\S+"
+    - "(?i)(authorization:\\s*bearer)\\s+\\S+"
+
+chat:
+  stream-enabled: true
+  capture-vanilla-global: true
+  capture-plexonchats-global: true
+  allow-dashboard-send: true
+  allow-minimessage-from-dashboard: true
+  dashboard-prefix: "<dark_gray>[</dark_gray><gradient:#7c3aed:#22d3ee>PlexonPanel</gradient><dark_gray>]</dark_gray> <gray><actor>:</gray> "
+
+remote-actions:
+  enabled: true
+  maximum-clock-skew-seconds: 30
+  console:
+    enabled: true
+    mode: ALLOWLIST_WITH_CONFIRMATION
+    # Keep this explicit. Full capability means the path is available under
+    # local policy; it does not mean every arbitrary Minecraft command is safe.
+    allow:
+      - "^(tps|mspt)(\\s.*)?$"
+      - "^paper version$"
+      - "^spark (health|tps)(\\s.*)?$"
+      - "^plexonpanel reload$"
+    deny:
+      - "^(stop|restart|reload|op|deop)(\\s.*)?$"
+      - "^(lp|luckperms|pex)(\\s.*)?$"
+      - ".*(password|secret|token|api[-_]?key).*"
+  players:
+    message: true
+    kick: true
+    ban: true
+    unban: true
+    whitelist: true
+    teleport: true
+    gamemode: true
+    heal: true
+    feed: true
+    kill: true
+    op: true
+  # Only explicitly verified, locally allowlisted operations belong here.
+  # This maps the PlexonPanel entry to its own safe policy reload command and
+  # deliberately does NOT expose generic Bukkit/Paper /reload.
+  plugin-reload-commands:
+    PlexonPanel: "plexonpanel reload"
+
+audit:
+  retention-days: 30
+
+access:
+  default-pair-role: Observer
+  device-credential-days: 30
+  allow-dashboard-revoke: true
+  roles: {}
+
+files:
+  enabled: true
+  roots:
+    server:
+      path: /opt/plexoncraft/server
+      read: true
+      write: true
+  permissions:
+    list: true
+    read: true
+    download: true
+    write: true
+    create: true
+    rename: true
+    delete: true
+    upload: true
+
+host:
+  # Set this to the separately generated Host companion public key before the
+  # Paper/Host coordination channel is enabled in production.
+  public-key: ""
+
+backups:
+  enabled: true
+  allow-host-schedule: true
