@@ -24,9 +24,13 @@ gateway:
 
 telemetry:
   enabled: true
-  server-interval-ticks: 40
+  # Lightweight TPS/MSPT health snapshots at 4 Hz so Dashboard 3.0's
+  # browser-local 250/500/1000/2000 ms display cadences have fresh source data.
+  server-interval-ticks: 5
   player-snapshot-interval-seconds: 30
-  system-interval-seconds: 5
+  # JVM/process system telemetry is intentionally slower than the lightweight
+  # Paper health snapshot; Host publishes machine telemetry at 250 ms.
+  system-interval-seconds: 1
   world-interval-seconds: 10
   plugin-interval-seconds: 60
   send-player-presence-events: true
