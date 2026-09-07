@@ -39,7 +39,7 @@ public record PanelSettings(
 
         Telemetry telemetry = new Telemetry(
             config.getBoolean("telemetry.enabled", true),
-            bounded(config.getLong("telemetry.server-interval-ticks", 40), 20, 72_000, "telemetry.server-interval-ticks"),
+            bounded(config.getLong("telemetry.server-interval-ticks", 40), 5, 72_000, "telemetry.server-interval-ticks"),
             bounded(config.getLong("telemetry.player-snapshot-interval-seconds", 30), 5, 3600, "telemetry.player-snapshot-interval-seconds"),
             bounded(config.getLong("telemetry.system-interval-seconds", 5), 1, 3600, "telemetry.system-interval-seconds"),
             bounded(config.getLong("telemetry.world-interval-seconds", 10), 1, 3600, "telemetry.world-interval-seconds"),
