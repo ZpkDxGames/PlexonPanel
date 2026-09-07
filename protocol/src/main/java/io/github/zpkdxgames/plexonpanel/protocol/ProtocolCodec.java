@@ -31,7 +31,10 @@ public final class ProtocolCodec {
   }
 
   ProtocolCodec(Clock clock) {
-    this.gson = new GsonBuilder().disableHtmlEscaping().create();
+    // Protocol bodies use explicit nulls for nullable wire fields. In particular,
+    // players.presence JOINED events carry null session end/duration values and
+    // the relay validates that distinction from a malformed non-null value.
+    this.gson = new GsonBuilder().disableHtmlEscaping().serializeNulls().create();
     this.clock = clock;
   }
 

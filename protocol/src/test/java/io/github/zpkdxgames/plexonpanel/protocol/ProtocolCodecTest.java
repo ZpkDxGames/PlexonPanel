@@ -10,6 +10,7 @@ import java.security.KeyPairGenerator;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
@@ -29,6 +30,24 @@ class ProtocolCodecTest {
     assertEquals(42, decoded.body().get("value").getAsInt());
     assertEquals(NOW, codec.timestamp(decoded.envelope()));
     assertTrue(codec.verify(decoded.envelope(), identity.keyPair().getPublic()));
+  }
+
+  @Test
+  void signedBodiesPreserveExplicitNullsRequiredByWireContracts() throws Exception {
+    DeviceIdentity identity = identity();
+    ProtocolCodec codec = new ProtocolCodec(Clock.fixed(NOW, ZoneOffset.UTC));
+    Map<String, Object> body = new LinkedHashMap<>();
+    body.put("state", "JOINED");
+    body.put("sessionEndedAt", null);
+    body.put("sessionDurationMillis", null);
+
+    DecodedMessage decoded =
+        codec.decode(codec.encodeSigned("players.presence", body, identity));
+
+    assertTrue(decoded.body().has("sessionEndedAt"));
+    assertTrue(decoded.body().get("sessionEndedAt").isJsonNull());
+    assertTrue(decoded.body().has("sessionDurationMillis"));
+    assertTrue(decoded.body().get("sessionDurationMillis").isJsonNull());
   }
 
   @Test
