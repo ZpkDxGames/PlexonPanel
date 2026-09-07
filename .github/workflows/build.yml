@@ -25,10 +25,19 @@ jobs:
           java-version: "25"
       - uses: gradle/actions/setup-gradle@v6
       - run: ./gradlew --no-daemon clean test javadoc :agent:jar :host-agent:jar
-      - run: python3 scripts/package-release.py
+      - name: Package and verify clean provenance
+        run: |
+          python3 scripts/package-release.py
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          manifest=json.loads(Path('build/release/release-manifest.json').read_text())
+          assert manifest['sourceCommit'] == os.environ['GITHUB_SHA']
+          assert manifest['workingTreeModified'] is False
+          PY
       - uses: actions/upload-artifact@v7
         with:
-          name: PlexonPanel-2.0.0-${{ matrix.os }}
+          name: PlexonPanel-3.0.0-${{ matrix.os }}
           path: build/release/
           if-no-files-found: error
           retention-days: 14

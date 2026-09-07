@@ -208,7 +208,7 @@ public final class BackupManager {
               hash,
               true,
               offsite,
-              "Paper 26.2 / PlexonPanel 2.0.0",
+              "Paper 26.2 / PlexonPanel 3.0.0",
               (System.nanoTime() - started) / 1000000,
               device == null ? "Local schedule" : device.name(),
               automatic,

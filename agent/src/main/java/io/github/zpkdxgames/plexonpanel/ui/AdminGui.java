@@ -52,7 +52,7 @@ public final class AdminGui implements Listener {
         "status",
         List.of(
             "Relay: " + r.gateway().state(),
-            "Protocol: 3 · Version: 2.0.0",
+            "Protocol: 3 · Version: 3.0.0",
             "Identity: " + plugin.identity().fingerprint().substring(0, 17)));
     button(
         m,

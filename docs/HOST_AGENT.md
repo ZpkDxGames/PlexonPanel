@@ -1,6 +1,6 @@
 # Optional Linux host companion
 
-The host runs Java 25 as a dedicated non-root Linux user, with no inbound listener. It owns an independent Ed25519 identity and can operate only locally configured paths, executable and exact systemd unit. The example intentionally disables all mutations/files/backups and rejects its unconfigured placeholders.
+The host runs Java 25 as a dedicated non-root Linux user, with no inbound listener. It owns an independent Ed25519 identity and can operate only locally configured paths, executable and exact systemd unit. The 3.0.0 artifact is a coordinated rebuild; it adds no player-history capability and never scans Paper player data. The example intentionally disables all mutations/files/backups and rejects its unconfigured placeholders.
 
 ## Ubuntu 24.04 installation
 
@@ -15,7 +15,7 @@ Use a disposable server first. Adjust the example user, paths and `plexoncraft.s
 7. Initialize as the host user:
 
 ```sh
-sudo -u plexonpanel-host /usr/bin/java -jar /opt/plexonpanel-host/plexonpanel-host-2.0.0.jar --init /var/lib/plexonpanel-host
+sudo -u plexonpanel-host /usr/bin/java -jar /opt/plexonpanel-host/plexonpanel-host-3.0.0.jar --init /var/lib/plexonpanel-host
 ```
 
 Copy only its printed public key to Paper `host.public-key`; copy the existing Paper UUID to host config. Both use the relay public key and WSS `/v1/agent` URL. Reload Paper locally.
@@ -42,7 +42,7 @@ The host verifies SHA-256, takes an emergency backup, validates bounded ZIP entr
 On recovery-required, leave Paper stopped, inspect local journal/logs, repair storage/permissions and run:
 
 ```sh
-sudo -u plexonpanel-host /usr/bin/java -jar /opt/plexonpanel-host/plexonpanel-host-2.0.0.jar /etc/plexonpanel-host/host-config.json --recover-restore
+sudo -u plexonpanel-host /usr/bin/java -jar /opt/plexonpanel-host/plexonpanel-host-3.0.0.jar /etc/plexonpanel-host/host-config.json --recover-restore
 ```
 
 Recovery restores saved originals and removes new targets; repeating it after interruption preserves originals already recovered. Malformed/unknown journals fail closed. Never delete a journal to bypass recovery. Validate files and gameplay before deliberately starting Paper. Actual ARM64/systemd/rclone interruption tests remain release gates.

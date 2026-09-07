@@ -1,4 +1,4 @@
-# PlexonPanel 2.0.0 — local policy is authoritative
+# PlexonPanel 3.0.0 — local policy is authoritative
 # The database-less relay is disabled until its URL and public key are configured.
 
 gateway:
@@ -18,11 +18,31 @@ gateway:
 
 telemetry:
   enabled: true
-  server-interval-ticks: 100
-  system-interval-seconds: 10
+  # Server health is captured on Paper's main thread, then serialized off-thread.
+  # Keep this at 20 ticks or higher. Raise it if load testing shows an MSPT impact.
+  server-interval-ticks: 40
+  player-snapshot-interval-seconds: 30
+  system-interval-seconds: 5
+  world-interval-seconds: 10
   plugin-interval-seconds: 60
+  send-player-presence-events: true
+  suppress-unchanged-inventories: true
   include-player-location: false
   include-player-address: false
+
+# Persistent player presence is personal-data collection and is disabled by default.
+# When disabled, authorized devices can still receive the current online roster and
+# realtime join/leave deltas, but no presence journal is written.
+player-history:
+  enabled: false
+  retention-days: 30
+  maximum-events: 100000
+  maximum-player-summaries: 50000
+  maximum-journal-file-bytes: 8388608
+  query-byte-budget: 33554432
+  default-page-size: 50
+  maximum-page-size: 100
+  shutdown-flush-seconds: 5
 
 console:
   stream-enabled: false
@@ -74,7 +94,7 @@ remote-actions:
   plugin-reload-commands: {}
 
 audit:
-  # Security auditing is mandatory in 2.0, regardless of the old enabled switch.
+  # Security auditing remains mandatory, regardless of the legacy enabled switch.
   retention-days: 30
 
 access:

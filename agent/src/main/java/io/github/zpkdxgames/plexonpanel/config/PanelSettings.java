@@ -10,6 +10,7 @@ import java.util.Objects;
 public record PanelSettings(
     Gateway gateway,
     Telemetry telemetry,
+    PlayerHistory playerHistory,
     Console console,
     Chat chat,
     RemoteActions remoteActions,
@@ -38,11 +39,36 @@ public record PanelSettings(
 
         Telemetry telemetry = new Telemetry(
             config.getBoolean("telemetry.enabled", true),
-            bounded(config.getLong("telemetry.server-interval-ticks", 100), 20, 72_000, "telemetry.server-interval-ticks"),
-            bounded(config.getLong("telemetry.system-interval-seconds", 10), 1, 3600, "telemetry.system-interval-seconds"),
+            bounded(config.getLong("telemetry.server-interval-ticks", 40), 20, 72_000, "telemetry.server-interval-ticks"),
+            bounded(config.getLong("telemetry.player-snapshot-interval-seconds", 30), 5, 3600, "telemetry.player-snapshot-interval-seconds"),
+            bounded(config.getLong("telemetry.system-interval-seconds", 5), 1, 3600, "telemetry.system-interval-seconds"),
+            bounded(config.getLong("telemetry.world-interval-seconds", 10), 1, 3600, "telemetry.world-interval-seconds"),
             bounded(config.getLong("telemetry.plugin-interval-seconds", 60), 10, 86_400, "telemetry.plugin-interval-seconds"),
+            config.getBoolean("telemetry.send-player-presence-events", true),
+            config.getBoolean("telemetry.suppress-unchanged-inventories", true),
             config.getBoolean("telemetry.include-player-location", false),
             config.getBoolean("telemetry.include-player-address", false)
+        );
+
+        int maximumPageSize = bounded(config.getInt("player-history.maximum-page-size", 100), 1, 100,
+            "player-history.maximum-page-size");
+        int defaultPageSize = bounded(config.getInt("player-history.default-page-size", 50), 1,
+            maximumPageSize, "player-history.default-page-size");
+        PlayerHistory playerHistory = new PlayerHistory(
+            config.getBoolean("player-history.enabled", false),
+            bounded(config.getInt("player-history.retention-days", 30), 1, 3650, "player-history.retention-days"),
+            bounded(config.getInt("player-history.maximum-events", 100_000), 100, 1_000_000,
+                "player-history.maximum-events"),
+            bounded(config.getInt("player-history.maximum-player-summaries", 50_000), 100, 1_000_000,
+                "player-history.maximum-player-summaries"),
+            bounded(config.getLong("player-history.maximum-journal-file-bytes", 8_388_608L), 65_536L,
+                67_108_864L, "player-history.maximum-journal-file-bytes"),
+            bounded(config.getLong("player-history.query-byte-budget", 33_554_432L), 1_048_576L,
+                268_435_456L, "player-history.query-byte-budget"),
+            defaultPageSize,
+            maximumPageSize,
+            bounded(config.getInt("player-history.shutdown-flush-seconds", 5), 1, 30,
+                "player-history.shutdown-flush-seconds")
         );
 
         Console console = new Console(
@@ -88,7 +114,7 @@ public record PanelSettings(
             bounded(config.getInt("audit.retention-days", 30), 1, 3650, "audit.retention-days")
         );
 
-        return new PanelSettings(gateway, telemetry, console, chat, remoteActions, audit);
+        return new PanelSettings(gateway, telemetry, playerHistory, console, chat, remoteActions, audit);
     }
 
     private static URI validateGatewayUri(String value) {
@@ -149,10 +175,27 @@ public record PanelSettings(
     public record Telemetry(
         boolean enabled,
         long serverIntervalTicks,
+        long playerSnapshotIntervalSeconds,
         long systemIntervalSeconds,
+        long worldIntervalSeconds,
         long pluginIntervalSeconds,
+        boolean sendPlayerPresenceEvents,
+        boolean suppressUnchangedInventories,
         boolean includePlayerLocation,
         boolean includePlayerAddress
+    ) {
+    }
+
+    public record PlayerHistory(
+        boolean enabled,
+        int retentionDays,
+        int maximumEvents,
+        int maximumPlayerSummaries,
+        long maximumJournalFileBytes,
+        long queryByteBudget,
+        int defaultPageSize,
+        int maximumPageSize,
+        int shutdownFlushSeconds
     ) {
     }
 

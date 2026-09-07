@@ -9,6 +9,7 @@ import io.github.zpkdxgames.plexonpanel.console.ConsoleStreamService;
 import io.github.zpkdxgames.plexonpanel.control.ControlEngine;
 import io.github.zpkdxgames.plexonpanel.identity.DeviceIdentity;
 import io.github.zpkdxgames.plexonpanel.identity.PairingState;
+import io.github.zpkdxgames.plexonpanel.presence.PlayerPresenceService;
 import io.github.zpkdxgames.plexonpanel.security.DeviceRegistry;
 import io.github.zpkdxgames.plexonpanel.telemetry.TelemetryService;
 import io.github.zpkdxgames.plexonpanel.transport.GatewayClient;
@@ -22,6 +23,7 @@ public final class AgentRuntime implements AutoCloseable {
   private final ChatStreamService chat;
   private final ConsoleStreamService console;
   private final TelemetryService telemetry;
+  private final PlayerPresenceService presence;
   private final ControlEngine actions;
   private final ControlPolicy policy;
   private final DeviceRegistry devices;
@@ -50,8 +52,12 @@ public final class AgentRuntime implements AutoCloseable {
         new GatewayClient(plugin, settings, identity, pairingState, policy, devices, localAudit);
     this.chat = new ChatStreamService(plugin, settings.chat(), gateway);
     this.console = new ConsoleStreamService(plugin, settings.console(), gateway, serverRoot);
-    this.telemetry = new TelemetryService(plugin, settings.telemetry(), gateway, serverRoot);
-    PaperActions backend = new PaperActions(plugin, policy, settings, chat);
+    this.presence =
+        new PlayerPresenceService(
+            plugin.getDataFolder().toPath(), settings.playerHistory(), plugin.getLogger());
+    this.telemetry =
+        new TelemetryService(plugin, settings.telemetry(), gateway, serverRoot, presence);
+    PaperActions backend = new PaperActions(plugin, policy, settings, chat, presence, telemetry);
     this.actions =
         new ControlEngine(
             devices,
@@ -113,6 +119,14 @@ public final class AgentRuntime implements AutoCloseable {
     return console;
   }
 
+  public TelemetryService telemetry() {
+    return telemetry;
+  }
+
+  public PlayerPresenceService presence() {
+    return presence;
+  }
+
   @Override
   public void close() {
     if (!closed.compareAndSet(false, true)) {
@@ -120,8 +134,9 @@ public final class AgentRuntime implements AutoCloseable {
     }
     backupCoordinator.close();
     actions.close();
-    gateway.close();
     telemetry.close();
+    presence.close();
+    gateway.close();
     console.close();
     chat.close();
   }

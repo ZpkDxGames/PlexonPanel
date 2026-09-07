@@ -1,18 +1,18 @@
 # Privacy and data handling
 
-Agents use outbound TLS to the configured relay; Vercel serves the browser UI. No Firebase, telemetry database or server-side Vercel credentials are used.
+Agents use outbound TLS to the configured relay; Vercel serves the browser UI. No Firebase, telemetry database, or server-side Vercel credential is used.
 
-| Location               | Data and lifetime                                                                                                                    |
-| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
-| Paper                  | Private identity, current device registry, mandatory local audit retained 1–365 configured days.                                     |
-| Host                   | Independent private identity, local audit, archives/metadata and recovery journal.                                                   |
-| Cloudflare             | Public identity pins, current grants/generation/revision, short-lived pairing/rate coordination; no persisted telemetry/file bodies. |
-| Browser memory         | Bounded streams/history and transient file/action responses.                                                                         |
-| Browser IndexedDB      | Per-server credentials until expiry/forget; sanitized cache for one hour with 30-minute charts.                                      |
-| Optional rclone remote | Explicit archives under separately managed provider retention.                                                                       |
+| Location | Data and lifetime |
+| --- | --- |
+| Paper | Private identity, immutable device registry, mandatory privileged-operation audit, and—only when explicitly enabled—a bounded player-presence journal and summary under `presence/`. |
+| Host | Independent private identity, local audit, archives/metadata, and recovery journal. It stores no player-presence history. |
+| Cloudflare | Public identity pins, current grants/generation/revision, and short-lived pairing/rate/pending-routing coordination. No persisted telemetry, inventory, presence body, history result, file body, or action result. |
+| Browser memory | Bounded live streams, roster, queried history, and transient file/action responses for the open workspace. |
+| Browser IndexedDB | Per-server credentials until expiry/forget and a sanitized one-hour cache with bounded performance charts. Online players and detailed player history are excluded. |
+| Optional rclone remote | Explicit backup archives under separately managed provider retention; no automatic presence export. |
 
-The trusted relay necessarily sees transient routed data; TLS does not make it end-to-end encrypted against the relay. Provider request metadata is subject to the operator's account policy. Relay observability is disabled; never log payloads.
+`player-history.enabled` defaults to `false` because login/logout/session retention is personal-data collection. When enabled, Paper records UUID, plain account name, observed UTC instants, generated event/session IDs, bounded termination state, known durations, and optional Paper play-time summary. It does not record address, location, chat, console, kick text, display-name formatting, secrets, or tokens. Unknown logout time and duration remain null rather than being guessed.
 
-Full console/chat and player location/address are separate local/scope opt-ins. Sensitive player fields, file bodies and action outputs are excluded from persistent browser cache. Audit excludes command text, message text, file bodies and secrets. Redaction cannot identify every plugin-specific secret; restrict verbose streams.
+Paper removes journal files outside the configured retention period and bounds event, player-summary, file-size, scan-byte, result, and worker-queue growth. Protect the `presence/` directory like other private server records. For rollback, archive it privately rather than combining it with the security audit or publishing it as release evidence.
 
-Use a private browser profile on a trusted device. A stolen bearer credential remains usable within remaining scopes and local policy until expiry/revocation. Forget clears browser data; revoke lost devices locally. Protect identity backups outside dashboard transfers and release artifacts.
+The trusted relay necessarily sees transient routed data; TLS is not end-to-end encryption against the relay. Player location/address, full console/chat, and history remain separately scoped and locally gated. Use a trusted browser profile, revoke lost devices locally, and keep raw logs, player records, credentials, and production configuration out of issues and release artifacts.

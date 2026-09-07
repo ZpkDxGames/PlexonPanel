@@ -21,6 +21,7 @@ public record ControlPolicy(
     for (String s : Scopes.ALL) c.put(s, false);
     for (String s : List.of("overview.view", "telemetry.view", "players.view", "plugins.view"))
       c.put(s, settings.telemetry().enabled());
+    c.put("players.history.view", settings.playerHistory().enabled());
     c.put(
         "players.location",
         settings.telemetry().enabled() && settings.telemetry().includePlayerLocation());

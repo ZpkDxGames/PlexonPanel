@@ -6,7 +6,9 @@ import com.google.gson.JsonObject;
 import io.github.zpkdxgames.plexonpanel.chat.ChatStreamService;
 import io.github.zpkdxgames.plexonpanel.config.*;
 import io.github.zpkdxgames.plexonpanel.console.LogRedactor;
+import io.github.zpkdxgames.plexonpanel.presence.PlayerPresenceService;
 import io.github.zpkdxgames.plexonpanel.security.DeviceRegistry;
+import io.github.zpkdxgames.plexonpanel.telemetry.TelemetryService;
 import io.papermc.paper.ban.BanListType;
 import java.time.Instant;
 import java.util.*;
@@ -22,14 +24,24 @@ public final class PaperActions {
   private final JavaPlugin plugin;
   private final ControlPolicy policy;
   private final ChatStreamService chat;
+  private final PlayerPresenceService presence;
+  private final TelemetryService telemetry;
   private final CommandPolicy commands;
   private final LogRedactor redactor;
+  private final Map<String, Long> snapshotRequests = new HashMap<>();
 
   public PaperActions(
-      JavaPlugin plugin, ControlPolicy policy, PanelSettings settings, ChatStreamService chat) {
+      JavaPlugin plugin,
+      ControlPolicy policy,
+      PanelSettings settings,
+      ChatStreamService chat,
+      PlayerPresenceService presence,
+      TelemetryService telemetry) {
     this.plugin = plugin;
     this.policy = policy;
     this.chat = chat;
+    this.presence = presence;
+    this.telemetry = telemetry;
     commands =
         new CommandPolicy(
             settings.remoteActions().console().allowPatterns(),
@@ -39,6 +51,8 @@ public final class PaperActions {
 
   public Map<String, Object> execute(String action, JsonObject p, DeviceRegistry.Device device)
       throws Exception {
+    if (action.equals("players.history.list")) return presence.query(p);
+    if (action.equals("players.snapshot.request")) return requestPlayerSnapshot(p, device);
     var future = new CompletableFuture<Map<String, Object>>();
     plugin
         .getServer()
@@ -84,6 +98,20 @@ public final class PaperActions {
       future.cancel(false);
       throw e;
     }
+  }
+
+  private synchronized Map<String, Object> requestPlayerSnapshot(
+      JsonObject parameters, DeviceRegistry.Device device) {
+    if (parameters.size() != 0)
+      throw new IllegalArgumentException("players.snapshot.request takes no parameters");
+    long now = System.currentTimeMillis();
+    snapshotRequests.entrySet().removeIf(entry -> entry.getValue() <= now - 5000L);
+    Long previous = snapshotRequests.get(device.deviceId());
+    if (previous != null && previous > now - 5000L) throw new SecurityException("RATE_LIMITED");
+    snapshotRequests.put(device.deviceId(), now);
+    TelemetryService.SnapshotRequest request = telemetry.requestPlayerSnapshot();
+    if (!request.queued()) throw new SecurityException("BUSY");
+    return Map.of("queued", true, "coalesced", request.coalesced());
   }
 
   private Map<String, Object> onMain(String action, JsonObject p, DeviceRegistry.Device device)

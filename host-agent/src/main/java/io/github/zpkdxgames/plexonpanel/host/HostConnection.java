@@ -159,7 +159,7 @@ public final class HostConnection implements MessageSink, AutoCloseable {
         ws.request(1);
         Map<String, Object> hello = new LinkedHashMap<>();
         hello.put("agentName", "PlexonPanel Host");
-        hello.put("pluginVersion", "2.0.0");
+        hello.put("pluginVersion", "3.0.0");
         hello.put("protocolVersion", 3);
         hello.put("publicKey", identity.publicKeyBase64());
         hello.put("publicKeyFingerprint", identity.fingerprint());

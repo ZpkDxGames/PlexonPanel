@@ -40,6 +40,7 @@ The local operator chooses a role when issuing a five-minute one-use code. Built
 | `player.unban`            |    —     |     ✓     |       ✓       |   ✓   |
 | `player.whitelist`        |    —     |     ✓     |       ✓       |   ✓   |
 | `players.address`         |    —     |     —     |       —       |   ✓   |
+| `players.history.view`    |    —     |     ✓     |       ✓       |   ✓   |
 | `players.location`        |    —     |     —     |       —       |   ✓   |
 | `players.view`            |    ✓     |     ✓     |       ✓       |   ✓   |
 | `plugins.config`          |    —     |     —     |       ✓       |   ✓   |
@@ -52,4 +53,6 @@ The local operator chooses a role when issuing a five-minute one-use code. Built
 | `settings.view`           |    ✓     |     ✓     |       ✓       |   ✓   |
 | `telemetry.view`          |    ✓     |     ✓     |       ✓       |   ✓   |
 
-The local registry is plugins/PlexonPanel/access/devices.json with an adjacent lock, at most 64 devices, 1–30-day expiry and last authorized activity (throttled to one minute). Revoke-all increments generation. Devices cannot grant themselves more scopes. Action aliases are defined in Scopes.ACTIONS and mirrored in TypeScript; chunks use the parent download scope.
+`players.history.view` is usable only while `player-history.enabled` is true on Paper. Owner cannot override that setting. Existing device records are immutable and do not acquire the new scope during upgrade; revoke and re-pair only a device whose operator should gain history. Live current-roster deltas remain under `players.view`.
+
+The local registry is `plugins/PlexonPanel/access/devices.json` with an adjacent lock, at most 64 devices, 1–30-day expiry and last authorized activity (throttled to one minute). Revoke-all increments generation. Devices cannot grant themselves more scopes. Action aliases are defined in `Scopes.ACTIONS` and mirrored in TypeScript; chunks use the parent download scope.

@@ -233,18 +233,18 @@ public final class GatewayClient implements MessageSink, AutoCloseable {
     if (outbound.offer(message)) {
       return true;
     }
-    if (priority == MessagePriority.CRITICAL && evictNonCritical()) {
+    if (priority != MessagePriority.TELEMETRY && evictLowerPriority(priority)) {
       return outbound.offer(message);
     }
     droppedMessages.incrementAndGet();
     return false;
   }
 
-  private boolean evictNonCritical() {
+  private boolean evictLowerPriority(MessagePriority priority) {
     Optional<OutboundMessage> candidate =
         outbound.stream()
-            .filter(message -> message.priority() != MessagePriority.CRITICAL)
-            .findFirst();
+            .filter(message -> message.priority().ordinal() < priority.ordinal())
+            .min(java.util.Comparator.comparingInt(message -> message.priority().ordinal()));
     return candidate.filter(outbound::remove).isPresent();
   }
 

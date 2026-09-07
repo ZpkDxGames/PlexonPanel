@@ -58,7 +58,38 @@ class DeviceRegistryTest {
                         Map.of("player.kick", true)))
             .getMessage());
     assertFalse(observer.scopes().contains("players.address"));
+    assertFalse(observer.scopes().contains("players.history.view"));
     assertFalse(observer.scopes().contains("files.write"));
+  }
+
+  @Test
+  void historyRoleAndCapabilityRulesDoNotUpgradeExistingGrants() throws Exception {
+    var r = registry();
+    for (String role : List.of("Moderator", "Administrator", "Owner"))
+      assertTrue(Scopes.ROLES.get(role).contains("players.history.view"));
+    assertFalse(Scopes.ROLES.get("Observer").contains("players.history.view"));
+    assertEquals("players.history.view", Scopes.required("players.history.list"));
+    assertEquals("players.view", Scopes.required("players.snapshot.request"));
+
+    Set<String> oldModeratorScopes =
+        Scopes.ROLES.get("Moderator").stream()
+            .filter(scope -> !scope.equals("players.history.view"))
+            .collect(java.util.stream.Collectors.toUnmodifiableSet());
+    String request = UUID.randomUUID().toString();
+    r.begin(request, "Moderator", oldModeratorScopes, now.plusSeconds(60), 1);
+    var existing = r.consume(request, UUID.randomUUID().toString(), "Existing moderator");
+    assertFalse(existing.scopes().contains("players.history.view"));
+    assertEquals(
+        "SCOPE_DENIED",
+        assertThrows(
+                SecurityException.class,
+                () ->
+                    r.authorize(
+                        existing.deviceId(),
+                        r.snapshot().generation(),
+                        "players.history.view",
+                        Map.of("players.history.view", true)))
+            .getMessage());
   }
 
   @Test

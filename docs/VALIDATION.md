@@ -1,26 +1,40 @@
 # Validation and release acceptance
 
-Status: review candidate; production release is blocked on live gates. Source baselines: Paper `2e3bbf34c486cbc595b1d6b503281f4fc0c72f19`, dashboard `d1583af58017ee2aad2538a0ae5cec74f97e71b3`.
+Status: PlexonPanel 3.0.0 review candidate; stable publication is blocked on live gates. Source baselines were plugin `6317bfbba1990cd8a96852b03f8097a524f745db` and dashboard `98166f7d9b3851a1c96d160c2b5eefc3b231c58f`.
 
-## Local evidence
+## Automated evidence
 
-The completed local checks passed **53 Java tests** (44 shared protocol, 3 Paper, 6 host), **27 relay tests** and **22 dashboard/client/tool tests**. Lint and TypeScript passed. Next 16.3.1 built only `/` and the standard not-found route. Java/Javadoc and both JARs built; Javadoc reports missing-comment warnings. Actual local workerd passed v3 authentication, one-use pairing, browser session, bounded telemetry, scoped denial and live revocation. Environment: Linux x64, Temurin 25.0.4.1, Gradle 9.7.0 and Node 24.19.0. Final branch CI rechecks recovered source.
+An intermediate branch build at plugin commit `5b537bdc8f25d2cd10bf66a174b5e8e1d46e60a2` passed the repository's clean Gradle test, Javadoc, Paper JAR, Host JAR, and packaging gate on both GitHub-hosted Ubuntu 24.04 x64 and ARM64 ([workflow run 34058130416](https://github.com/ZpkDxGames/PlexonPanel/actions/runs/34058130416)). Both architecture artifacts were byte-identical:
 
-Visual QA used synthetic server-rendered instances of actual components/styles at desktop, 768-pixel tablet and 390-pixel phone widths. Cards/navigation/tables were reviewed. This was fixture review, not authenticated live-server E2E. Temporary QA routes/datasets were removed before production build.
+| Asset | SHA-256 |
+| --- | --- |
+| `PlexonPanel-3.0.0.jar` | `d6149334101c21dbf9f71bc6b012d41efae05217ecf84ac52a7e2454e65fb2a8` |
+| `plexonpanel-host-3.0.0.jar` | `e605c21a6c120258ea86f21d72dd1f52c7c77b7b689b1a8f0e86abf351534040` |
+
+The JAR manifests reported implementation version 3.0.0 and the external release manifest reported product 3.0.0, protocol 3, and Java 25. The final branch revision must rerun this same matrix; hashes must be recorded again if Java sources change.
+
+The paired dashboard workspace passed ESLint, application/relay TypeScript, a Next 16.3.1 production build, **29 relay tests**, and **34 dashboard/client/UI tests**. Local workerd smoke is automated simulation only, not deployed or paired-Paper acceptance.
+
+Automated presence coverage includes first join, normal quit/duration, kick/quit de-duplication, rapid reconnect, duplicate event rejection, reload reconciliation, shutdown behavior, orphan unknown-disconnect, name changes, UTC/null semantics, truncated tails, daily/size rotation, retention and index/event bounds, unsafe paths/permissions, atomic summary writes, bounded flush/queue pressure, privacy exclusions, scopes/capabilities, stable pagination, relay filtering/private routing/no-storage, and dashboard snapshot/delta/session/cache behavior.
 
 ## Live gates still pending
 
-| Gate                            | Required evidence                                                                                                                                              | Blocker                                           |
-| ------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------- |
-| Disposable Paper 26.2 / Java 25 | Startup/reload/disable, identity, pairing/expiry/revocation, GUI permissions/clicks, real telemetry, chat/console, all typed operations and plugin integration | Disposable server and operator setup/EULA         |
-| Ubuntu 24.04 ARM64              | Actual non-root OS permissions, systemd/polkit allow/deny, host independence and ARM Java                                                                      | Target host access                                |
-| Cloudflare + Vercel             | Deployed identity migration, origins/CSP, browser pairing/denial, private results, reconnect/hibernation and server isolation                                  | Deployment accounts and approved test environment |
-| rclone                          | Fixed remote/config, offsite integrity/retrieval, failures and retention                                                                                       | Disposable configured remote                      |
-| Restore interruption            | Save lease watchdog, emergency archive, interrupted rename boundaries, repeated recovery and gameplay after deliberate startup                                 | Disposable Paper/systemd environment              |
-| 30-minute stability             | TPS/MSPT baseline comparison, bounded memory/queues, high-volume streams and outages/reconnect                                                                 | Representative loaded server                      |
+| Gate | Required evidence | Current blocker |
+| --- | --- | --- |
+| Disposable Paper 26.2 / Java 25 | Startup, upgrade/reload/disable, same identity, pairing/revocation, real telemetry, chat/console and typed-operation regression. | Disposable server and operator setup/EULA. |
+| Player-presence lifecycle/history | Real join, quit, kick, rapid reconnect, plugin reload, closed-dashboard retention, disabled-history no-write, multiple pages and optional name change. | Controlled players/accounts and private test server. |
+| Crash/orphan recovery | Forced termination followed by honest `UNKNOWN_DISCONNECT`, preserved last observation, null exact end/duration and no duplicate closure. | Disposable failure environment. |
+| Realtime latency/reconciliation | One-tick-plus-network delta target, relay/browser outage, stale-session discard, complete snapshot replay, refresh rate/coalescing and Paper-only operation. | Paired relay/dashboard/Paper environment. |
+| Permissions/privacy | Observer current-only, qualifying new grants, unchanged pre-3.0 grant, Owner denied when history is off; inspect journal, relay, browser, logs and audits for prohibited data. | Controlled role devices and storage access. |
+| Mixed-version protocol 3 | New dashboard + 2.0 Paper, 3.0 Paper + older UI/relay, all current; preserve fingerprint/grants and revocation. | Retained reviewed artifacts/deployments. |
+| Ubuntu 24.04 ARM64 runtime | Non-root permissions, systemd/polkit allow/deny, Host independence and Paper/Host connection. | Target host access. |
+| Cloudflare + Vercel | Identity migration, CSP/origins, private results, hibernation/reconnect and server isolation without clearing state. | Approved deployment accounts/environment. |
+| rclone | Fixed executable/config/remote, offsite integrity/retrieval, failures and retention. | Disposable configured remote. |
+| Restore interruption | Save lease watchdog, emergency archive, interrupted renames, repeat recovery and gameplay validation. | Disposable Paper/systemd environment. |
+| 30-minute representative load | Baseline versus 3.0 TPS/MSPT, event latency, snapshot duration, heap/queues/journal/index, stream pressure and reconnect. | Representative loaded server. |
 
-Record exact commits/JAR hashes, hardware/OS/Java/Paper versions, configurations and sanitized outcomes. Never commit secrets, player data, raw logs or backup bodies as evidence.
+Record exact accepted commits, final JAR hashes, hardware/OS/Java/Paper/dashboard/relay versions, configuration differences, timestamps and sanitized outcomes in `docs/release-gates.json`. Never commit secrets, real player records, raw logs, tokens, or production configuration.
 
 ## Release gate
 
-Finish paired CI and all live checks. Update the agent repository's `docs/release-gates.json` with true results and concrete evidence, then review/merge the paired PRs and deliberately create aligned `v2.0.0`. The manually dispatched workflow checks all evidence and creates only a draft release from an existing tag. It does not auto-publish or overwrite releases. Review artifacts/checksums, publish deliberately and deploy during coordinated maintenance. No production merge/tag/deployment/release is authorized by passing unit tests alone.
+All JSON gates intentionally remain false. After paired final CI and real evidence review, merge normally, create the reviewed plugin tag `v3.0.0`, and manually dispatch the gated workflow. It creates only a draft release from an existing tag and cannot run unless every required gate has non-empty approved evidence. Review assets/checksums and publish deliberately; green CI alone never authorizes a stable release or production deployment.
