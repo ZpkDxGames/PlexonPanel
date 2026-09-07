@@ -94,7 +94,7 @@ remote-actions:
   plugin-reload-commands: {}
 
 audit:
-  # Security auditing is mandatory in 2.0, regardless of the old enabled switch.
+  # Security auditing remains mandatory, regardless of the legacy enabled switch.
   retention-days: 30
 
 access:
