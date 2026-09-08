@@ -1,0 +1,34 @@
+name: Apply 3.0.2 reliability source changes v2
+on:
+  push:
+    branches:
+      - agent/3.0.2-reliability
+permissions:
+  contents: write
+jobs:
+  apply:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: agent/3.0.2-reliability
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "25"
+      - uses: gradle/actions/setup-gradle@v6
+      - name: Apply changes and verify
+        run: |
+          python3 scripts/apply-3.0.2-reliability.py
+          python3 scripts/fix-3.0.2-metadata.py
+          ./gradlew --no-daemon clean test javadoc :agent:jar :host-agent:jar
+          python3 scripts/package-release.py
+      - name: Commit source changes if needed
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add host-agent/src/main/java/io/github/zpkdxgames/plexonpanel/host/HostMain.java agent/src/main/java/io/github/zpkdxgames/plexonpanel/transport/GatewayClient.java agent/src/main/java/io/github/zpkdxgames/plexonpanel/AgentRuntime.java agent/src/main/java/io/github/zpkdxgames/plexonpanel/command/PlexonPanelCommand.java build.gradle.kts agent/src/main/resources/plugin.yml .github/workflows/build.yml .github/workflows/release.yml docs/release-gates.json protocol/src/test/java/io/github/zpkdxgames/plexonpanel/protocol/ReleaseVersionConsistencyTest.java protocol/src/main/java/io/github/zpkdxgames/plexonpanel/control/ControlEngine.java agent/examples/config-full-control.yml host-agent/examples/plexonpanel-host.service README.md docs/PROTOCOL.md CHANGELOG.md
+          if git diff --cached --quiet; then exit 0; fi
+          git commit -m "Harden 3.0.2 agent lifecycle"
+          git push origin HEAD:agent/3.0.2-reliability
