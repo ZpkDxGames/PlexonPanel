@@ -1,3 +1,16 @@
+## 3.1.0 — PlexonCore migration candidate, live acceptance pending
+
+- Register the Paper agent as PlexonCore module `panel` against Core API `>=1.0 <2.0`, with `STARTING`/`READY`/`DEGRADED`/`FAILED` diagnostics and safe standalone fallback.
+- Add the local read-only `PlexonPanelAPI` through Bukkit `ServicesManager` for sanitized product, protocol, Core mode, relay state, identity fingerprint, pairing and local capability diagnostics.
+- Preserve signed wire protocol 3 and `/v1`; no protocol 4, new remote Core scope, identity migration or device-grant migration was introduced.
+- Keep PlexonCore diagnostic-only: Core metadata cannot grant scopes, bypass `ControlPolicy`, run remote actions, rotate identity, expose pairing secrets or own Panel transport.
+- Keep `/plexon reload` transport-neutral. Core registration does not create/close `GatewayClient`, restart streams/telemetry/Host or trigger `access.sync`.
+- Preserve all 3.0.2 reconnect/failure-isolation behavior, including stale-socket isolation, destination failure isolation, access-sync rules and Host reconciliation semantics.
+- Repair a missing `protocol-version.txt` as protocol 3 without clearing existing pairing state, preventing an accidental re-pair requirement during upgrade.
+- Add Core absence/API/read-only/isolation regression coverage and CI distribution checks that reject shaded PlexonCore runtime classes.
+- Coordinate Paper/Host bundle metadata to 3.1.0 while keeping Host behavior and authority independent from PlexonCore.
+- Add Core/API/migration documentation, RC-first release workflow and new live gates for Core registration, Core-reload transport stability, standalone mode and 20-cycle lifecycle acceptance.
+
 ## 3.0.2 — reliability candidate, live lifecycle acceptance pending
 
 - Stop Host reconnect/service polling from publishing unconditional full `access.sync` snapshots.

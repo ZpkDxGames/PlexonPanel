@@ -1,13 +1,13 @@
-name: Prepare gated draft release
+name: Prepare gated final release
 on:
   workflow_dispatch:
     inputs:
       tag:
-        description: Existing reviewed tag (v3.0.2)
+        description: Existing reviewed tag (v3.1.0)
         required: true
         type: string
       acceptance_verified:
-        description: All live presence, compatibility, Paper, ARM64, cloud, rclone and stability evidence was reviewed
+        description: All live Core, lifecycle, compatibility, Paper, ARM64, cloud, rclone, privacy and stability evidence was reviewed
         required: true
         type: boolean
         default: false
@@ -18,9 +18,9 @@ concurrency:
   cancel-in-progress: false
 jobs:
   draft:
-    if: inputs.acceptance_verified && inputs.tag == 'v3.0.2'
+    if: inputs.acceptance_verified && inputs.tag == 'v3.1.0'
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v7
         with:
@@ -33,13 +33,13 @@ jobs:
           gates=json.loads(Path('docs/release-gates.json').read_text())
           required={
             'paperDisposable','fullCapabilityAccessMatrix','highRiskConfirmationAudit',
-            'ubuntuArm64','cloudflareVercel','rclone',
-            'restoreCrashRecovery','stability30Minutes',
-            'playerPresenceLifecycle','orphanSessionRecovery',
-            'mixedVersionProtocol3','realtimeReconciliation',
-            'privacyScopeValidation'
+            'ubuntuArm64','cloudflareVercel','rclone','restoreCrashRecovery',
+            'stability30Minutes','playerPresenceLifecycle','orphanSessionRecovery',
+            'mixedVersionProtocol3','realtimeReconciliation','privacyScopeValidation',
+            'coreModuleRegistration','coreReloadNoTransportRestart','standaloneWithoutCore',
+            'panelLifecycleTwentyCycles'
           }
-          assert gates['version']=='3.0.2' and set(gates['gates'])==required
+          assert gates['version']=='3.1.0' and set(gates['gates'])==required
           assert all(g['passed'] is True and g['evidence'].strip() for g in gates['gates'].values()), 'Live acceptance is incomplete'
           PY
       - uses: actions/setup-java@v5
@@ -47,7 +47,18 @@ jobs:
           distribution: temurin
           java-version: "25"
       - uses: gradle/actions/setup-gradle@v6
-      - run: ./gradlew --no-daemon clean test javadoc :agent:jar :host-agent:jar
+      - name: Provision PlexonCore 1.0.0 API
+        shell: bash
+        run: |
+          set -euo pipefail
+          core_jar="${RUNNER_TEMP}/PlexonCore-1.0.0.jar"
+          curl --fail --location --silent --show-error --output "${core_jar}" \
+            "https://github.com/ZpkDxGames/PlexonCore/releases/download/v1.0.0/PlexonCore-1.0.0.jar"
+          echo "4abce6de93293e21b31cb874734430d5bdc77de17a4c3b98fd6a9006e1f13018  ${core_jar}" | sha256sum --check
+          mvn -B -ntp org.apache.maven.plugins:maven-install-plugin:3.1.4:install-file \
+            -Dfile="${core_jar}" -DgroupId=com.zpkdxgames -DartifactId=PlexonCore \
+            -Dversion=1.0.0 -Dpackaging=jar -DgeneratePom=true
+      - run: ./gradlew --no-daemon clean test check javadoc :agent:jar :host-agent:jar
       - run: python3 scripts/package-release.py
       - name: Create draft for final operator review
         env:
@@ -55,4 +66,4 @@ jobs:
           RELEASE_TAG: ${{ inputs.tag }}
         run: |
           gh release create "$RELEASE_TAG" build/release/* --verify-tag --draft \
-            --title "PlexonPanel 3.0.2" --notes-file CHANGELOG.md
+            --title "PlexonPanel 3.1.0" --notes-file CHANGELOG.md

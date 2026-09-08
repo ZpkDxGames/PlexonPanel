@@ -1,5 +1,5 @@
 {
-  "version": "3.0.2",
+  "version": "3.1.0",
   "gates": {
     "paperDisposable": {
       "passed": false,
@@ -50,6 +50,22 @@
       "evidence": ""
     },
     "privacyScopeValidation": {
+      "passed": false,
+      "evidence": ""
+    },
+    "coreModuleRegistration": {
+      "passed": false,
+      "evidence": ""
+    },
+    "coreReloadNoTransportRestart": {
+      "passed": false,
+      "evidence": ""
+    },
+    "standaloneWithoutCore": {
+      "passed": false,
+      "evidence": ""
+    },
+    "panelLifecycleTwentyCycles": {
       "passed": false,
       "evidence": ""
     }

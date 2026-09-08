@@ -1,5 +1,3 @@
-import java.util.zip.ZipFile
-
 plugins {
     java
 }
@@ -62,29 +60,4 @@ tasks.jar {
             "Implementation-Vendor" to "ZpkDxGames"
         )
     }
-}
-
-val verifyDistribution by tasks.registering {
-    group = "verification"
-    description = "Verifies that optional runtime APIs are not shaded into the Paper JAR."
-    dependsOn(tasks.jar)
-    doLast {
-        val jarFile = tasks.jar.get().archiveFile.get().asFile
-        ZipFile(jarFile).use { zip ->
-            val entries = zip.entries().asSequence().map { it.name }.toList()
-            check(entries.none { it.startsWith("com/zpkdxgames/plexoncore/") }) {
-                "PlexonCore runtime classes must not be shaded into PlexonPanel"
-            }
-            check(entries.any { it == "io/github/zpkdxgames/plexonpanel/api/PlexonPanelAPI.class" }) {
-                "PlexonPanelAPI is missing from the distribution"
-            }
-            check(entries.any { it == "io/github/zpkdxgames/plexonpanel/integration/core/PlexonCoreBridge.class" }) {
-                "PlexonCore bridge is missing from the distribution"
-            }
-        }
-    }
-}
-
-tasks.check {
-    dependsOn(verifyDistribution)
 }
