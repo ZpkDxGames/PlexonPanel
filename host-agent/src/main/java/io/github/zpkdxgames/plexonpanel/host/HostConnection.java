@@ -5,6 +5,7 @@ import io.github.zpkdxgames.plexonpanel.protocol.*;
 import io.github.zpkdxgames.plexonpanel.util.NamedThreadFactory;
 import java.net.URI;
 import java.net.http.*;
+import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.time.*;
 import java.util.*;
@@ -13,6 +14,9 @@ import java.util.concurrent.atomic.*;
 import java.util.function.*;
 
 public final class HostConnection implements MessageSink, AutoCloseable {
+  private static final long LINK_TICK_SECONDS = 5L;
+  private static final long INBOUND_TIMEOUT_MILLIS = 45_000L;
+
   private final HostConfig config;
   private final DeviceIdentity identity;
   private final ProtocolCodec codec = new ProtocolCodec();
@@ -59,37 +63,66 @@ public final class HostConnection implements MessageSink, AutoCloseable {
             .start(
                 () -> {
                   while (running.get()) {
+                    WebSocket attempted = null;
                     try {
                       Packet packet = queue.take();
                       CompletableFuture<WebSocket> sent = null;
                       synchronized (HostConnection.this) {
-                        WebSocket current = socket;
-                        if (current != null && packet.session.equals(wireSession.nonce()))
-                          sent = current.sendText(packet.text, true);
+                        attempted = socket;
+                        if (attempted != null && packet.session.equals(wireSession.nonce()))
+                          sent = attempted.sendText(packet.text, true);
                       }
                       if (sent != null) sent.get(10, TimeUnit.SECONDS);
                     } catch (InterruptedException e) {
+                      Thread.currentThread().interrupt();
                       return;
                     } catch (Exception e) {
-                      disconnect();
+                      disconnect(attempted, "Outbound send failed: " + describe(e));
                     }
                   }
                 });
     scheduler.scheduleWithFixedDelay(
-        () -> {
-          if (!running.get()) return;
-          if (socket == null && System.currentTimeMillis() >= nextAttempt) connect();
-          else if (socket != null && System.currentTimeMillis() - lastMessage > 45000) disconnect();
-          else if (socket != null && authenticated)
-            socket.sendPing(java.nio.ByteBuffer.wrap(new byte[] {1}));
-        },
-        0,
-        5,
-        TimeUnit.SECONDS);
+        this::maintainConnectionSafely, 0, LINK_TICK_SECONDS, TimeUnit.SECONDS);
+  }
+
+  /**
+   * ScheduledExecutorService suppresses every later execution of a repeating task if one invocation
+   * escapes with an exception. Keep the relay watchdog fail-safe so a transient WebSocket race can
+   * never leave a healthy Host JVM permanently disconnected.
+   */
+  private void maintainConnectionSafely() {
+    try {
+      if (!running.get()) return;
+      WebSocket current = socket;
+      long now = System.currentTimeMillis();
+      if (current == null) {
+        if (now >= nextAttempt) connect();
+        return;
+      }
+      if (now - lastMessage > INBOUND_TIMEOUT_MILLIS) {
+        disconnect(current, "Relay heartbeat timed out");
+        return;
+      }
+      if (authenticated) {
+        try {
+          current
+              .sendPing(ByteBuffer.wrap(new byte[] {1}))
+              .whenComplete(
+                  (ignored, error) -> {
+                    if (error != null)
+                      disconnect(current, "Relay ping failed: " + describe(error));
+                  });
+        } catch (RuntimeException error) {
+          disconnect(current, "Relay ping failed: " + describe(error));
+        }
+      }
+    } catch (RuntimeException error) {
+      disconnect(null, "Relay watchdog recovered from an unexpected failure: " + describe(error));
+    }
   }
 
   private void connect() {
-    if (!connecting.compareAndSet(false, true)) return;
+    if (!running.get() || !connecting.compareAndSet(false, true)) return;
     try {
       http.newWebSocketBuilder()
           .header("X-PlexonPanel-Protocol", "3")
@@ -98,35 +131,41 @@ public final class HostConnection implements MessageSink, AutoCloseable {
               URI.create(config.relayUrl() + "?serverId=" + config.serverId() + "&agentKind=HOST"),
               new Listener())
           .whenComplete(
-              (ws, e) -> {
+              (ws, error) -> {
                 connecting.set(false);
-                if (e != null) {
-                  backoff();
-                }
+                if (error != null) connectionFailed("Connection failed: " + describe(error));
               });
-    } catch (Exception e) {
+    } catch (RuntimeException error) {
       connecting.set(false);
-      backoff();
+      connectionFailed("Connection failed: " + describe(error));
     }
+  }
+
+  private synchronized void connectionFailed(String reason) {
+    if (!running.get()) return;
+    backoff();
+    log(reason);
   }
 
   private synchronized void backoff() {
     attempts = Math.min(attempts + 1, 6);
     nextAttempt =
         System.currentTimeMillis()
-            + Math.min(60000, 1000L * (1L << attempts))
+            + Math.min(60_000, 1000L * (1L << attempts))
             + ThreadLocalRandom.current().nextInt(1000);
   }
 
-  private synchronized void disconnect() {
+  private synchronized void disconnect(WebSocket expected, String reason) {
+    if (expected != null && socket != expected) return;
+    boolean hadSession = socket != null || authenticated;
     authenticated = false;
     WebSocket old = socket;
     socket = null;
-    if (old != null) {
-      old.abort();
-      backoff();
-    }
+    lastMessage = 0L;
     queue.clear();
+    if (old != null) old.abort();
+    if (running.get()) backoff();
+    if (hadSession || expected == null) log(reason);
   }
 
   public synchronized boolean send(String type, Object body, MessagePriority priority) {
@@ -156,10 +195,11 @@ public final class HostConnection implements MessageSink, AutoCloseable {
         socket = ws;
         lastMessage = System.currentTimeMillis();
         authenticated = false;
-        ws.request(1);
+        requestNext(ws);
+        if (ws != socket) return;
         Map<String, Object> hello = new LinkedHashMap<>();
         hello.put("agentName", "PlexonPanel Host");
-        hello.put("pluginVersion", "3.0.0");
+        hello.put("pluginVersion", implementationVersion());
         hello.put("protocolVersion", 3);
         hello.put("publicKey", identity.publicKeyBase64());
         hello.put("publicKeyFingerprint", identity.fingerprint());
@@ -171,14 +211,15 @@ public final class HostConnection implements MessageSink, AutoCloseable {
         hello.put("capabilities", config.effectiveCapabilities());
         hello.put("agentKind", "HOST");
         hello.put("hostPublicKey", "");
-        send("agent.hello", hello, MessagePriority.CRITICAL);
+        if (!send("agent.hello", hello, MessagePriority.CRITICAL))
+          disconnect(ws, "Failed to queue Host hello");
       }
     }
 
     public CompletionStage<?> onText(WebSocket ws, CharSequence text, boolean last) {
       if (ws != socket) return null;
       if (fragments.length() + text.length() > ProtocolCodec.MAX_ENVELOPE_BYTES) {
-        disconnect();
+        disconnect(ws, "Relay message exceeded protocol limits");
         return null;
       }
       fragments.append(text);
@@ -196,7 +237,7 @@ public final class HostConnection implements MessageSink, AutoCloseable {
             case "gateway.challenge" -> {
               String nonce = m.body().get("nonce").getAsString();
               if (nonce.length() > 128) throw new SecurityException();
-              send(
+              if (!send(
                   "agent.challenge_response",
                   Map.of(
                       "nonce",
@@ -204,12 +245,15 @@ public final class HostConnection implements MessageSink, AutoCloseable {
                       "proof",
                       identity.signBase64Url(
                           ("challenge:" + nonce).getBytes(StandardCharsets.UTF_8))),
-                  MessagePriority.CRITICAL);
+                  MessagePriority.CRITICAL))
+                throw new IllegalStateException("Challenge response queue failed");
             }
             case "gateway.authenticated" -> {
               if (m.body().get("protocolVersion").getAsInt() != 3) throw new SecurityException();
               authenticated = true;
               attempts = 0;
+              nextAttempt = 0L;
+              log("Authenticated with relay");
               connected.run();
             }
             case "gateway.snapshot_request" -> {
@@ -220,32 +264,60 @@ public final class HostConnection implements MessageSink, AutoCloseable {
             }
           }
         } catch (Exception e) {
-          disconnect();
+          disconnect(ws, "Inbound relay message rejected: " + describe(e));
+          return null;
         }
       }
-      ws.request(1);
+      requestNext(ws);
       return null;
     }
 
-    public CompletionStage<?> onPong(WebSocket ws, java.nio.ByteBuffer bytes) {
+    public CompletionStage<?> onPong(WebSocket ws, ByteBuffer bytes) {
+      if (ws != socket) return null;
       lastMessage = System.currentTimeMillis();
-      ws.request(1);
+      requestNext(ws);
       return null;
     }
 
     public CompletionStage<?> onClose(WebSocket ws, int code, String reason) {
-      if (ws == socket) disconnect();
+      disconnect(ws, "Relay closed connection (" + code + "): " + reason);
       return null;
     }
 
     public void onError(WebSocket ws, Throwable error) {
-      if (ws == socket) disconnect();
+      disconnect(ws, "Relay WebSocket error: " + describe(error));
     }
+  }
+
+  private void requestNext(WebSocket ws) {
+    if (ws != socket) return;
+    try {
+      ws.request(1);
+    } catch (RuntimeException error) {
+      disconnect(ws, "Relay receive request failed: " + describe(error));
+    }
+  }
+
+  private static String implementationVersion() {
+    String version = HostConnection.class.getPackage().getImplementationVersion();
+    return version == null || version.isBlank() ? "development" : version;
+  }
+
+  private static String describe(Throwable error) {
+    Throwable current = error;
+    while (current.getCause() != null && current.getCause() != current) current = current.getCause();
+    String message = current.getMessage();
+    return current.getClass().getSimpleName()
+        + (message == null || message.isBlank() ? "" : ": " + message);
+  }
+
+  private static void log(String message) {
+    if (message != null && !message.isBlank()) System.err.println("PlexonPanel Host: " + message);
   }
 
   public void close() {
     running.set(false);
-    disconnect();
+    disconnect(null, "");
     if (sender != null) sender.interrupt();
     scheduler.shutdownNow();
     http.shutdownNow();
