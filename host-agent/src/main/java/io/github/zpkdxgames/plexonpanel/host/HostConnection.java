@@ -15,7 +15,10 @@ import java.util.function.*;
 
 public final class HostConnection implements MessageSink, AutoCloseable {
   private static final long LINK_TICK_SECONDS = 5L;
+  private static final long AUTHENTICATION_TIMEOUT_MILLIS = 15_000L;
   private static final long INBOUND_TIMEOUT_MILLIS = 45_000L;
+  private static final long INITIAL_RECONNECT_MILLIS = 2_000L;
+  private static final long MAXIMUM_RECONNECT_MILLIS = 180_000L;
 
   private final HostConfig config;
   private final DeviceIdentity identity;
@@ -35,6 +38,8 @@ public final class HostConnection implements MessageSink, AutoCloseable {
   private volatile WebSocket socket;
   private volatile boolean authenticated;
   private volatile long lastMessage;
+  private volatile long connectedAt;
+  private volatile String lastFailure = "";
   private int attempts;
   private Thread sender;
   private volatile Consumer<DecodedMessage> handler = m -> {};
@@ -54,8 +59,20 @@ public final class HostConnection implements MessageSink, AutoCloseable {
     return authenticated;
   }
 
+  public synchronized int reconnectAttempts() {
+    return attempts;
+  }
+
+  public synchronized long nextRetryMillis() {
+    return Math.max(0L, nextAttempt - System.currentTimeMillis());
+  }
+
+  public String lastFailure() {
+    return lastFailure;
+  }
+
   public void start() {
-    running.set(true);
+    if (!running.compareAndSet(false, true)) return;
     sender =
         Thread.ofPlatform()
             .daemon(true)
@@ -85,11 +102,7 @@ public final class HostConnection implements MessageSink, AutoCloseable {
         this::maintainConnectionSafely, 0, LINK_TICK_SECONDS, TimeUnit.SECONDS);
   }
 
-  /**
-   * ScheduledExecutorService suppresses every later execution of a repeating task if one invocation
-   * escapes with an exception. Keep the relay watchdog fail-safe so a transient WebSocket race can
-   * never leave a healthy Host JVM permanently disconnected.
-   */
+  /** Keep the watchdog fail-safe: an exception must never suppress all future link checks. */
   private void maintainConnectionSafely() {
     try {
       if (!running.get()) return;
@@ -97,6 +110,10 @@ public final class HostConnection implements MessageSink, AutoCloseable {
       long now = System.currentTimeMillis();
       if (current == null) {
         if (now >= nextAttempt) connect();
+        return;
+      }
+      if (!authenticated && now - connectedAt > AUTHENTICATION_TIMEOUT_MILLIS) {
+        disconnect(current, "Relay authentication timed out");
         return;
       }
       if (now - lastMessage > INBOUND_TIMEOUT_MILLIS) {
@@ -143,16 +160,20 @@ public final class HostConnection implements MessageSink, AutoCloseable {
 
   private synchronized void connectionFailed(String reason) {
     if (!running.get()) return;
+    lastFailure = reason;
     backoff();
-    log(reason);
+    log(reason + "; retry in approximately " + Math.max(1L, nextRetryMillis() / 1000L) + "s");
   }
 
   private synchronized void backoff() {
-    attempts = Math.min(attempts + 1, 6);
-    nextAttempt =
-        System.currentTimeMillis()
-            + Math.min(60_000, 1000L * (1L << attempts))
-            + ThreadLocalRandom.current().nextInt(1000);
+    attempts = Math.min(attempts + 1, 30);
+    long delay =
+        ReconnectBackoff.delayMillis(
+            attempts,
+            INITIAL_RECONNECT_MILLIS,
+            MAXIMUM_RECONNECT_MILLIS,
+            ThreadLocalRandom.current());
+    nextAttempt = System.currentTimeMillis() + delay;
   }
 
   private synchronized void disconnect(WebSocket expected, String reason) {
@@ -161,10 +182,12 @@ public final class HostConnection implements MessageSink, AutoCloseable {
     authenticated = false;
     WebSocket old = socket;
     socket = null;
+    connectedAt = 0L;
     lastMessage = 0L;
     queue.clear();
     if (old != null) old.abort();
     if (running.get()) backoff();
+    if (reason != null && !reason.isBlank()) lastFailure = reason;
     if (hadSession || expected == null) log(reason);
   }
 
@@ -193,7 +216,8 @@ public final class HostConnection implements MessageSink, AutoCloseable {
         wireSession.reset();
         queue.clear();
         socket = ws;
-        lastMessage = System.currentTimeMillis();
+        connectedAt = System.currentTimeMillis();
+        lastMessage = connectedAt;
         authenticated = false;
         requestNext(ws);
         if (ws != socket) return;
@@ -253,6 +277,7 @@ public final class HostConnection implements MessageSink, AutoCloseable {
               authenticated = true;
               attempts = 0;
               nextAttempt = 0L;
+              lastFailure = "";
               log("Authenticated with relay");
               connected.run();
             }
@@ -316,7 +341,7 @@ public final class HostConnection implements MessageSink, AutoCloseable {
   }
 
   public void close() {
-    running.set(false);
+    if (!running.compareAndSet(true, false)) return;
     disconnect(null, "");
     if (sender != null) sender.interrupt();
     scheduler.shutdownNow();
