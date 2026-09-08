@@ -63,28 +63,26 @@ public final class HostConnection implements MessageSink, AutoCloseable {
             .start(
                 () -> {
                   while (running.get()) {
+                    WebSocket attempted = null;
                     try {
                       Packet packet = queue.take();
                       CompletableFuture<WebSocket> sent = null;
                       synchronized (HostConnection.this) {
-                        WebSocket current = socket;
-                        if (current != null && packet.session.equals(wireSession.nonce()))
-                          sent = current.sendText(packet.text, true);
+                        attempted = socket;
+                        if (attempted != null && packet.session.equals(wireSession.nonce()))
+                          sent = attempted.sendText(packet.text, true);
                       }
                       if (sent != null) sent.get(10, TimeUnit.SECONDS);
                     } catch (InterruptedException e) {
                       Thread.currentThread().interrupt();
                       return;
                     } catch (Exception e) {
-                      disconnect(null, "Outbound send failed: " + describe(e));
+                      disconnect(attempted, "Outbound send failed: " + describe(e));
                     }
                   }
                 });
     scheduler.scheduleWithFixedDelay(
-        this::maintainConnectionSafely,
-        0,
-        LINK_TICK_SECONDS,
-        TimeUnit.SECONDS);
+        this::maintainConnectionSafely, 0, LINK_TICK_SECONDS, TimeUnit.SECONDS);
   }
 
   /**
@@ -198,6 +196,7 @@ public final class HostConnection implements MessageSink, AutoCloseable {
         lastMessage = System.currentTimeMillis();
         authenticated = false;
         requestNext(ws);
+        if (ws != socket) return;
         Map<String, Object> hello = new LinkedHashMap<>();
         hello.put("agentName", "PlexonPanel Host");
         hello.put("pluginVersion", implementationVersion());
@@ -246,7 +245,8 @@ public final class HostConnection implements MessageSink, AutoCloseable {
                       "proof",
                       identity.signBase64Url(
                           ("challenge:" + nonce).getBytes(StandardCharsets.UTF_8))),
-                  MessagePriority.CRITICAL)) throw new IllegalStateException("Challenge response queue failed");
+                  MessagePriority.CRITICAL))
+                throw new IllegalStateException("Challenge response queue failed");
             }
             case "gateway.authenticated" -> {
               if (m.body().get("protocolVersion").getAsInt() != 3) throw new SecurityException();
@@ -307,7 +307,8 @@ public final class HostConnection implements MessageSink, AutoCloseable {
     Throwable current = error;
     while (current.getCause() != null && current.getCause() != current) current = current.getCause();
     String message = current.getMessage();
-    return current.getClass().getSimpleName() + (message == null || message.isBlank() ? "" : ": " + message);
+    return current.getClass().getSimpleName()
+        + (message == null || message.isBlank() ? "" : ": " + message);
   }
 
   private static void log(String message) {
