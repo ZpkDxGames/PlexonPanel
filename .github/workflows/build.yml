@@ -16,7 +16,7 @@ jobs:
       matrix:
         os: [ubuntu-24.04, ubuntu-24.04-arm]
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 20
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-java@v5
@@ -24,20 +24,50 @@ jobs:
           distribution: temurin
           java-version: "25"
       - uses: gradle/actions/setup-gradle@v6
-      - run: ./gradlew --no-daemon clean test javadoc :agent:jar :host-agent:jar
-      - name: Package and verify clean provenance
+      - name: Provision PlexonCore 1.0.0 API
+        shell: bash
+        run: |
+          set -euo pipefail
+          core_jar="${RUNNER_TEMP}/PlexonCore-1.0.0.jar"
+          curl --fail --location --silent --show-error \
+            --output "${core_jar}" \
+            "https://github.com/ZpkDxGames/PlexonCore/releases/download/v1.0.0/PlexonCore-1.0.0.jar"
+          echo "4abce6de93293e21b31cb874734430d5bdc77de17a4c3b98fd6a9006e1f13018  ${core_jar}" | sha256sum --check
+          mvn -B -ntp org.apache.maven.plugins:maven-install-plugin:3.1.4:install-file \
+            -Dfile="${core_jar}" \
+            -DgroupId=com.zpkdxgames \
+            -DartifactId=PlexonCore \
+            -Dversion=1.0.0 \
+            -Dpackaging=jar \
+            -DgeneratePom=true
+      - run: ./gradlew --no-daemon clean test check javadoc :agent:jar :host-agent:jar
+      - name: Package and verify release contract
         run: |
           python3 scripts/package-release.py
           python3 - <<'PY'
-          import json, os
+          import json, os, zipfile
           from pathlib import Path
           manifest=json.loads(Path('build/release/release-manifest.json').read_text())
           assert manifest['sourceCommit'] == os.environ['GITHUB_SHA']
           assert manifest['workingTreeModified'] is False
+          assert manifest['version'] == '3.1.0'
+          assert manifest['protocolVersion'] == 3
+          jar=Path('build/release/PlexonPanel-3.1.0.jar')
+          host=Path('build/release/plexonpanel-host-3.1.0.jar')
+          assert jar.is_file() and host.is_file()
+          with zipfile.ZipFile(jar) as z:
+              names=set(z.namelist())
+              plugin_yml=z.read('plugin.yml').decode('utf-8')
+          assert 'io/github/zpkdxgames/plexonpanel/api/PlexonPanelAPI.class' in names
+          assert 'io/github/zpkdxgames/plexonpanel/integration/core/PlexonCoreBridge.class' in names
+          assert not any(name.startswith('com/zpkdxgames/plexoncore/') for name in names)
+          assert 'version: "3.1.0"' in plugin_yml
+          assert '  - PlexonCore' in plugin_yml
           PY
+          (cd build/release && sha256sum --check SHA256SUMS.txt)
       - uses: actions/upload-artifact@v7
         with:
-          name: PlexonPanel-3.0.2-${{ matrix.os }}
+          name: PlexonPanel-3.1.0-${{ matrix.os }}
           path: build/release/
           if-no-files-found: error
           retention-days: 14

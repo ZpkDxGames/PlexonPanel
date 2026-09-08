@@ -1,63 +1,72 @@
-# PlexonPanel 3.0.2
+# PlexonPanel 3.1.0
 
-PlexonPanel is an outbound-only control room for Paper 26.2 on Java 25, with an optional non-root Linux host companion. Version 3.0.2 hardens relay/agent lifecycle recovery while keeping every currently implemented Paper and Host capability locally enable-able through explicit full-control presets while preserving the truthful authority split, immutable device grants and the signed **protocol 3** wire contract under `/v1`.
+PlexonPanel is an outbound-only control room for Paper 26.2 on Java 25 with an optional non-root Linux Host companion. Version 3.1.0 makes the **Paper agent** a first-class PlexonCore module while preserving the complete 3.0.2 security model, Paper/Host authority split, immutable device grants and signed **protocol 3** wire contract under `/v1`.
 
-**Release status:** review candidate. Automated checks do not replace the pending live acceptance gates in [validation](docs/VALIDATION.md), and the stable release must remain blocked until those gates contain real evidence.
+**Release status:** 3.1.0 release candidate. Automated checks do not replace the pending live acceptance gates in [validation](docs/VALIDATION.md). Stable `v3.1.0` remains blocked until those gates contain reviewed evidence.
 
-## Download PlexonPanel 3.0.2
+For `v3.1.0-rc.1`, the reviewed Dashboard/Relay runtime remains **3.0.2 / protocol 3**. The RC acceptance matrix therefore explicitly validates Dashboard/Relay 3.0.2 with Paper/Host 3.1.0 before stable publication. A coordinated Dashboard/Relay 3.1.0 release is not required for this Core migration.
 
-The current tested 3.0.2 release candidate is published from this repository under [`v3.0.2-rc.1`](https://github.com/ZpkDxGames/PlexonPanel/releases/tag/v3.0.2-rc.1).
+## PlexonCore mode
 
-- [Download `PlexonPanel-3.0.2.jar`](https://github.com/ZpkDxGames/PlexonPanel/releases/download/v3.0.2-rc.1/PlexonPanel-3.0.2.jar) — install this JAR in Paper's `plugins/` directory.
-- [Download `plexonpanel-host-3.0.2.jar`](https://github.com/ZpkDxGames/PlexonPanel/releases/download/v3.0.2-rc.1/plexonpanel-host-3.0.2.jar) — run this separately as the Linux Host companion; do **not** place it in Paper's `plugins/` directory.
-- [Download `PlexonPanel-3.0.2-examples.zip`](https://github.com/ZpkDxGames/PlexonPanel/releases/download/v3.0.2-rc.1/PlexonPanel-3.0.2-examples.zip) — configuration, systemd/policy examples and operational documentation.
-- [Download `SHA256SUMS.txt`](https://github.com/ZpkDxGames/PlexonPanel/releases/download/v3.0.2-rc.1/SHA256SUMS.txt) for integrity verification.
+With compatible PlexonCore installed, the Paper plugin registers module ID `panel` and should appear as:
 
-The release remains marked as a prerelease until the documented live Linux/Paper/Cloudflare/Vercel acceptance matrix is completed.
+```text
+PlexonPanel — READY | Core API | 3.1.0
+```
+
+Supported Core API is `>=1.0 <2.0`; PlexonCore 1.0.0 / API 1.0 is the coordinated runtime. Core is a Paper soft dependency and is **not** shaded into `PlexonPanel-3.1.0.jar`.
+
+Without Core, with Core disabled, or with an unsupported Core API, PlexonPanel continues in `STANDALONE` mode. The Host companion, protocol module, relay and dashboard do not acquire a PlexonCore runtime dependency.
+
+See [PlexonCore integration](docs/PLEXONCORE.md), [local API](docs/API.md) and [3.1.0 migration](docs/MIGRATION_3_1.md).
+
+## Security and authority boundary
+
+Paper remains authoritative for Paper/JVM telemetry, players, console/chat, plugin actions, Paper files, pairing/device registry and Paper-local policy. Host remains authoritative for Linux telemetry, systemd lifecycle, Host files/backups and Host-local policy. Relay remains a signed protocol verifier/router and Dashboard remains the browser presentation/control room.
+
+PlexonCore handles local module registration and diagnostics only. Its capability metadata cannot grant scopes, bypass `ControlPolicy`, create Owner privilege, bypass confirmation, rotate identity or execute remote actions.
+
+Existing protocol-3 credentials and immutable device grants are never silently upgraded. Upgrading 3.0.2 → 3.1.0 must preserve server UUID, fingerprint, Paper/Host identities, pairing state, device IDs/generations/revisions and existing browser credentials. A missing `protocol-version.txt` marker is recreated as protocol 3 without clearing pairing.
 
 ## Full local capabilities
 
-The installable defaults remain conservative. The intended PlexonCraft full-control deployment can instead use [Paper full-control](agent/examples/config-full-control.yml) and [Host full-control](host-agent/examples/host-config-full-control.json). Read [full local capability deployment](docs/FULL_CONTROL.md) before applying them.
+The installable defaults remain conservative. The intended PlexonCraft full-control deployment can use [Paper full-control](agent/examples/config-full-control.yml) and [Host full-control](host-agent/examples/host-config-full-control.json). Read [full local capability deployment](docs/FULL_CONTROL.md) before applying them.
 
-Paper remains authoritative for players, console, chat, player actions and plugins. Host remains authoritative for systemd lifecycle and the complete backup family. Both expose files/telemetry/audit/devices/settings only where real handlers exist. Host still rejects Paper-only scope families and Paper still does not claim `server.start`, `server.stop` or `server.restart`.
-
-`plugins.reload` is advertised only when at least one explicit plugin reload mapping is actually executable under the local console allow/deny policy. The supplied preset exposes only PlexonPanel's own `/plexonpanel reload` path; generic Bukkit/Paper `/reload` is not enabled.
-
-Existing protocol-3 credentials keep their original immutable scopes. If Access shows a local capability enabled but `This Device: Not granted`, revoke and re-pair that intended device. A newly paired Owner receives the current canonical `Scopes.ALL`; Owner still cannot override a local denial.
+`plugins.reload` is advertised only when at least one explicit plugin reload mapping is executable under the same local console policy. Generic Bukkit/Paper `/reload` is not enabled.
 
 ## Privacy-first player presence
 
-Current online-player updates operate under `players.view`. Persistent history is a separate, local Paper capability and is disabled by default. When an operator explicitly enables `player-history.enabled`, Paper writes a bounded JSONL journal and summary beneath `plugins/PlexonPanel/presence/`. The relay routes results transiently and the dashboard does not cache detailed history.
+Current online-player updates operate under `players.view`. Persistent history remains separate, local to Paper and disabled by default. History requires local history policy, the immutable `players.history.view` device grant and Paper/relay authorization. PlexonCore registration does not enable history or alter presence payloads.
 
-History access requires all three conditions:
+## Build and package
 
-1. Local history policy is enabled.
-2. The immutable device grant contains `players.history.view`.
-3. Paper and the relay both authorize the request.
-
-Existing protocol-3 credentials retain their old scopes and are never silently upgraded. Revoke and re-pair only devices that should gain the new history scope. Observer remains current-roster-only by default.
-
-## Build and install
+CI provisions the official PlexonCore 1.0.0 API artifact after verifying its pinned SHA-256, then runs:
 
 ```sh
-./gradlew --no-daemon clean test javadoc :agent:jar :host-agent:jar
+./gradlew --no-daemon clean test check javadoc :agent:jar :host-agent:jar
 python3 scripts/package-release.py
 ```
 
-Expected outputs are `agent/build/libs/PlexonPanel-3.0.2.jar`, `host-agent/build/libs/plexonpanel-host-3.0.2.jar`, and these review assets in `build/release/`:
+Expected outputs:
 
-- `PlexonPanel-3.0.2.jar`
-- `plexonpanel-host-3.0.2.jar`
-- `PlexonPanel-3.0.2-examples.zip`
+- `PlexonPanel-3.1.0.jar`
+- `plexonpanel-host-3.1.0.jar`
+- `PlexonPanel-3.1.0-examples.zip`
 - `release-manifest.json`
 - `SHA256SUMS.txt`
 
-Install the Paper JAR only while the server is stopped. Start once to create configuration and identity, then configure the pinned relay WSS URL/public key. Verify `/plexonpanel status`, `/plexonpanel capabilities`, and `/plexonpanel diagnostics` before enabling mutations or history. Preserve the existing UUID, fingerprint, identity files, and `access/devices.json` during upgrades.
+The release contract verifies protocol 3, required API/Core bridge classes, 3.1.0 plugin metadata and that no `com/zpkdxgames/plexoncore/` runtime classes are bundled.
 
-If the Host companion is used, update its JAR to 3.0.2 in the same maintenance window and preserve its identity/configuration. Its authority remains separate from Paper; it never gains player, console, chat or plugin capabilities.
+## Install / upgrade
 
-## Security boundary
+Stop Minecraft first. Back up and preserve the complete `plugins/PlexonPanel/` directory; it contains critical identity/access state. Replace the Paper JAR and, if coordinated, the Host JAR. Do not delete identity/access files and do not re-pair as an upgrade workaround.
 
-Every action intersects the immutable device grant with the executing agent's current local capability. Owner cannot override a local denial. Public defaults disable mutations, full console, chat sending, files, host lifecycle, backups, and persistent player history. Full-control examples still retain confirmations, audit, command allow/deny rules, path confinement, backup effective gating, service-name validation, bounded payloads/queues and signed transport. No Firebase, telemetry database, inbound Minecraft administration port, generic shell, or RCON is required.
+After startup verify `/plexon modules`, `/plexonpanel status`, `/plexonpanel capabilities` and `/plexonpanel diagnostics`. Confirm the UUID/fingerprint and existing browser credential are unchanged.
+
+`/plexon reload` must not reconnect Paper/Host/browser transport or trigger `access.sync`. `/plexonpanel reload` remains the Panel-owned runtime reload path.
+
+## RC-first release process
+
+`v3.1.0-rc.1` is published first for live acceptance. Stable `v3.1.0` is produced only after all entries in `docs/release-gates.json` contain approved evidence, including Core module registration, Core-reload transport stability, standalone operation, Dashboard/Relay 3.0.2 mixed-version compatibility and the required 20 Stop → Start lifecycle cycles.
 
 See [configuration](docs/CONFIGURATION.md), [operations](docs/OPERATIONS.md), [roles and scopes](docs/ACCESS.md), [protocol 3](docs/PROTOCOL.md), [migration and rollback](docs/MIGRATION.md), [privacy](PRIVACY.md), and [validation/release gates](docs/VALIDATION.md).
