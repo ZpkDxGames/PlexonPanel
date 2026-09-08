@@ -1,6 +1,6 @@
 # Protocol 3 contract
 
-Product/bundle version 3.0.2, wire version 3. Routes retain `/v1`; protocol 2 is explicitly incompatible. Paper and host initiate WSS `/v1/agent?serverId=<uuid>&agentKind=PAPER|HOST` with `X-PlexonPanel-Protocol: 3`.
+Product/bundle version 3.1.0, wire version 3. Routes retain `/v1`; protocol 2 is explicitly incompatible. Paper and host initiate WSS `/v1/agent?serverId=<uuid>&agentKind=PAPER|HOST` with `X-PlexonPanel-Protocol: 3`.
 
 ## Envelope
 
