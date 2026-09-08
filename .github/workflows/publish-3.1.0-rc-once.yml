@@ -1,0 +1,70 @@
+name: Publish PlexonPanel 3.1.0 RC once
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/publish-3.1.0-rc-once.yml"
+permissions:
+  contents: write
+concurrency:
+  group: plexonpanel-3-1-0-rc-once
+  cancel-in-progress: false
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "25"
+      - uses: gradle/actions/setup-gradle@v6
+      - name: Provision PlexonCore 1.0.0 API
+        shell: bash
+        run: |
+          set -euo pipefail
+          core_jar="${RUNNER_TEMP}/PlexonCore-1.0.0.jar"
+          curl --fail --location --silent --show-error --output "${core_jar}" \
+            "https://github.com/ZpkDxGames/PlexonCore/releases/download/v1.0.0/PlexonCore-1.0.0.jar"
+          echo "4abce6de93293e21b31cb874734430d5bdc77de17a4c3b98fd6a9006e1f13018  ${core_jar}" | sha256sum --check
+          mvn -B -ntp org.apache.maven.plugins:maven-install-plugin:3.1.4:install-file \
+            -Dfile="${core_jar}" -DgroupId=com.zpkdxgames -DartifactId=PlexonCore \
+            -Dversion=1.0.0 -Dpackaging=jar -DgeneratePom=true
+      - run: ./gradlew --no-daemon clean test check javadoc :agent:jar :host-agent:jar
+      - run: python3 scripts/package-release.py
+      - name: Verify RC release contract
+        run: |
+          python3 - <<'PY'
+          import json, zipfile
+          from pathlib import Path
+          manifest=json.loads(Path('build/release/release-manifest.json').read_text())
+          assert manifest['version']=='3.1.0'
+          assert manifest['protocolVersion']==3
+          assert manifest['workingTreeModified'] is False
+          assert Path('build/release/PlexonPanel-3.1.0.jar').is_file()
+          assert Path('build/release/plexonpanel-host-3.1.0.jar').is_file()
+          assert Path('build/release/PlexonPanel-3.1.0-examples.zip').is_file()
+          with zipfile.ZipFile('build/release/PlexonPanel-3.1.0.jar') as jar:
+              names=set(jar.namelist())
+              plugin_yml=jar.read('plugin.yml').decode('utf-8')
+          assert 'io/github/zpkdxgames/plexonpanel/api/PlexonPanelAPI.class' in names
+          assert 'io/github/zpkdxgames/plexonpanel/integration/core/PlexonCoreBridge.class' in names
+          assert not any(name.startswith('com/zpkdxgames/plexoncore/') for name in names)
+          assert 'version: "3.1.0"' in plugin_yml
+          assert '  - PlexonCore' in plugin_yml
+          PY
+          (cd build/release && sha256sum --check SHA256SUMS.txt)
+      - name: Publish v3.1.0-rc.1
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view v3.1.0-rc.1 >/dev/null 2>&1; then
+            echo "v3.1.0-rc.1 already exists; refusing to replace an acceptance artifact."
+            exit 1
+          fi
+          gh release create v3.1.0-rc.1 build/release/* \
+            --target "$GITHUB_SHA" \
+            --prerelease \
+            --title "PlexonPanel 3.1.0 RC 1" \
+            --notes "PlexonPanel 3.1.0 release candidate for Paper 26.2 / Java 25. This RC makes the Paper agent a PlexonCore module while preserving protocol 3, existing identity/pairing/grants, Host authority, and Dashboard/Relay 3.0.2 compatibility. Stable v3.1.0 remains blocked by the live evidence gates in docs/release-gates.json."
