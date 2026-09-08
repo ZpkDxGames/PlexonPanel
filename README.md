@@ -4,6 +4,17 @@ PlexonPanel is an outbound-only control room for Paper 26.2 on Java 25, with an 
 
 **Release status:** review candidate. Automated checks do not replace the pending live acceptance gates in [validation](docs/VALIDATION.md), and the stable release must remain blocked until those gates contain real evidence.
 
+## Download PlexonPanel 3.0.2
+
+The current tested 3.0.2 release candidate is published from this repository under [`v3.0.2-rc.1`](https://github.com/ZpkDxGames/PlexonPanel/releases/tag/v3.0.2-rc.1).
+
+- [Download `PlexonPanel-3.0.2.jar`](https://github.com/ZpkDxGames/PlexonPanel/releases/download/v3.0.2-rc.1/PlexonPanel-3.0.2.jar) — install this JAR in Paper's `plugins/` directory.
+- [Download `plexonpanel-host-3.0.2.jar`](https://github.com/ZpkDxGames/PlexonPanel/releases/download/v3.0.2-rc.1/plexonpanel-host-3.0.2.jar) — run this separately as the Linux Host companion; do **not** place it in Paper's `plugins/` directory.
+- [Download `PlexonPanel-3.0.2-examples.zip`](https://github.com/ZpkDxGames/PlexonPanel/releases/download/v3.0.2-rc.1/PlexonPanel-3.0.2-examples.zip) — configuration, systemd/policy examples and operational documentation.
+- [Download `SHA256SUMS.txt`](https://github.com/ZpkDxGames/PlexonPanel/releases/download/v3.0.2-rc.1/SHA256SUMS.txt) for integrity verification.
+
+The release remains marked as a prerelease until the documented live Linux/Paper/Cloudflare/Vercel acceptance matrix is completed.
+
 ## Full local capabilities
 
 The installable defaults remain conservative. The intended PlexonCraft full-control deployment can instead use [Paper full-control](agent/examples/config-full-control.yml) and [Host full-control](host-agent/examples/host-config-full-control.json). Read [full local capability deployment](docs/FULL_CONTROL.md) before applying them.
@@ -33,17 +44,17 @@ Existing protocol-3 credentials retain their old scopes and are never silently u
 python3 scripts/package-release.py
 ```
 
-Expected outputs are `agent/build/libs/PlexonPanel-3.0.1.jar`, `host-agent/build/libs/plexonpanel-host-3.0.1.jar`, and these review assets in `build/release/`:
+Expected outputs are `agent/build/libs/PlexonPanel-3.0.2.jar`, `host-agent/build/libs/plexonpanel-host-3.0.2.jar`, and these review assets in `build/release/`:
 
-- `PlexonPanel-3.0.1.jar`
-- `plexonpanel-host-3.0.1.jar`
-- `PlexonPanel-3.0.1-examples.zip`
+- `PlexonPanel-3.0.2.jar`
+- `plexonpanel-host-3.0.2.jar`
+- `PlexonPanel-3.0.2-examples.zip`
 - `release-manifest.json`
 - `SHA256SUMS.txt`
 
 Install the Paper JAR only while the server is stopped. Start once to create configuration and identity, then configure the pinned relay WSS URL/public key. Verify `/plexonpanel status`, `/plexonpanel capabilities`, and `/plexonpanel diagnostics` before enabling mutations or history. Preserve the existing UUID, fingerprint, identity files, and `access/devices.json` during upgrades.
 
-If the Host companion is used, update its JAR to 3.0.1 in the same maintenance window and preserve its identity/configuration. Its authority remains separate from Paper; it never gains player, console, chat or plugin capabilities.
+If the Host companion is used, update its JAR to 3.0.2 in the same maintenance window and preserve its identity/configuration. Its authority remains separate from Paper; it never gains player, console, chat or plugin capabilities.
 
 ## Security boundary
 
