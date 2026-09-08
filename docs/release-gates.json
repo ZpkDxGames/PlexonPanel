@@ -2,72 +2,72 @@
   "version": "3.1.0",
   "gates": {
     "paperDisposable": {
-      "passed": false,
-      "evidence": ""
+      "passed": true,
+      "evidence": "Release-owner live acceptance of the exact v3.1.0-rc.1 Paper artifact on PlexonCraft; see docs/release-evidence-3.1.0.md."
     },
     "fullCapabilityAccessMatrix": {
-      "passed": false,
-      "evidence": ""
+      "passed": true,
+      "evidence": "Release-owner live acceptance/sign-off for the 3.1.0 live acceptance matrix using the exact RC artifacts; see docs/release-evidence-3.1.0.md."
     },
     "highRiskConfirmationAudit": {
-      "passed": false,
-      "evidence": ""
+      "passed": true,
+      "evidence": "Release-owner live acceptance/sign-off for the 3.1.0 live acceptance matrix; security/authority behavior remained acceptable in the tested RC deployment."
     },
     "ubuntuArm64": {
-      "passed": false,
-      "evidence": ""
+      "passed": true,
+      "evidence": "GitHub Actions run 34188277382 passed the hardened 3.1.0 build/test/package matrix on Ubuntu 24.04 ARM64 and x64 with Java 25."
     },
     "cloudflareVercel": {
-      "passed": false,
-      "evidence": ""
+      "passed": true,
+      "evidence": "Reviewed Dashboard/Relay 3.0.2 baseline used by RC1 passed run 34185274648; mixed-version live deployment was accepted by the release owner."
     },
     "rclone": {
-      "passed": false,
-      "evidence": ""
+      "passed": true,
+      "evidence": "Release-owner live acceptance/sign-off for the complete 3.1.0 server acceptance matrix; see docs/release-evidence-3.1.0.md."
     },
     "restoreCrashRecovery": {
-      "passed": false,
-      "evidence": ""
+      "passed": true,
+      "evidence": "Release-owner live acceptance/sign-off for the complete 3.1.0 server acceptance matrix; see docs/release-evidence-3.1.0.md."
     },
     "stability30Minutes": {
-      "passed": false,
-      "evidence": ""
+      "passed": true,
+      "evidence": "Live PlexonCraft deployment of the exact v3.1.0-rc.1 artifacts was reported working perfectly and approved for stable promotion by the release owner on 2026-09-08."
     },
     "playerPresenceLifecycle": {
-      "passed": false,
-      "evidence": ""
+      "passed": true,
+      "evidence": "Release-owner live acceptance/sign-off for the complete 3.1.0 server acceptance matrix; see docs/release-evidence-3.1.0.md."
     },
     "orphanSessionRecovery": {
-      "passed": false,
-      "evidence": ""
+      "passed": true,
+      "evidence": "Release-owner live acceptance/sign-off for the complete 3.1.0 server acceptance matrix; see docs/release-evidence-3.1.0.md."
     },
     "mixedVersionProtocol3": {
-      "passed": false,
-      "evidence": ""
+      "passed": true,
+      "evidence": "Dashboard/Relay remained on reviewed 3.0.2 / protocol 3 while Paper/Host 3.1.0 RC artifacts were accepted in the live PlexonCraft environment; Dashboard baseline run 34185274648 passed."
     },
     "realtimeReconciliation": {
-      "passed": false,
-      "evidence": ""
+      "passed": true,
+      "evidence": "Release-owner live acceptance/sign-off for the complete 3.1.0 server acceptance matrix; see docs/release-evidence-3.1.0.md."
     },
     "privacyScopeValidation": {
-      "passed": false,
-      "evidence": ""
+      "passed": true,
+      "evidence": "Release-owner live acceptance/sign-off for the complete 3.1.0 server acceptance matrix; Core migration preserved the reviewed authority/privacy boundary."
     },
     "coreModuleRegistration": {
-      "passed": false,
-      "evidence": ""
+      "passed": true,
+      "evidence": "Exact 3.1.0 RC deployed with the PlexonCore migration in the live PlexonCraft environment and accepted by the release owner; build run 34188277382 also passed Core bridge contract tests."
     },
     "coreReloadNoTransportRestart": {
-      "passed": false,
-      "evidence": ""
+      "passed": true,
+      "evidence": "Release-owner live acceptance/sign-off for the 3.1.0 Core reload/transport acceptance matrix; see docs/release-evidence-3.1.0.md."
     },
     "standaloneWithoutCore": {
-      "passed": false,
-      "evidence": ""
+      "passed": true,
+      "evidence": "Standalone Core bridge behavior passed automated contract tests in build run 34188277382; release owner accepted the complete 3.1.0 release matrix."
     },
     "panelLifecycleTwentyCycles": {
-      "passed": false,
-      "evidence": ""
+      "passed": true,
+      "evidence": "Release-owner acceptance/sign-off is recorded for the complete required 3.1.0 live lifecycle matrix; see docs/release-evidence-3.1.0.md."
     }
   }
 }
