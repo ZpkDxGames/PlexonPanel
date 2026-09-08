@@ -87,6 +87,11 @@ public final class AgentRuntime implements AutoCloseable {
           telemetry.sendInitialSnapshots();
           console.sendRecentSnapshot();
         });
+    gateway.setSnapshotRequestHandler(
+        () -> {
+          telemetry.sendInitialSnapshots();
+          console.sendRecentSnapshot();
+        });
   }
 
   public void start() {

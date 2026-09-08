@@ -1,6 +1,6 @@
 # Protocol 3 contract
 
-Product/bundle version 3.0.1, wire version 3. Routes retain `/v1`; protocol 2 is explicitly incompatible. Paper and host initiate WSS `/v1/agent?serverId=<uuid>&agentKind=PAPER|HOST` with `X-PlexonPanel-Protocol: 3`.
+Product/bundle version 3.0.2, wire version 3. Routes retain `/v1`; protocol 2 is explicitly incompatible. Paper and host initiate WSS `/v1/agent?serverId=<uuid>&agentKind=PAPER|HOST` with `X-PlexonPanel-Protocol: 3`.
 
 ## Envelope
 
@@ -65,3 +65,11 @@ Presence timestamps are UTC ISO-8601 instants. UUID is identity; the name is bou
 Presence event bodies, player inventory bodies, and history action results are excluded from Durable Object persistence. Action results remain routed only to the requesting device.
 
 Transfers use start → ordered 16 KiB chunks → cancellation/expiry, with final SHA-256 verification. File bodies and action results are transient. Durable Object storage contains identity/access/pairing coordination only; bounded socket attachments retain pending routing metadata across hibernation. Cloudflare's attachment limit is [16,384 bytes](https://developers.cloudflare.com/durable-objects/best-practices/websockets/); signed session sequences avoid unbounded replay arrays.
+
+## 3.0.2 lifecycle rules
+
+Paper remains authoritative for full access synchronization. It publishes `access.sync` after a newly authenticated relay session and after real local access mutations. A Dashboard `gateway.snapshot_request` refreshes telemetry/console snapshots only and does not re-run access synchronization.
+
+Host reads the shared registry but does not publish a full access snapshot merely because it reconnects or emits a service-status sample. Host-side device revocation continues to publish the resulting removal through the shared `ControlEngine`.
+
+Paper WebSocket close/error/ping/send callbacks are scoped to the socket that produced them so stale callbacks from an older transport epoch cannot tear down a newer authenticated session. Protocol wire version remains 3.

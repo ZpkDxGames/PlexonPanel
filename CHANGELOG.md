@@ -1,3 +1,14 @@
+## 3.0.2 — reliability candidate, live lifecycle acceptance pending
+
+- Stop Host reconnect/service polling from publishing unconditional full `access.sync` snapshots.
+- Keep Host access publication mutation-driven through authorized local revocation.
+- Separate Paper authenticated-session initialization from Dashboard snapshot refresh so browser reconnects do not re-sync access.
+- Scope Paper ping/send/close/error recovery to the socket that actually failed and preserve bounded reconnect/session reset behavior.
+- Extend `/ppanel diagnostics` with reconnect, session-prefix, protocol-code and critical-queue visibility without printing secrets.
+- Make the PlexonCraft full-control preset pair new intended operators as Owner while preserving `Owner = Scopes.ALL` and local capability intersection.
+- Mark Java SIGTERM (143) as a successful intentional Host systemd stop while preserving `Restart=on-failure` and `RestartSec=5`.
+- Preserve protocol v3, identities, the shared access registry and existing immutable grants.
+
 # Changelog
 
 ## 3.0.1 — review candidate, live acceptance pending

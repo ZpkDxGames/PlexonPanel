@@ -304,6 +304,16 @@ public final class PlexonPanelCommand implements CommandExecutor, TabCompleter {
     sendRow(sender, "Presence writer queue", presence.get("queueDepth").toString());
     sendRow(sender, "Last connected", formatInstant(gateway.lastConnectedAt()));
     sendRow(sender, "Last relay message", formatInstant(gateway.lastMessageAt()));
+    sendRow(sender, "Reconnect attempts", Integer.toString(gateway.reconnectAttempts()));
+    sendRow(sender, "Session nonce prefix", gateway.currentSessionNoncePrefix());
+    sendRow(
+        sender,
+        "Pending critical messages",
+        Long.toString(gateway.pendingCriticalMessages()));
+    if (!gateway.lastAcceptedRelayMessageType().isBlank())
+      sendRow(sender, "Last accepted relay message", gateway.lastAcceptedRelayMessageType());
+    if (!gateway.lastProtocolRejectionCode().isBlank())
+      sendRow(sender, "Last protocol rejection", gateway.lastProtocolRejectionCode());
     sendRow(
         sender, "Recent console lines", Integer.toString(runtime.console().recentLines().size()));
     if (!gateway.lastError().isBlank()) {
