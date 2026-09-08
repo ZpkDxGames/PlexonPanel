@@ -9,6 +9,7 @@ import com.zpkdxgames.plexoncore.module.ModuleRegistry.ModuleState;
 import com.zpkdxgames.plexoncore.module.ModuleRegistry.ModuleVersionRange;
 import java.time.Instant;
 import java.util.Set;
+import java.util.logging.Level;
 import org.bukkit.Bukkit;
 import org.bukkit.plugin.Plugin;
 import org.bukkit.plugin.RegisteredServiceProvider;
@@ -94,18 +95,31 @@ public final class PlexonCoreBridge implements CoreBridge {
 
   @Override
   public String registrationState() {
-    if (ownsRegistration) {
-      return core.modules().find(MODULE_ID).map(descriptor -> descriptor.state().name()).orElse("NOT_REGISTERED");
+    if (!ownsRegistration) {
+      return registrationState;
     }
-    return registrationState;
+    try {
+      return core.modules()
+          .find(MODULE_ID)
+          .map(descriptor -> descriptor.state().name())
+          .orElse("NOT_REGISTERED");
+    } catch (RuntimeException error) {
+      failCoreOperation("read module state", error);
+      return registrationState;
+    }
   }
 
   @Override
   public String detail() {
-    if (ownsRegistration) {
-      return core.modules().find(MODULE_ID).map(ModuleDescriptor::detail).orElse(detail);
+    if (!ownsRegistration) {
+      return detail;
     }
-    return detail;
+    try {
+      return core.modules().find(MODULE_ID).map(ModuleDescriptor::detail).orElse(detail);
+    } catch (RuntimeException error) {
+      failCoreOperation("read module detail", error);
+      return detail;
+    }
   }
 
   @Override
@@ -114,7 +128,11 @@ public final class PlexonCoreBridge implements CoreBridge {
       registrationState = "INCOMPATIBLE";
       return;
     }
-    register(ModuleState.STARTING, "Initializing PlexonPanel Paper agent");
+    try {
+      register(ModuleState.STARTING, "Initializing PlexonPanel Paper agent");
+    } catch (RuntimeException error) {
+      failCoreOperation("register module STARTING", error);
+    }
   }
 
   private void register(ModuleState state, String newDetail) {
@@ -151,24 +169,34 @@ public final class PlexonCoreBridge implements CoreBridge {
 
   @Override
   public void markReady(String detail) {
-    update(ModuleState.READY, IntegrationState.READY, detail);
+    updateSafely(ModuleState.READY, IntegrationState.READY, detail);
   }
 
   @Override
   public void markDegraded(String detail) {
-    update(ModuleState.DEGRADED, IntegrationState.DEGRADED, detail);
+    updateSafely(ModuleState.DEGRADED, IntegrationState.DEGRADED, detail);
   }
 
   @Override
   public void markFailed(String detail) {
-    update(ModuleState.FAILED, IntegrationState.FAILED, detail);
+    updateSafely(ModuleState.FAILED, IntegrationState.FAILED, detail);
   }
 
-  private void update(ModuleState moduleState, IntegrationState integrationState, String newDetail) {
+  private void updateSafely(
+      ModuleState moduleState, IntegrationState integrationState, String newDetail) {
     if (!compatible) {
       return;
     }
-    if (!ownsRegistration || core.modules().find(MODULE_ID).filter(d -> d.plugin() == plugin).isEmpty()) {
+    try {
+      update(moduleState, integrationState, newDetail);
+    } catch (RuntimeException error) {
+      failCoreOperation("publish " + moduleState.name() + " state", error);
+    }
+  }
+
+  private void update(ModuleState moduleState, IntegrationState integrationState, String newDetail) {
+    if (!ownsRegistration
+        || core.modules().find(MODULE_ID).filter(d -> d.plugin() == plugin).isEmpty()) {
       register(moduleState, newDetail);
     } else {
       core.modules().updateState(MODULE_ID, moduleState, newDetail);
@@ -188,16 +216,28 @@ public final class PlexonCoreBridge implements CoreBridge {
     detail = newDetail == null ? "" : newDetail;
   }
 
+  private void failCoreOperation(String operation, RuntimeException error) {
+    ownsRegistration = false;
+    registrationState = "UNAVAILABLE";
+    detail = "PlexonCore diagnostics unavailable during " + operation;
+    plugin
+        .getLogger()
+        .log(
+            Level.WARNING,
+            detail + "; PlexonPanel control-plane operation continues in standalone mode.",
+            error);
+  }
+
   @Override
   public void unregister() {
     if (!ownsRegistration) {
       return;
     }
-    core.modules()
-        .find(MODULE_ID)
-        .filter(descriptor -> descriptor.plugin() == plugin)
-        .ifPresent(descriptor -> core.modules().unregister(MODULE_ID));
-    if (compatible) {
+    try {
+      core.modules()
+          .find(MODULE_ID)
+          .filter(descriptor -> descriptor.plugin() == plugin)
+          .ifPresent(descriptor -> core.modules().unregister(MODULE_ID));
       core.integrations()
           .publish(
               "PLEXON_PANEL",
@@ -206,8 +246,16 @@ public final class PlexonCoreBridge implements CoreBridge {
               IntegrationState.DEGRADED,
               CAPABILITIES,
               "PlexonPanel is disabled");
+    } catch (RuntimeException error) {
+      plugin
+          .getLogger()
+          .log(
+              Level.WARNING,
+              "PlexonCore cleanup failed during PlexonPanel disable; local Panel shutdown continues.",
+              error);
+    } finally {
+      ownsRegistration = false;
+      registrationState = "UNREGISTERED";
     }
-    ownsRegistration = false;
-    registrationState = "UNREGISTERED";
   }
 }

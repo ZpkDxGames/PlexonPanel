@@ -27,6 +27,19 @@ class CoreIsolationContractTest {
   }
 
   @Test
+  void coreDiagnosticsFailuresAreContainedInsideTheBridge() throws Exception {
+    String source =
+        Files.readString(
+            Path.of(
+                "src/main/java/io/github/zpkdxgames/plexonpanel/integration/core/PlexonCoreBridge.java"));
+
+    assertTrue(source.contains("failCoreOperation"));
+    assertTrue(source.contains("control-plane operation continues in standalone mode"));
+    assertTrue(source.contains("catch (RuntimeException error)"));
+    assertFalse(source.contains("throw error;"));
+  }
+
+  @Test
   void missingProtocolMarkerCannotClearPairingState() throws Exception {
     String source =
         Files.readString(
