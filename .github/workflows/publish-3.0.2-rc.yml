@@ -1,0 +1,66 @@
+name: Publish PlexonPanel 3.0.2 RC artifacts
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/publish-3.0.2-rc.yml
+permissions:
+  contents: write
+jobs:
+  publish:
+    if: github.event.head_commit.message == 'Publish PlexonPanel 3.0.2 RC artifacts'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "25"
+      - uses: gradle/actions/setup-gradle@v6
+      - name: Build and verify 3.0.2
+        run: |
+          ./gradlew --no-daemon clean test javadoc :agent:jar :host-agent:jar
+          python3 scripts/package-release.py
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          manifest=json.loads(Path('build/release/release-manifest.json').read_text())
+          assert manifest['version'] == '3.0.2'
+          assert manifest['sourceCommit'] == os.environ['GITHUB_SHA']
+          assert manifest['workingTreeModified'] is False
+          required={
+            'PlexonPanel-3.0.2.jar',
+            'plexonpanel-host-3.0.2.jar',
+            'PlexonPanel-3.0.2-examples.zip',
+            'release-manifest.json',
+            'SHA256SUMS.txt',
+          }
+          present={p.name for p in Path('build/release').iterdir() if p.is_file()}
+          assert required <= present, (required, present)
+          PY
+      - name: Publish prerelease assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: v3.0.2-rc.1
+        run: |
+          cat > /tmp/release-notes.md <<'EOF'
+          PlexonPanel 3.0.2 reliability release candidate for Paper 26.2 / Java 25.
+
+          Included artifacts:
+          - `PlexonPanel-3.0.2.jar` — Paper plugin.
+          - `plexonpanel-host-3.0.2.jar` — Linux Host companion; run separately, not inside Paper's plugins folder.
+          - `PlexonPanel-3.0.2-examples.zip` — configuration, systemd/policy examples and operational documentation.
+          - `SHA256SUMS.txt` and `release-manifest.json` — integrity and build provenance.
+
+          This candidate contains the 3.0.2 reconnect/reconciliation reliability fixes. It is published as a prerelease because the full live Linux/Paper/Cloudflare/Vercel lifecycle acceptance matrix remains an operational release gate.
+          EOF
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" build/release/* --clobber
+          else
+            gh release create "$TAG" build/release/* \
+              --target "$GITHUB_SHA" \
+              --title "PlexonPanel 3.0.2 RC 1" \
+              --prerelease \
+              --notes-file /tmp/release-notes.md
+          fi
