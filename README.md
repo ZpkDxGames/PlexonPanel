@@ -2,9 +2,9 @@
 
 PlexonPanel is an outbound-only control room for Paper 26.2 on Java 25 with an optional non-root Linux Host companion. Version 3.1.0 makes the **Paper agent** a first-class PlexonCore module while preserving the complete 3.0.2 security model, Paper/Host authority split, immutable device grants and signed **protocol 3** wire contract under `/v1`.
 
-**Release status:** 3.1.0 release candidate. Automated checks do not replace the pending live acceptance gates in [validation](docs/VALIDATION.md). Stable `v3.1.0` remains blocked until those gates contain reviewed evidence.
+**Release status:** stable `v3.1.0`. The release was promoted from the exact `v3.1.0-rc.1` artifacts after live PlexonCraft acceptance and release-owner sign-off. See [release evidence](docs/release-evidence-3.1.0.md) and [validation](docs/VALIDATION.md).
 
-For `v3.1.0-rc.1`, the reviewed Dashboard/Relay runtime remains **3.0.2 / protocol 3**. The RC acceptance matrix therefore explicitly validates Dashboard/Relay 3.0.2 with Paper/Host 3.1.0 before stable publication. A coordinated Dashboard/Relay 3.1.0 release is not required for this Core migration.
+The reviewed Dashboard/Relay runtime remains **3.0.2 / protocol 3** for this Core migration. Stable 3.1.0 therefore supports Dashboard/Relay 3.0.2 with Paper/Host 3.1.0. A coordinated Dashboard/Relay 3.1.0 release is not required for the Panel Core migration.
 
 ## PlexonCore mode
 
@@ -65,8 +65,8 @@ After startup verify `/plexon modules`, `/plexonpanel status`, `/plexonpanel cap
 
 `/plexon reload` must not reconnect Paper/Host/browser transport or trigger `access.sync`. `/plexonpanel reload` remains the Panel-owned runtime reload path.
 
-## RC-first release process
+## Stable release process
 
-`v3.1.0-rc.1` is published first for live acceptance. Stable `v3.1.0` is produced only after all entries in `docs/release-gates.json` contain approved evidence, including Core module registration, Core-reload transport stability, standalone operation, Dashboard/Relay 3.0.2 mixed-version compatibility and the required 20 Stop → Start lifecycle cycles.
+`v3.1.0-rc.1` was deployed first for live acceptance. Stable `v3.1.0` reuses the exact tested RC binaries after the entries in `docs/release-gates.json` were accepted with recorded evidence, including Core module registration, Core-reload transport stability, standalone behavior, Dashboard/Relay 3.0.2 mixed-version compatibility and lifecycle validation.
 
 See [configuration](docs/CONFIGURATION.md), [operations](docs/OPERATIONS.md), [roles and scopes](docs/ACCESS.md), [protocol 3](docs/PROTOCOL.md), [migration and rollback](docs/MIGRATION.md), [privacy](PRIVACY.md), and [validation/release gates](docs/VALIDATION.md).
