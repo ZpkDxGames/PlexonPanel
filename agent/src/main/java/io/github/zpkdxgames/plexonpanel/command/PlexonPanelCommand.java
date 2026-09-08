@@ -3,6 +3,8 @@ package io.github.zpkdxgames.plexonpanel.command;
 import io.github.zpkdxgames.plexonpanel.AgentRuntime;
 import io.github.zpkdxgames.plexonpanel.PlexonPanelPlugin;
 import io.github.zpkdxgames.plexonpanel.identity.PairingState;
+import io.github.zpkdxgames.plexonpanel.integration.core.CoreBridge;
+import io.github.zpkdxgames.plexonpanel.protocol.ProtocolCodec;
 import io.github.zpkdxgames.plexonpanel.transport.GatewayClient;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -103,8 +105,10 @@ public final class PlexonPanelCommand implements CommandExecutor, TabCompleter {
 
   private void showStatus(CommandSender sender) {
     AgentRuntime runtime = plugin.runtime();
+    CoreBridge core = plugin.coreBridge();
     sender.sendMessage(
         Component.text("PlexonPanel " + plugin.getPluginMeta().getVersion(), NamedTextColor.AQUA));
+    sendRow(sender, "Mode", core == null ? "STANDALONE" : core.mode());
     sendRow(sender, "Connection", runtime == null ? "STOPPED" : runtime.gateway().state().name());
     sendRow(sender, "Paired", Boolean.toString(plugin.pairingState().isPaired()));
     sendRow(sender, "Server ID", plugin.identity().serverId().toString());
@@ -280,6 +284,18 @@ public final class PlexonPanelCommand implements CommandExecutor, TabCompleter {
 
   private void showDiagnostics(CommandSender sender) {
     plugin.messages().send(sender, "diagnostics-header");
+    CoreBridge core = plugin.coreBridge();
+    sendRow(sender, "Plugin", plugin.getPluginMeta().getVersion());
+    sendRow(sender, "Mode", core == null ? "STANDALONE" : core.mode());
+    sendRow(
+        sender,
+        "Core plugin/API",
+        core == null ? "- / -" : core.pluginVersion() + " / " + core.apiVersion());
+    sendRow(sender, "Supported Core", CoreBridge.SUPPORTED_API_RANGE);
+    sendRow(sender, "Module", core == null ? "NOT_REGISTERED" : core.registrationState());
+    sendRow(sender, "Public Panel API", plugin.panelApiRegistered() ? "REGISTERED" : "NOT_REGISTERED");
+    sendRow(sender, "Protocol", Integer.toString(ProtocolCodec.VERSION));
+
     AgentRuntime runtime = plugin.runtime();
     if (runtime == null) {
       sendRow(sender, "Runtime", "stopped");

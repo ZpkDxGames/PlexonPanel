@@ -1,3 +1,5 @@
+import java.util.zip.ZipFile
+
 plugins {
     java
 }
@@ -11,6 +13,7 @@ java {
 dependencies {
     implementation(project(":protocol"))
     compileOnly("io.papermc.paper:paper-api:26.2.build.112-stable")
+    compileOnly("com.zpkdxgames:PlexonCore:1.0.0")
     compileOnly(project(":integrations:plexonchats-api"))
 
     implementation("com.google.code.gson:gson:2.14.0")
@@ -18,6 +21,7 @@ dependencies {
     testImplementation(platform("org.junit:junit-bom:6.1.3"))
     testImplementation("org.junit.jupiter:junit-jupiter")
     testImplementation("io.papermc.paper:paper-api:26.2.build.112-stable")
+    testImplementation("com.zpkdxgames:PlexonCore:1.0.0")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
 
@@ -58,4 +62,29 @@ tasks.jar {
             "Implementation-Vendor" to "ZpkDxGames"
         )
     }
+}
+
+val verifyDistribution by tasks.registering {
+    group = "verification"
+    description = "Verifies that optional runtime APIs are not shaded into the Paper JAR."
+    dependsOn(tasks.jar)
+    doLast {
+        val jarFile = tasks.jar.get().archiveFile.get().asFile
+        ZipFile(jarFile).use { zip ->
+            val entries = zip.entries().asSequence().map { it.name }.toList()
+            check(entries.none { it.startsWith("com/zpkdxgames/plexoncore/") }) {
+                "PlexonCore runtime classes must not be shaded into PlexonPanel"
+            }
+            check(entries.any { it == "io/github/zpkdxgames/plexonpanel/api/PlexonPanelAPI.class" }) {
+                "PlexonPanelAPI is missing from the distribution"
+            }
+            check(entries.any { it == "io/github/zpkdxgames/plexonpanel/integration/core/PlexonCoreBridge.class" }) {
+                "PlexonCore bridge is missing from the distribution"
+            }
+        }
+    }
+}
+
+tasks.check {
+    dependsOn(verifyDistribution)
 }
