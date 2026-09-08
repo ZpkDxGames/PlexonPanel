@@ -37,7 +37,7 @@ jobs:
           PY
       - uses: actions/upload-artifact@v7
         with:
-          name: PlexonPanel-3.0.1-${{ matrix.os }}
+          name: PlexonPanel-3.0.2-${{ matrix.os }}
           path: build/release/
           if-no-files-found: error
           retention-days: 14
