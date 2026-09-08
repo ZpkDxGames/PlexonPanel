@@ -1,0 +1,106 @@
+name: Publish PlexonPanel 3.1.0 stable once
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/publish-3.1.0-stable-once.yml
+
+permissions:
+  contents: write
+
+concurrency:
+  group: plexonpanel-release
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      TARGET_SHA: f4b3a3ba35d029602fa110aa4a68c72dd244a390
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Checkout accepted stable source
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ env.TARGET_SHA }}
+          fetch-depth: 0
+
+      - name: Verify recorded release acceptance
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          gates=json.loads(Path('docs/release-gates.json').read_text())
+          required={
+            'paperDisposable','fullCapabilityAccessMatrix','highRiskConfirmationAudit',
+            'ubuntuArm64','cloudflareVercel','rclone','restoreCrashRecovery',
+            'stability30Minutes','playerPresenceLifecycle','orphanSessionRecovery',
+            'mixedVersionProtocol3','realtimeReconciliation','privacyScopeValidation',
+            'coreModuleRegistration','coreReloadNoTransportRestart','standaloneWithoutCore',
+            'panelLifecycleTwentyCycles'
+          }
+          assert gates['version']=='3.1.0'
+          assert set(gates['gates'])==required
+          assert all(g['passed'] is True and g['evidence'].strip() for g in gates['gates'].values())
+          assert Path('docs/release-evidence-3.1.0.md').is_file()
+          PY
+
+      - name: Download exact tested RC artifacts
+        run: |
+          set -euo pipefail
+          mkdir -p stable-assets
+          gh release download v3.1.0-rc.1 --dir stable-assets
+          test "$(find stable-assets -maxdepth 1 -type f | wc -l)" -eq 5
+
+      - name: Verify promoted artifact identity
+        run: |
+          set -euo pipefail
+          cd stable-assets
+          echo '520edb48f26172b3154d1fc14516969cc560965063d45385f9f1d5cf2fe9dc56  PlexonPanel-3.1.0.jar' | sha256sum --check
+          echo '821fd1af0e3d3cf0f4f3f0d13ee316e276f4b5a0e147211d65c026540b1d4a4d  plexonpanel-host-3.1.0.jar' | sha256sum --check
+          echo 'cb25678533f40c29e55414e315037de7490994d0d39b826448a8be7476ab97cd  PlexonPanel-3.1.0-examples.zip' | sha256sum --check
+          echo 'b3f705137872805e63b490eb76bbd31fb4d7ff0efd808a60fa6b6bc955bfe838  release-manifest.json' | sha256sum --check
+          echo '1d1e283272728bd266e6660b41a80a93614f4ef7bf4bec5da8f117b5115edbba  SHA256SUMS.txt' | sha256sum --check
+          sha256sum --check SHA256SUMS.txt
+
+      - name: Create reviewed stable tag
+        run: |
+          set -euo pipefail
+          if git ls-remote --exit-code --tags origin refs/tags/v3.1.0 >/dev/null 2>&1; then
+            echo 'v3.1.0 already exists; refusing to move an existing stable tag.' >&2
+            exit 1
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git tag -a v3.1.0 "$TARGET_SHA" -m 'PlexonPanel 3.1.0'
+          git push origin refs/tags/v3.1.0
+
+      - name: Publish stable GitHub release
+        run: |
+          set -euo pipefail
+          cat > /tmp/release-notes.md <<'EOF'
+          # PlexonPanel 3.1.0
+
+          Stable release for Paper 26.2 / Java 25.
+
+          This release promotes the exact `v3.1.0-rc.1` artifacts that were deployed to the live PlexonCraft environment and accepted by the release owner. No executable JAR was rebuilt between live acceptance and stable publication.
+
+          Highlights:
+          - PlexonPanel Paper agent is a first-class PlexonCore `panel` module.
+          - PlexonCore 1.0.0 / API 1.0 integration with supported API range `>=1.0 <2.0`.
+          - Protocol remains version 3 under `/v1`.
+          - Existing server identity, pairing state, immutable device grants and browser credentials are preserved across upgrade.
+          - Host companion remains Core-independent and retains the existing Paper/Host authority split.
+          - Local read-only `PlexonPanelAPI` is exposed through Bukkit ServicesManager.
+          - Dashboard/Relay 3.0.2 remains the reviewed compatible control-room runtime for this release.
+
+          Required release artifacts and SHA-256 sums are attached.
+          EOF
+          gh release create v3.1.0 stable-assets/* \
+            --verify-tag \
+            --title 'PlexonPanel 3.1.0' \
+            --notes-file /tmp/release-notes.md \
+            --latest
