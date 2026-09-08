@@ -1,6 +1,6 @@
-# PlexonPanel 3.0.1
+# PlexonPanel 3.0.2
 
-PlexonPanel is an outbound-only control room for Paper 26.2 on Java 25, with an optional non-root Linux host companion. Version 3.0.1 makes every currently implemented Paper and Host capability locally enable-able through explicit full-control presets while preserving the truthful authority split, immutable device grants and the signed **protocol 3** wire contract under `/v1`.
+PlexonPanel is an outbound-only control room for Paper 26.2 on Java 25, with an optional non-root Linux host companion. Version 3.0.2 hardens relay/agent lifecycle recovery while keeping every currently implemented Paper and Host capability locally enable-able through explicit full-control presets while preserving the truthful authority split, immutable device grants and the signed **protocol 3** wire contract under `/v1`.
 
 **Release status:** review candidate. Automated checks do not replace the pending live acceptance gates in [validation](docs/VALIDATION.md), and the stable release must remain blocked until those gates contain real evidence.
 

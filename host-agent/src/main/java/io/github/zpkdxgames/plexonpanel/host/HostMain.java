@@ -202,7 +202,6 @@ public final class HostMain {
             connection,
             connection::authenticated,
             config.serverId());
-    AtomicLong sentRevision = new AtomicLong(-1);
     Runnable fastSnapshot =
         () -> {
           if (!connection.authenticated()) return;
@@ -222,8 +221,6 @@ public final class HostMain {
             status.put("paperConnected", paper.get());
             status.put("recoveryRequired", backups.recoveryRequired());
             connection.send("service.status", status, MessagePriority.TELEMETRY);
-            var state = devices.snapshot();
-            if (sentRevision.getAndSet(state.revision()) != state.revision()) engine.syncAccess();
           } catch (Exception e) {
             System.err.println("Host service snapshot unavailable: " + e.getClass().getSimpleName());
           }
@@ -241,7 +238,6 @@ public final class HostMain {
           }
         },
         () -> {
-          sentRevision.set(-1);
           telemetryScheduler.execute(fastSnapshot);
           scheduler.execute(serviceSnapshot);
         });

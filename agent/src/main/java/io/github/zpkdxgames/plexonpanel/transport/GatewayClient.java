@@ -73,7 +73,10 @@ public final class GatewayClient implements MessageSink, AutoCloseable {
   private volatile WebSocket webSocket;
   private volatile Consumer<DecodedMessage> inboundHandler = ignored -> {};
   private volatile Runnable connectedHandler = () -> {};
+  private volatile Runnable snapshotRequestHandler = () -> {};
   private volatile String lastError = "";
+  private volatile String lastProtocolRejectionCode = "";
+  private volatile String lastAcceptedRelayMessageType = "";
   private volatile int reconnectAttempts;
   private volatile Instant lastConnectedAt;
   private volatile Instant lastMessageAt;
@@ -125,6 +128,10 @@ public final class GatewayClient implements MessageSink, AutoCloseable {
 
   public void setConnectedHandler(Runnable handler) {
     this.connectedHandler = Objects.requireNonNull(handler, "handler");
+  }
+
+  public void setSnapshotRequestHandler(Runnable handler) {
+    this.snapshotRequestHandler = Objects.requireNonNull(handler, "handler");
   }
 
   public void start() {
@@ -275,32 +282,33 @@ public final class GatewayClient implements MessageSink, AutoCloseable {
             (socket, error) -> {
               connecting.set(false);
               if (error != null) {
-                handleDisconnect("Connection failed: " + rootMessage(error));
+                handleDisconnect(null, "Connection failed: " + rootMessage(error));
               }
             });
   }
 
   private void senderLoop() {
     while (running.get() && !Thread.currentThread().isInterrupted()) {
+      WebSocket attemptedSocket = null;
       try {
         OutboundMessage message = outbound.take();
         java.util.concurrent.CompletableFuture<WebSocket> sent;
         synchronized (this) {
-          WebSocket socket = webSocket;
-          if (socket == null
+          attemptedSocket = webSocket;
+          if (attemptedSocket == null
               || state.get() != ConnectionState.CONNECTED
               || !message.session().equals(wireSession.nonce())) {
             droppedMessages.incrementAndGet();
             continue;
           }
-          sent = socket.sendText(message.encoded(), true);
+          sent = attemptedSocket.sendText(message.encoded(), true);
         }
         sent.get(10, TimeUnit.SECONDS);
       } catch (InterruptedException interrupted) {
         Thread.currentThread().interrupt();
         return;
       } catch (Exception error) {
-        handleDisconnect("Send failed: " + rootMessage(error));
+        handleDisconnect(attemptedSocket, "Send failed: " + rootMessage(error));
       }
     }
   }
@@ -345,6 +353,7 @@ public final class GatewayClient implements MessageSink, AutoCloseable {
       }
       lastMessageAt = Instant.now();
       if (handleControlMessage(message)) {
+        lastAcceptedRelayMessageType = message.envelope().type();
         return;
       }
       if (gatewayPublicKey == null) {
@@ -352,6 +361,7 @@ public final class GatewayClient implements MessageSink, AutoCloseable {
       }
       if (!authenticated.get()) throw new SecurityException("Session is not authenticated");
       inboundHandler.accept(message);
+      lastAcceptedRelayMessageType = message.envelope().type();
     } catch (Exception error) {
       lastError = "Inbound message rejected: " + rootMessage(error);
       plugin.getLogger().warning(lastError);
@@ -385,7 +395,7 @@ public final class GatewayClient implements MessageSink, AutoCloseable {
         yield true;
       }
       case "gateway.snapshot_request" -> {
-        runConnectedHandler("Snapshot refresh handler failed");
+        runSnapshotRequestHandler();
         yield true;
       }
       case "pairing.registered" -> {
@@ -477,7 +487,9 @@ public final class GatewayClient implements MessageSink, AutoCloseable {
                         (ignored, error) -> {
                           if (error != null && running.get()) {
                             scheduler.execute(
-                                () -> handleDisconnect("Heartbeat failed: " + rootMessage(error)));
+                                () ->
+                                    handleDisconnect(
+                                        socket, "Heartbeat failed: " + rootMessage(error)));
                           }
                         });
               }
@@ -493,7 +505,7 @@ public final class GatewayClient implements MessageSink, AutoCloseable {
         scheduler.schedule(
             () -> {
               if (running.get() && webSocket == expectedSocket && !authenticated.get()) {
-                handleDisconnect("Relay authentication timed out");
+                handleDisconnect(expectedSocket, "Relay authentication timed out");
               }
             },
             Math.max(10, settings.connectTimeoutSeconds()),
@@ -519,8 +531,19 @@ public final class GatewayClient implements MessageSink, AutoCloseable {
     }
   }
 
-  private synchronized void handleDisconnect(String reason) {
+  private void runSnapshotRequestHandler() {
+    try {
+      snapshotRequestHandler.run();
+    } catch (RuntimeException error) {
+      plugin.getLogger().log(Level.WARNING, "Snapshot refresh handler failed", error);
+    }
+  }
+
+  private synchronized void handleDisconnect(WebSocket expectedSocket, String reason) {
     if (!running.get()) {
+      return;
+    }
+    if (expectedSocket != null && webSocket != expectedSocket) {
       return;
     }
     if (state.get() == ConnectionState.BACKOFF && webSocket == null) {
@@ -558,6 +581,27 @@ public final class GatewayClient implements MessageSink, AutoCloseable {
 
   public String lastError() {
     return lastError;
+  }
+
+  public int reconnectAttempts() {
+    return reconnectAttempts;
+  }
+
+  public String lastProtocolRejectionCode() {
+    return lastProtocolRejectionCode;
+  }
+
+  public String lastAcceptedRelayMessageType() {
+    return lastAcceptedRelayMessageType;
+  }
+
+  public String currentSessionNoncePrefix() {
+    String nonce = wireSession.nonce();
+    return nonce.substring(0, Math.min(8, nonce.length()));
+  }
+
+  public long pendingCriticalMessages() {
+    return outbound.stream().filter(m -> m.priority() == MessagePriority.CRITICAL).count();
   }
 
   public Instant lastConnectedAt() {
@@ -601,6 +645,14 @@ public final class GatewayClient implements MessageSink, AutoCloseable {
     senderExecutor.shutdownNow();
     scheduler.shutdownNow();
     httpExecutor.shutdownNow();
+  }
+
+  private void rememberProtocolRejection(String reason) {
+    String value = reason == null ? "" : reason.trim();
+    int separator = value.lastIndexOf(':');
+    String candidate = separator >= 0 ? value.substring(separator + 1).trim() : value;
+    lastProtocolRejectionCode =
+        candidate.matches("[A-Z][A-Z0-9_]{1,63}") ? candidate : "PROTOCOL_REJECTED";
   }
 
   private static String requiredString(JsonObject object, String name) {
@@ -682,6 +734,7 @@ public final class GatewayClient implements MessageSink, AutoCloseable {
 
     @Override
     public CompletionStage<?> onPong(WebSocket socket, ByteBuffer message) {
+      if (socket != webSocket) return null;
       lastMessageAt = Instant.now();
       socket.request(1);
       return null;
@@ -689,9 +742,13 @@ public final class GatewayClient implements MessageSink, AutoCloseable {
 
     @Override
     public CompletionStage<?> onClose(WebSocket socket, int statusCode, String reason) {
+      if (statusCode == 4008) rememberProtocolRejection(reason);
       if (running.get()) {
         scheduler.execute(
-            () -> handleDisconnect("Relay closed connection (" + statusCode + "): " + reason));
+            () ->
+                handleDisconnect(
+                    socket,
+                    "Relay closed connection (" + statusCode + "): " + reason));
       }
       return null;
     }
@@ -699,7 +756,8 @@ public final class GatewayClient implements MessageSink, AutoCloseable {
     @Override
     public void onError(WebSocket socket, Throwable error) {
       if (running.get()) {
-        scheduler.execute(() -> handleDisconnect("WebSocket error: " + rootMessage(error)));
+        scheduler.execute(
+            () -> handleDisconnect(socket, "WebSocket error: " + rootMessage(error)));
       }
     }
   }

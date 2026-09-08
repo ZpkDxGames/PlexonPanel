@@ -1,4 +1,4 @@
-# PlexonPanel 3.0.1 — PlexonCraft full local capability preset
+# PlexonPanel 3.0.2 — PlexonCraft full local capability preset
 #
 # This file intentionally enables every capability that the Paper agent can
 # truthfully execute. It is NOT the public default. Copy only the settings you
@@ -108,7 +108,7 @@ audit:
   retention-days: 30
 
 access:
-  default-pair-role: Observer
+  default-pair-role: Owner
   device-credential-days: 30
   allow-dashboard-revoke: true
   roles: {}

@@ -188,7 +188,7 @@ public final class ControlEngine implements AutoCloseable {
           "protocolVersion",
           3,
           "version",
-          "3.0.0",
+          "3.0.2",
           "maxEditableBytes",
           SafeFiles.MAX_TEXT_BYTES);
     if (action.equals("devices.list")) return Map.of("devices", devices.snapshot().devices());
