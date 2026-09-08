@@ -4,6 +4,8 @@ PlexonPanel is an outbound-only control room for Paper 26.2 on Java 25 with an o
 
 **Release status:** 3.1.0 release candidate. Automated checks do not replace the pending live acceptance gates in [validation](docs/VALIDATION.md). Stable `v3.1.0` remains blocked until those gates contain reviewed evidence.
 
+For `v3.1.0-rc.1`, the reviewed Dashboard/Relay runtime remains **3.0.2 / protocol 3**. The RC acceptance matrix therefore explicitly validates Dashboard/Relay 3.0.2 with Paper/Host 3.1.0 before stable publication. A coordinated Dashboard/Relay 3.1.0 release is not required for this Core migration.
+
 ## PlexonCore mode
 
 With compatible PlexonCore installed, the Paper plugin registers module ID `panel` and should appear as:
@@ -65,6 +67,6 @@ After startup verify `/plexon modules`, `/plexonpanel status`, `/plexonpanel cap
 
 ## RC-first release process
 
-`v3.1.0-rc.1` is published first for live acceptance. Stable `v3.1.0` is produced only after all entries in `docs/release-gates.json` contain approved evidence, including Core module registration, Core-reload transport stability, standalone operation and the required 20 Stop → Start lifecycle cycles.
+`v3.1.0-rc.1` is published first for live acceptance. Stable `v3.1.0` is produced only after all entries in `docs/release-gates.json` contain approved evidence, including Core module registration, Core-reload transport stability, standalone operation, Dashboard/Relay 3.0.2 mixed-version compatibility and the required 20 Stop → Start lifecycle cycles.
 
 See [configuration](docs/CONFIGURATION.md), [operations](docs/OPERATIONS.md), [roles and scopes](docs/ACCESS.md), [protocol 3](docs/PROTOCOL.md), [migration and rollback](docs/MIGRATION.md), [privacy](PRIVACY.md), and [validation/release gates](docs/VALIDATION.md).

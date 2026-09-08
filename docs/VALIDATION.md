@@ -2,6 +2,8 @@
 
 Status: PlexonPanel **3.1.0 release candidate**. Stable publication is blocked on fresh live evidence. The implementation starts from reviewed 3.0.2 main `8847f52dac68aa855595f4d8c5fa695645d22872` and preserves wire protocol 3.
 
+For `v3.1.0-rc.1`, the Dashboard/Relay runtime remains the reviewed **3.0.2 / protocol 3** stack. The required mixed-version acceptance target is therefore Dashboard/Relay 3.0.2 + Paper/Host 3.1.0.
+
 ## Automated evidence
 
 The 3.1.0 branch must pass clean tests, Javadoc, Paper/Host JAR builds and release packaging on GitHub-hosted Ubuntu 24.04 x64 and ARM64. CI provisions the official PlexonCore 1.0.0 artifact with its pinned SHA-256, verifies Panel remains protocol 3, verifies the public local API and Core bridge are present, and rejects a Paper JAR that shades PlexonCore runtime classes.
@@ -24,7 +26,7 @@ All existing protocol/security/reliability tests remain release requirements, in
 | 30-minute representative load | TPS/MSPT, event latency, snapshots, heap/queues/streams/reconnect remain healthy. |
 | Player-presence lifecycle | JOINED/LEFT, reconnect, plugin reload, history privacy and UNKNOWN_DISCONNECT semantics. |
 | Orphan-session recovery | Forced termination remains honest and duplicate-free. |
-| Mixed-version protocol 3 | Dashboard/Relay 3.0.2 + agents 3.1.0; Dashboard/Relay 3.1.0 + agents 3.0.2; all-3.1.0 where supported. |
+| Mixed-version protocol 3 | **Required for RC1:** Dashboard/Relay 3.0.2 + Paper/Host 3.1.0 preserves fingerprint, grants, revocation and lifecycle without a protocol bump. If Dashboard/Relay 3.1.0 is later coordinated, validate the reciprocal/all-3.1.0 combinations too. |
 | Realtime reconciliation | Relay/browser outage, stale-session isolation, snapshot replay and no access-sync churn. |
 | Privacy/scope validation | Observer/current-only, stale grant unchanged, Owner still intersected with local policy. |
 | Core module registration | `/plexon modules` shows `PlexonPanel — READY | Core API | 3.1.0`; diagnostics show Core/API/protocol versions. |

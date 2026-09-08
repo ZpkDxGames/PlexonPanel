@@ -12,9 +12,9 @@ This is a conservative Paper-agent PlexonCore migration. Protocol 3, `/v1`, iden
 
 ## Replace artifacts
 
-Replace the Paper JAR with `PlexonPanel-3.1.0.jar`. If using the coordinated Host bundle, replace the Host executable JAR with `plexonpanel-host-3.1.0.jar` while preserving its existing configuration and identity.
+Replace the Paper JAR with `PlexonPanel-3.1.0.jar`. Replace the Host executable JAR with `plexonpanel-host-3.1.0.jar` while preserving its existing configuration and identity.
 
-The Dashboard/Relay may be deployed as coordinated 3.1.0 metadata. Wire protocol remains 3, so mixed 3.0.2/3.1.0 combinations are an explicit validation target rather than a protocol migration.
+For `v3.1.0-rc.1`, retain the reviewed **Dashboard/Relay 3.0.2** deployment. It already speaks protocol 3, which remains the wire contract for Paper/Host 3.1.0. The required acceptance path is therefore Dashboard/Relay 3.0.2 + Paper/Host 3.1.0. A coordinated Dashboard/Relay 3.1.0 release is deferred unless it is separately implemented and validated; it is not required for this Core migration.
 
 ## Startup verification
 
@@ -60,6 +60,19 @@ With Paper authenticated and a Dashboard connected, run `/plexon reload` and ver
 - Panel remains or returns `READY` in Core.
 
 `/plexonpanel reload` remains a Panel-owned operation and may replace the Panel `AgentRuntime` according to its existing semantics.
+
+## Mixed-version protocol-3 acceptance
+
+With the RC stack, verify Dashboard/Relay 3.0.2 + Paper/Host 3.1.0 preserves:
+
+- the same server fingerprint and UUID;
+- existing browser credentials without re-pair;
+- existing immutable grants and revocation semantics;
+- Paper/Host presence and lifecycle behavior;
+- snapshot refresh without `access.sync` churn;
+- destination-failure isolation and reconnect recovery.
+
+If a later coordinated Dashboard/Relay 3.1.0 is built, validate the additional protocol-3 combinations described in `docs/VALIDATION.md` before deploying it.
 
 ## Standalone acceptance
 
