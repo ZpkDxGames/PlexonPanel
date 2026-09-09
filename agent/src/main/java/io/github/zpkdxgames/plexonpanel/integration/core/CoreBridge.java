@@ -1,7 +1,7 @@
 package io.github.zpkdxgames.plexonpanel.integration.core;
 
 public interface CoreBridge {
-  String SUPPORTED_API_RANGE = ">=1.0 <2.0";
+  String SUPPORTED_API_RANGE = ">=1.0 <3.0";
   String MODULE_ID = "panel";
 
   boolean installed();
