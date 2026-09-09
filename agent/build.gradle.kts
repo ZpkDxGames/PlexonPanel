@@ -10,16 +10,16 @@ java {
 
 dependencies {
     implementation(project(":protocol"))
-    compileOnly("io.papermc.paper:paper-api:26.2.build.112-stable")
-    compileOnly("com.zpkdxgames:PlexonCore:1.0.0")
+    compileOnly("io.papermc.paper:paper-api:26.2.build.121-stable")
+    compileOnly("com.zpkdxgames:PlexonCore:2.0.4")
     compileOnly(project(":integrations:plexonchats-api"))
 
     implementation("com.google.code.gson:gson:2.14.0")
 
     testImplementation(platform("org.junit:junit-bom:6.1.3"))
     testImplementation("org.junit.jupiter:junit-jupiter")
-    testImplementation("io.papermc.paper:paper-api:26.2.build.112-stable")
-    testImplementation("com.zpkdxgames:PlexonCore:1.0.0")
+    testImplementation("io.papermc.paper:paper-api:26.2.build.121-stable")
+    testImplementation("com.zpkdxgames:PlexonCore:2.0.4")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
 
