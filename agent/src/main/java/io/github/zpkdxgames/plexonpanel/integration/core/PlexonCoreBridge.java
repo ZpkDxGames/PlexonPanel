@@ -63,46 +63,18 @@ public final class PlexonCoreBridge implements CoreBridge {
     return registration.getProvider();
   }
 
-  @Override
-  public boolean installed() {
-    return true;
-  }
-
-  @Override
-  public boolean available() {
-    return compatible;
-  }
-
-  @Override
-  public boolean compatible() {
-    return compatible;
-  }
-
-  @Override
-  public String pluginVersion() {
-    return version.pluginVersion();
-  }
-
-  @Override
-  public String apiVersion() {
-    return version.apiVersion();
-  }
-
-  @Override
-  public String mode() {
-    return compatible && ownsRegistration ? "CORE" : "STANDALONE";
-  }
+  @Override public boolean installed() { return true; }
+  @Override public boolean available() { return compatible; }
+  @Override public boolean compatible() { return compatible; }
+  @Override public String pluginVersion() { return version.pluginVersion(); }
+  @Override public String apiVersion() { return version.apiVersion(); }
+  @Override public String mode() { return compatible && ownsRegistration ? "CORE" : "STANDALONE"; }
 
   @Override
   public String registrationState() {
-    if (!ownsRegistration) {
-      return registrationState;
-    }
+    if (!ownsRegistration) return registrationState;
     try {
-      return core.modules()
-          .find(MODULE_ID)
-          .map(descriptor -> descriptor.state().name())
-          .orElse("NOT_REGISTERED");
+      return core.modules().find(MODULE_ID).map(descriptor -> descriptor.state().name()).orElse("NOT_REGISTERED");
     } catch (RuntimeException error) {
       failCoreOperation("read module state", error);
       return registrationState;
@@ -111,9 +83,7 @@ public final class PlexonCoreBridge implements CoreBridge {
 
   @Override
   public String detail() {
-    if (!ownsRegistration) {
-      return detail;
-    }
+    if (!ownsRegistration) return detail;
     try {
       return core.modules().find(MODULE_ID).map(ModuleDescriptor::detail).orElse(detail);
     } catch (RuntimeException error) {
@@ -139,7 +109,12 @@ public final class PlexonCoreBridge implements CoreBridge {
     ModuleDescriptor existing = core.modules().find(MODULE_ID).orElse(null);
     if (existing != null && existing.plugin() == plugin) {
       ownsRegistration = true;
-      core.modules().updateState(MODULE_ID, state, newDetail);
+      if (!updateOwnedState(state, newDetail)) {
+        ownsRegistration = false;
+        registrationState = "NOT_REGISTERED";
+        detail = "Core module ownership changed before state transition";
+        return;
+      }
       registrationState = state.name();
       detail = newDetail;
       return;
@@ -167,26 +142,12 @@ public final class PlexonCoreBridge implements CoreBridge {
     }
   }
 
-  @Override
-  public void markReady(String detail) {
-    updateSafely(ModuleState.READY, IntegrationState.READY, detail);
-  }
+  @Override public void markReady(String detail) { updateSafely(ModuleState.READY, IntegrationState.READY, detail); }
+  @Override public void markDegraded(String detail) { updateSafely(ModuleState.DEGRADED, IntegrationState.DEGRADED, detail); }
+  @Override public void markFailed(String detail) { updateSafely(ModuleState.FAILED, IntegrationState.FAILED, detail); }
 
-  @Override
-  public void markDegraded(String detail) {
-    updateSafely(ModuleState.DEGRADED, IntegrationState.DEGRADED, detail);
-  }
-
-  @Override
-  public void markFailed(String detail) {
-    updateSafely(ModuleState.FAILED, IntegrationState.FAILED, detail);
-  }
-
-  private void updateSafely(
-      ModuleState moduleState, IntegrationState integrationState, String newDetail) {
-    if (!compatible) {
-      return;
-    }
+  private void updateSafely(ModuleState moduleState, IntegrationState integrationState, String newDetail) {
+    if (!compatible) return;
     try {
       update(moduleState, integrationState, newDetail);
     } catch (RuntimeException error) {
@@ -195,64 +156,71 @@ public final class PlexonCoreBridge implements CoreBridge {
   }
 
   private void update(ModuleState moduleState, IntegrationState integrationState, String newDetail) {
-    if (!ownsRegistration
-        || core.modules().find(MODULE_ID).filter(d -> d.plugin() == plugin).isEmpty()) {
+    if (!ownsRegistration || core.modules().find(MODULE_ID).filter(d -> d.plugin() == plugin).isEmpty()) {
       register(moduleState, newDetail);
-    } else {
-      core.modules().updateState(MODULE_ID, moduleState, newDetail);
-    }
-    if (!ownsRegistration) {
+    } else if (!updateOwnedState(moduleState, newDetail)) {
+      ownsRegistration = false;
+      registrationState = "NOT_REGISTERED";
+      detail = "Core module ownership changed before lifecycle update";
       return;
     }
-    core.integrations()
-        .publish(
-            "PLEXON_PANEL",
-            plugin.getName(),
-            plugin.getPluginMeta().getVersion(),
-            integrationState,
-            CAPABILITIES,
-            newDetail);
+    if (!ownsRegistration) return;
+    core.integrations().publish(
+        "PLEXON_PANEL",
+        plugin.getName(),
+        plugin.getPluginMeta().getVersion(),
+        integrationState,
+        CAPABILITIES,
+        newDetail);
     registrationState = moduleState.name();
     detail = newDetail == null ? "" : newDetail;
+  }
+
+  private boolean updateOwnedState(ModuleState state, String newDetail) {
+    if (version.apiMajor() >= 2) {
+      return core.modules().updateState(MODULE_ID, plugin, state, newDetail);
+    }
+    core.modules().updateState(MODULE_ID, state, newDetail);
+    return true;
   }
 
   private void failCoreOperation(String operation, RuntimeException error) {
     ownsRegistration = false;
     registrationState = "UNAVAILABLE";
     detail = "PlexonCore diagnostics unavailable during " + operation;
-    plugin
-        .getLogger()
-        .log(
-            Level.WARNING,
-            detail + "; PlexonPanel control-plane operation continues in standalone mode.",
-            error);
+    plugin.getLogger().log(
+        Level.WARNING,
+        detail + "; PlexonPanel control-plane operation continues in standalone mode.",
+        error);
   }
 
   @Override
   public void unregister() {
-    if (!ownsRegistration) {
-      return;
-    }
+    if (!ownsRegistration) return;
     try {
-      core.modules()
-          .find(MODULE_ID)
-          .filter(descriptor -> descriptor.plugin() == plugin)
-          .ifPresent(descriptor -> core.modules().unregister(MODULE_ID));
-      core.integrations()
-          .publish(
-              "PLEXON_PANEL",
-              plugin.getName(),
-              plugin.getPluginMeta().getVersion(),
-              IntegrationState.DEGRADED,
-              CAPABILITIES,
-              "PlexonPanel is disabled");
+      if (version.apiMajor() >= 2) {
+        core.modules().updateState(MODULE_ID, plugin, ModuleState.DISABLED, "PlexonPanel is disabled");
+        core.modules().unregisterOwnedBy(plugin);
+      } else {
+        core.modules().find(MODULE_ID)
+            .filter(descriptor -> descriptor.plugin() == plugin)
+            .ifPresent(descriptor -> {
+              core.modules().updateState(MODULE_ID, ModuleState.DISABLED, "PlexonPanel is disabled");
+              core.modules().unregister(MODULE_ID);
+            });
+      }
+      core.integrations().publish(
+          "PLEXON_PANEL",
+          plugin.getName(),
+          plugin.getPluginMeta().getVersion(),
+          IntegrationState.DEGRADED,
+          CAPABILITIES,
+          "PlexonPanel is disabled");
     } catch (RuntimeException error) {
-      plugin
-          .getLogger()
-          .log(
-              Level.WARNING,
-              "PlexonCore cleanup failed during PlexonPanel disable; local Panel shutdown continues.",
-              error);
+      plugin.getLogger().log(
+          Level.WARNING,
+          "PlexonCore cleanup failed during PlexonPanel disable; local Panel shutdown continues.",
+          error);
     } finally {
       ownsRegistration = false;
       registrationState = "UNREGISTERED";
