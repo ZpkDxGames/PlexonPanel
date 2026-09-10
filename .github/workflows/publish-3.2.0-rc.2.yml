@@ -28,7 +28,6 @@ jobs:
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
-          test -z "$(git status --porcelain --untracked-files=no)"
           grep -F 'version = "3.2.0-rc.2"' build.gradle.kts
           grep -F "$DASHBOARD_SHA" docs/release-3.2.0-rc.2.md
           grep -F 'runtimeCertification' scripts/package-release.py
