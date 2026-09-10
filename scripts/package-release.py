@@ -12,7 +12,7 @@ import zipfile
 
 root = Path(__file__).resolve().parent.parent
 version_match = re.search(
-    r'^version\s*=\s*"([0-9]+\.[0-9]+\.[0-9]+)"\s*$',
+    r'^version\s*=\s*"([0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?)"\s*$',
     (root / "build.gradle.kts").read_text(),
     re.MULTILINE,
 )
