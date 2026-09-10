@@ -1,6 +1,6 @@
-# PlexonPanel 3.2.0-rc.1 Phase 2 security review
+# PlexonPanel 3.2.0-rc.2 Phase 2 security review
 
-Scope: Paper plugin, host companion, protocol/replay layer and the coupled dashboard/standalone-relay source candidate.
+Scope: Paper plugin, host companion, protocol/replay layer and the coupled dashboard/standalone-relay candidate `bb2c1d76f38ce9ce49aa7f3ece278cc0df2d02f2`.
 
 ## Pairing and identity
 
@@ -22,10 +22,10 @@ Console/chat histories and outbound paths use bounded buffering/queues and drop 
 
 Remote endpoints require secure WebSocket transport; plaintext WebSocket is limited to loopback for the colocated standalone relay. Standalone relay configuration rejects wildcard origins, weak/missing secrets, mismatched Ed25519 keys and accidental public binding. Reconnect uses bounded exponential delay with jitter instead of a busy loop.
 
-## PlexonCore boundary
+## Dependency and PlexonCore boundary
 
-PlexonCore is compile-only/non-shaded. Panel consumes Core lifecycle/diagnostics services but Core does not become the control-plane authority. Core 2 lifecycle updates and cleanup are owner-aware.
+The final dashboard candidate passed `npm audit --audit-level=high` after its production and Cloudflare tooling dependency remediation. PlexonCore 2.0.4 is compile-only/non-shaded; Panel consumes Core lifecycle/diagnostics services but Core does not become control-plane execution authority.
 
 ## Findings
 
-No HIGH or CRITICAL security defect was identified in the reviewed source candidate and automated contract surface. This is a source security review only: deployed Cloudflare Tunnel routing, Unix service permissions, destructive-action confirmation behavior, multi-server isolation and stale-session behavior still require the dedicated runtime matrix before stable promotion.
+No known HIGH or CRITICAL product/source security blocker remains at the RC2 source boundary. This remains a source/release security review only: deployed Cloudflare Tunnel routing, Unix service permissions, destructive-action confirmation behavior, multi-server isolation, replay/stale-session behavior and the >=30-minute soak remain runtime gates. Runtime certification is `NOT_EXECUTED`.

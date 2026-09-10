@@ -20,6 +20,13 @@ if not version_match:
     raise SystemExit("Cannot read the release version from build.gradle.kts")
 version = version_match.group(1)
 
+DASHBOARD_CANDIDATE = "bb2c1d76f38ce9ce49aa7f3ece278cc0df2d02f2"
+DASHBOARD_CI_RUN = 34524470086
+JAVA_ROLLBACK_VERSION = "v3.1.1"
+JAVA_ROLLBACK_COMMIT = "e0984b625d692de6076afa7e20c4fe4b35f07e9a"
+DASHBOARD_ROLLBACK_COMMIT = "03777c7dc108b54dda625c7f56f5e723ca35124f"
+RUNTIME_CERTIFICATION = "NOT_EXECUTED"
+
 out = root / "build/release"
 out.mkdir(parents=True, exist_ok=True)
 artifacts = []
@@ -58,11 +65,7 @@ commit = subprocess.check_output(
 
 
 def tracked_worktree_modified():
-    """Compare reported tracked changes byte-for-byte, including their Git mode.
-
-    The baseline Windows wrapper can be reported by diff-index after checkout even when its raw
-    CRLF bytes are identical to HEAD. Generated build products remain intentionally irrelevant.
-    """
+    """Compare reported tracked changes byte-for-byte, including their Git mode."""
     untracked = subprocess.check_output(
         ["git", "ls-files", "--others", "--exclude-standard", "-z"], cwd=root
     ).split(b"\0")
@@ -110,18 +113,34 @@ manifest.write_text(
             "protocolVersion": 3,
             "java": 25,
             "sourceCommit": commit,
+            "javaCandidateCommit": commit,
+            "dashboardCandidateCommit": DASHBOARD_CANDIDATE,
+            "dashboardCiRun": DASHBOARD_CI_RUN,
+            "rollback": {
+                "plexonPanelVersion": JAVA_ROLLBACK_VERSION,
+                "plexonPanelCommit": JAVA_ROLLBACK_COMMIT,
+                "dashboardCommit": DASHBOARD_ROLLBACK_COMMIT,
+                "dashboardRelay": "deployed Worker relay rollback path",
+            },
+            "runtimeCertification": RUNTIME_CERTIFICATION,
+            "securityReview": "PASS_ZERO_KNOWN_HIGH_CRITICAL_PRODUCT_BLOCKERS",
             "workingTreeModified": dirty,
-            "productionAcceptance": "see docs/release-gates.json",
+            "productionAcceptance": "see docs/PHASE2_RUNTIME_GATES.md",
         },
         indent=2,
     )
     + "\n"
 )
 artifacts.append(manifest)
+
+test_summary = out / "test-summary.txt"
+if test_summary.is_file():
+    artifacts.append(test_summary)
+
 (out / "SHA256SUMS.txt").write_text(
     "".join(
         hashlib.sha256(path.read_bytes()).hexdigest() + "  " + path.name + "\n"
         for path in artifacts
     )
 )
-print(f"Packaged PlexonPanel {version} JARs, examples, manifest and checksums")
+print(f"Packaged PlexonPanel {version} JARs, examples, manifest, test summary and checksums")
