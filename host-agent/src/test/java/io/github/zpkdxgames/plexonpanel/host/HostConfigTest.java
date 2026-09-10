@@ -113,6 +113,35 @@ class HostConfigTest {
   }
 
   @Test
+  void loopbackWsIsAllowedForStandaloneRelay() throws Exception {
+    for (String relayUrl :
+        List.of(
+            "ws://127.0.0.1:8787/v1/agent",
+            "ws://localhost:8787/v1/agent",
+            "ws://[::1]:8787/v1/agent")) {
+      JsonObject c = config();
+      c.addProperty("relayUrl", relayUrl);
+      assertEquals(relayUrl, load(c).relayUrl(), relayUrl);
+    }
+  }
+
+  @Test
+  void plaintextWebSocketRemainsLoopbackOnly() throws Exception {
+    for (String relayUrl :
+        List.of(
+            "ws://relay.example/v1/agent",
+            "ws://127.0.0.1.example/v1/agent",
+            "ws://0.0.0.0:8787/v1/agent",
+            "http://127.0.0.1:8787/v1/agent",
+            "ws://127.0.0.1:8787/v1/dashboard",
+            "ws://127.0.0.1:8787/v1/agent?token=bad")) {
+      JsonObject c = config();
+      c.addProperty("relayUrl", relayUrl);
+      assertThrows(IllegalArgumentException.class, () -> load(c), relayUrl);
+    }
+  }
+
+  @Test
   void backupCapabilitiesRemainEffectivelyGated() throws Exception {
     JsonObject disabled = fullControlConfig();
     disabled.getAsJsonObject("backups").addProperty("enabled", false);

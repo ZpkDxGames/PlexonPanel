@@ -50,13 +50,14 @@ public record HostConfig(
     if (c.serverName == null || c.serverName.length() > 64 || c.serverName.isBlank())
       throw new IllegalArgumentException("Invalid server label");
     URI uri = URI.create(c.relayUrl);
-    if (!"wss".equals(uri.getScheme())
+    if ((!"wss".equalsIgnoreCase(uri.getScheme()) && !isLoopbackWebSocket(uri))
         || !"/v1/agent".equals(uri.getPath())
         || uri.getHost() == null
         || uri.getUserInfo() != null
         || uri.getQuery() != null
         || uri.getFragment() != null)
-      throw new IllegalArgumentException("Pinned WSS /v1/agent URL required");
+      throw new IllegalArgumentException(
+          "Pinned WSS /v1/agent URL required (ws:// is allowed only for loopback)");
     io.github.zpkdxgames.plexonpanel.identity.KeyCodec.decodePublic(c.relayPublicKey);
     if (!c.serviceName.matches("[A-Za-z0-9][A-Za-z0-9_.@-]{0,90}\\.service"))
       throw new IllegalArgumentException("Invalid configured systemd service");
@@ -104,6 +105,17 @@ public record HostConfig(
         throw new IllegalArgumentException("Invalid locally configured rclone provider");
     }
     return c;
+  }
+
+  private static boolean isLoopbackWebSocket(URI uri) {
+    if (!"ws".equalsIgnoreCase(uri.getScheme())) return false;
+    String host = uri.getHost();
+    if (host == null) return false;
+    String normalized = host.toLowerCase(Locale.ROOT);
+    return normalized.equals("127.0.0.1")
+        || normalized.equals("localhost")
+        || normalized.equals("::1")
+        || normalized.equals("[::1]");
   }
 
   public Map<String, Boolean> effectiveCapabilities() {

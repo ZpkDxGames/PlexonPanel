@@ -9,10 +9,10 @@ import java.util.regex.Pattern;
 import org.junit.jupiter.api.Test;
 
 class ReleaseVersionConsistencyTest {
-  private static final String EXPECTED_VERSION = "3.1.1";
+  private static final String EXPECTED_VERSION = "3.2.0-rc.1";
 
   @Test
-  void maintenanceArtifactNamesAgreeWithRootVersionWithoutRewritingHistoricalAcceptance() throws Exception {
+  void phaseTwoRcArtifactNamesAgreeWithRootVersionWithoutRewritingHistoricalAcceptance() throws Exception {
     Path root = repositoryRoot();
     String build = read(root, "build.gradle.kts");
     var matcher = Pattern.compile("(?m)^version\\s*=\\s*\"([^\"]+)\"\\s*$").matcher(build);
@@ -28,7 +28,6 @@ class ReleaseVersionConsistencyTest {
     assertTrue(packager.contains("plexonpanel-host-{version}.jar"));
     assertTrue(packager.contains("PlexonPanel-{version}-examples.zip"));
 
-    // Protocol stays v3; 3.1.0 live-acceptance records remain historical evidence and are not rewritten.
     assertEquals(3, ProtocolCodec.VERSION);
     assertTrue(read(root, "docs/release-gates.json").contains("\"version\": \"3.1.0\""));
   }
