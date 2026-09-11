@@ -1,7 +1,7 @@
 name: Build
 on:
   push:
-    branches: [main, "agent/**", "phase2/**"]
+    branches: [main, "agent/**", "phase2/**", "phase3/**"]
   pull_request:
   workflow_dispatch:
 permissions:
@@ -39,14 +39,14 @@ jobs:
             -Dfile="${core_jar}" -DgroupId=com.zpkdxgames -DartifactId=PlexonCore \
             -Dversion=2.0.4 -Dpackaging=jar -DgeneratePom=true
       - run: ./gradlew --no-daemon clean test check javadoc :agent:jar :host-agent:jar
-      - name: Package and verify Phase 2 RC2 release contract
+      - name: Package and verify RC3 release contract
         run: |
           python3 scripts/summarize-tests.py
           python3 scripts/package-release.py
           python3 - <<'PY'
           import json, os, zipfile
           from pathlib import Path
-          version='3.2.0-rc.2'
+          version='3.2.0-rc.3'
           dashboard='bb2c1d76f38ce9ce49aa7f3ece278cc0df2d02f2'
           manifest=json.loads(Path('build/release/release-manifest.json').read_text())
           assert manifest['sourceCommit'] == os.environ['GITHUB_SHA']
@@ -83,7 +83,7 @@ jobs:
           git diff --check origin/main...HEAD
       - uses: actions/upload-artifact@v7
         with:
-          name: PlexonPanel-3.2.0-rc.2-${{ matrix.os }}
+          name: PlexonPanel-3.2.0-rc.3-${{ matrix.os }}
           path: build/release/
           if-no-files-found: error
           retention-days: 14

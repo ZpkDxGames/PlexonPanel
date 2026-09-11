@@ -1,5 +1,5 @@
 name: PlexonPanel
-version: "3.2.0-rc.2"
+version: "3.2.0-rc.3"
 main: io.github.zpkdxgames.plexonpanel.PlexonPanelPlugin
 description: Secure Paper server monitoring and remote administration agent for PlexonPanel.
 api-version: "26.2"
