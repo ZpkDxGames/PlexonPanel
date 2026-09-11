@@ -12,6 +12,7 @@ import io.github.zpkdxgames.plexonpanel.protocol.DecodedMessage;
 import io.github.zpkdxgames.plexonpanel.protocol.MessagePriority;
 import io.github.zpkdxgames.plexonpanel.protocol.MessageSink;
 import io.github.zpkdxgames.plexonpanel.protocol.ProtocolCodec;
+import io.github.zpkdxgames.plexonpanel.protocol.ReconnectBackoff;
 import io.github.zpkdxgames.plexonpanel.protocol.ReplayGuard;
 import io.github.zpkdxgames.plexonpanel.security.DeviceRegistry;
 import io.github.zpkdxgames.plexonpanel.util.NamedThreadFactory;
@@ -33,6 +34,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
@@ -78,8 +80,12 @@ public final class GatewayClient implements MessageSink, AutoCloseable {
   private volatile String lastProtocolRejectionCode = "";
   private volatile String lastAcceptedRelayMessageType = "";
   private volatile int reconnectAttempts;
+  private volatile long currentBackoffMillis;
+  private volatile Instant nextRetryAt;
   private volatile Instant lastConnectedAt;
+  private volatile Instant lastAuthenticatedAt;
   private volatile Instant lastMessageAt;
+  private ScheduledFuture<?> reconnectTask;
   private ScheduledFuture<?> heartbeatTask;
   private ScheduledFuture<?> authenticationTimeoutTask;
 
@@ -135,9 +141,7 @@ public final class GatewayClient implements MessageSink, AutoCloseable {
   }
 
   public void start() {
-    if (closed.get()) {
-      throw new IllegalStateException("Relay client is closed");
-    }
+    if (closed.get()) throw new IllegalStateException("Relay client is closed");
     if (!settings.enabled()) {
       state.set(ConnectionState.DISABLED);
       return;
@@ -147,9 +151,7 @@ public final class GatewayClient implements MessageSink, AutoCloseable {
       lastError = "Relay URL is not configured";
       return;
     }
-    if (!running.compareAndSet(false, true)) {
-      return;
-    }
+    if (!running.compareAndSet(false, true)) return;
     senderExecutor.execute(this::senderLoop);
     scheduleConnect(0L);
   }
@@ -160,9 +162,7 @@ public final class GatewayClient implements MessageSink, AutoCloseable {
 
   public synchronized boolean requestPairingCode(String requestedRole) {
     String role = policy.roleName(requestedRole);
-    if (state.get() != ConnectionState.CONNECTED || !authenticated.get()) {
-      return false;
-    }
+    if (state.get() != ConnectionState.CONNECTED || !authenticated.get()) return false;
     PairingCodeGenerator.GeneratedCode code = pairingCodeGenerator.generate();
     devices.begin(
         code.requestId(),
@@ -184,9 +184,7 @@ public final class GatewayClient implements MessageSink, AutoCloseable {
                 "scopes", policy.roles().get(role),
                 "credentialDays", policy.credentialDays()),
             MessagePriority.CRITICAL);
-    if (!sent) {
-      pairingState.rejectCode(code.requestId());
-    }
+    if (!sent) pairingState.rejectCode(code.requestId());
     return sent;
   }
 
@@ -223,12 +221,8 @@ public final class GatewayClient implements MessageSink, AutoCloseable {
 
   @Override
   public synchronized boolean send(String type, Object body, MessagePriority priority) {
-    if (state.get() != ConnectionState.CONNECTED || !running.get()) {
-      return false;
-    }
-    if (!authenticated.get() && !isPreAuthenticationMessage(type)) {
-      return false;
-    }
+    if (state.get() != ConnectionState.CONNECTED || !running.get()) return false;
+    if (!authenticated.get() && !isPreAuthenticationMessage(type)) return false;
     String encoded;
     try {
       encoded = codec.encodeSigned(type, wireSession.stamp(body), identity);
@@ -237,12 +231,9 @@ public final class GatewayClient implements MessageSink, AutoCloseable {
       return false;
     }
     OutboundMessage message = new OutboundMessage(type, encoded, priority, wireSession.nonce());
-    if (outbound.offer(message)) {
-      return true;
-    }
-    if (priority != MessagePriority.TELEMETRY && evictLowerPriority(priority)) {
+    if (outbound.offer(message)) return true;
+    if (priority != MessagePriority.TELEMETRY && evictLowerPriority(priority))
       return outbound.offer(message);
-    }
     droppedMessages.incrementAndGet();
     return false;
   }
@@ -259,18 +250,37 @@ public final class GatewayClient implements MessageSink, AutoCloseable {
     return "agent.hello".equals(type) || "agent.challenge_response".equals(type);
   }
 
-  private void scheduleConnect(long delaySeconds) {
-    if (!running.get()) {
-      return;
+  private synchronized void scheduleConnect(long delayMillis) {
+    if (!running.get()) return;
+    if (reconnectTask != null && !reconnectTask.isDone()) reconnectTask.cancel(false);
+    state.set(delayMillis == 0L ? ConnectionState.CONNECTING : ConnectionState.BACKOFF);
+    currentBackoffMillis = Math.max(0L, delayMillis);
+    nextRetryAt = delayMillis > 0L ? Instant.now().plusMillis(delayMillis) : Instant.now();
+    reconnectTask =
+        scheduler.schedule(
+            () -> {
+              synchronized (GatewayClient.this) {
+                reconnectTask = null;
+                nextRetryAt = null;
+                currentBackoffMillis = 0L;
+              }
+              connect();
+            },
+            Math.max(0L, delayMillis),
+            TimeUnit.MILLISECONDS);
+  }
+
+  private synchronized void cancelReconnectTask() {
+    if (reconnectTask != null) {
+      reconnectTask.cancel(false);
+      reconnectTask = null;
     }
-    state.set(delaySeconds == 0L ? ConnectionState.CONNECTING : ConnectionState.BACKOFF);
-    scheduler.schedule(this::connect, delaySeconds, TimeUnit.SECONDS);
+    currentBackoffMillis = 0L;
+    nextRetryAt = null;
   }
 
   private void connect() {
-    if (!running.get() || !connecting.compareAndSet(false, true)) {
-      return;
-    }
+    if (!running.get() || !connecting.compareAndSet(false, true)) return;
     state.set(ConnectionState.CONNECTING);
     httpClient
         .newWebSocketBuilder()
@@ -281,9 +291,8 @@ public final class GatewayClient implements MessageSink, AutoCloseable {
         .whenComplete(
             (socket, error) -> {
               connecting.set(false);
-              if (error != null) {
+              if (error != null)
                 handleDisconnect(null, "Connection failed: " + rootMessage(error));
-              }
             });
   }
 
@@ -324,9 +333,7 @@ public final class GatewayClient implements MessageSink, AutoCloseable {
             paperVersion,
             minecraftVersion,
             System.getProperty("java.version", "unknown"),
-            System.getProperty("os.name", "unknown")
-                + " "
-                + System.getProperty("os.arch", "unknown"),
+            System.getProperty("os.name", "unknown") + " " + System.getProperty("os.arch", "unknown"),
             pairingState.isPaired(),
             capabilities,
             "PAPER",
@@ -337,28 +344,22 @@ public final class GatewayClient implements MessageSink, AutoCloseable {
   private void handleInbound(String json) {
     try {
       DecodedMessage message = codec.decode(json);
-      if (!identity.serverId().toString().equals(message.envelope().serverId())) {
+      if (!identity.serverId().toString().equals(message.envelope().serverId()))
         throw new SecurityException("Message serverId does not match this agent");
-      }
       if (gatewayPublicKey == null) {
-        if (settings.requireSignedMessages()) {
-          throw new SecurityException("Relay public key is not configured");
-        }
+        if (settings.requireSignedMessages()) throw new SecurityException("Relay public key is not configured");
       } else if (!codec.verify(message.envelope(), gatewayPublicKey)) {
         throw new SecurityException("Invalid relay message signature");
       }
-      if (!replayGuard.accept(
-          codec.messageId(message.envelope()), codec.timestamp(message.envelope()))) {
+      if (!replayGuard.accept(codec.messageId(message.envelope()), codec.timestamp(message.envelope())))
         throw new SecurityException("Expired or replayed relay message");
-      }
       lastMessageAt = Instant.now();
       if (handleControlMessage(message)) {
         lastAcceptedRelayMessageType = message.envelope().type();
         return;
       }
-      if (gatewayPublicKey == null) {
+      if (gatewayPublicKey == null)
         throw new SecurityException("Privileged messages require a configured relay public key");
-      }
       if (!authenticated.get()) throw new SecurityException("Session is not authenticated");
       inboundHandler.accept(message);
       lastAcceptedRelayMessageType = message.envelope().type();
@@ -373,12 +374,8 @@ public final class GatewayClient implements MessageSink, AutoCloseable {
     return switch (message.envelope().type()) {
       case "gateway.challenge" -> {
         String nonce = requiredString(body, "nonce");
-        String proof =
-            identity.signBase64Url(("challenge:" + nonce).getBytes(StandardCharsets.UTF_8));
-        send(
-            "agent.challenge_response",
-            Map.of("nonce", nonce, "proof", proof),
-            MessagePriority.CRITICAL);
+        String proof = identity.signBase64Url(("challenge:" + nonce).getBytes(StandardCharsets.UTF_8));
+        send("agent.challenge_response", Map.of("nonce", nonce, "proof", proof), MessagePriority.CRITICAL);
         yield true;
       }
       case "gateway.authenticated" -> {
@@ -386,11 +383,14 @@ public final class GatewayClient implements MessageSink, AutoCloseable {
           throw new SecurityException("Protocol mismatch");
         authenticated.set(true);
         cancelAuthenticationTimeout();
-        if (requiredBoolean(body, "paired")) {
-          pairingState.markPaired();
-        } else {
-          pairingState.clear();
+        synchronized (this) {
+          reconnectAttempts = 0;
+          cancelReconnectTask();
+          lastAuthenticatedAt = Instant.now();
+          lastError = "";
         }
+        if (requiredBoolean(body, "paired")) pairingState.markPaired();
+        else pairingState.clear();
         runConnectedHandler("Authenticated handler failed");
         yield true;
       }
@@ -414,41 +414,27 @@ public final class GatewayClient implements MessageSink, AutoCloseable {
         String requestId = requiredString(body, "requestId");
         try {
           DeviceRegistry.Device device =
-              devices.consume(
-                  requestId, requiredString(body, "deviceId"), requiredString(body, "name"));
+              devices.consume(requestId, requiredString(body, "deviceId"), requiredString(body, "name"));
           pairingState.markPaired();
           var accessState = devices.snapshot();
-          if (!accessState.devices().contains(device))
-            throw new SecurityException("DEVICE_REVOKED");
+          if (!accessState.devices().contains(device)) throw new SecurityException("DEVICE_REVOKED");
           accessAudit.append(
               Map.of(
-                  "timestamp",
-                  Instant.now().toString(),
-                  "requestId",
-                  requestId,
-                  "serverId",
-                  identity.serverId().toString(),
-                  "deviceId",
-                  device.deviceId(),
-                  "role",
-                  device.role(),
-                  "actorLabel",
-                  device.name(),
-                  "actionType",
-                  "devices.pair",
-                  "outcome",
-                  "SUCCESS"));
+                  "timestamp", Instant.now().toString(),
+                  "requestId", requestId,
+                  "serverId", identity.serverId().toString(),
+                  "deviceId", device.deviceId(),
+                  "role", device.role(),
+                  "actorLabel", device.name(),
+                  "actionType", "devices.pair",
+                  "outcome", "SUCCESS"));
           send(
               "pairing.accepted",
               Map.of(
-                  "requestId",
-                  requestId,
-                  "device",
-                  device,
-                  "generation",
-                  accessState.generation(),
-                  "revision",
-                  accessState.revision()),
+                  "requestId", requestId,
+                  "device", device,
+                  "generation", accessState.generation(),
+                  "revision", accessState.revision()),
               MessagePriority.CRITICAL);
           send("access.sync", devices.snapshot(), MessagePriority.CRITICAL);
         } catch (Exception error) {
@@ -470,9 +456,7 @@ public final class GatewayClient implements MessageSink, AutoCloseable {
   }
 
   private void scheduleHeartbeat() {
-    if (heartbeatTask != null) {
-      heartbeatTask.cancel(false);
-    }
+    if (heartbeatTask != null) heartbeatTask.cancel(false);
     heartbeatTask =
         scheduler.scheduleAtFixedRate(
             () -> {
@@ -480,17 +464,12 @@ public final class GatewayClient implements MessageSink, AutoCloseable {
               if (socket != null && state.get() == ConnectionState.CONNECTED) {
                 long epochMillis = System.currentTimeMillis();
                 socket
-                    .sendPing(
-                        ByteBuffer.wrap(
-                            Long.toString(epochMillis).getBytes(StandardCharsets.US_ASCII)))
+                    .sendPing(ByteBuffer.wrap(Long.toString(epochMillis).getBytes(StandardCharsets.US_ASCII)))
                     .whenComplete(
                         (ignored, error) -> {
-                          if (error != null && running.get()) {
+                          if (error != null && running.get())
                             scheduler.execute(
-                                () ->
-                                    handleDisconnect(
-                                        socket, "Heartbeat failed: " + rootMessage(error)));
-                          }
+                                () -> handleDisconnect(socket, "Heartbeat failed: " + rootMessage(error)));
                         });
               }
             },
@@ -504,9 +483,8 @@ public final class GatewayClient implements MessageSink, AutoCloseable {
     authenticationTimeoutTask =
         scheduler.schedule(
             () -> {
-              if (running.get() && webSocket == expectedSocket && !authenticated.get()) {
+              if (running.get() && webSocket == expectedSocket && !authenticated.get())
                 handleDisconnect(expectedSocket, "Relay authentication timed out");
-              }
             },
             Math.max(10, settings.connectTimeoutSeconds()),
             TimeUnit.SECONDS);
@@ -540,22 +518,14 @@ public final class GatewayClient implements MessageSink, AutoCloseable {
   }
 
   private synchronized void handleDisconnect(WebSocket expectedSocket, String reason) {
-    if (!running.get()) {
-      return;
-    }
-    if (expectedSocket != null && webSocket != expectedSocket) {
-      return;
-    }
-    if (state.get() == ConnectionState.BACKOFF && webSocket == null) {
-      return;
-    }
+    if (!running.get()) return;
+    if (expectedSocket != null && webSocket != expectedSocket) return;
+    if (state.get() == ConnectionState.BACKOFF && webSocket == null) return;
     lastError = reason;
     authenticated.set(false);
     WebSocket socket = webSocket;
     webSocket = null;
-    if (socket != null && !socket.isOutputClosed()) {
-      socket.abort();
-    }
+    if (socket != null && !socket.isOutputClosed()) socket.abort();
     if (heartbeatTask != null) {
       heartbeatTask.cancel(false);
       heartbeatTask = null;
@@ -563,37 +533,33 @@ public final class GatewayClient implements MessageSink, AutoCloseable {
     cancelAuthenticationTimeout();
     outbound.clear();
     reconnectAttempts = Math.min(reconnectAttempts + 1, 30);
-    long factor = 1L << Math.min(reconnectAttempts - 1, 10);
     long delay =
-        Math.min(
-            settings.maximumReconnectDelaySeconds(),
-            settings.initialReconnectDelaySeconds() * factor);
+        ReconnectBackoff.delayMillis(
+            reconnectAttempts,
+            TimeUnit.SECONDS.toMillis(settings.initialReconnectDelaySeconds()),
+            TimeUnit.SECONDS.toMillis(settings.maximumReconnectDelaySeconds()),
+            ThreadLocalRandom.current());
+    if (looksLikeClientRejection(reason)) {
+      delay = Math.max(delay, Math.min(TimeUnit.SECONDS.toMillis(30),
+          TimeUnit.SECONDS.toMillis(settings.maximumReconnectDelaySeconds())));
+    }
     scheduleConnect(delay);
   }
 
-  public ConnectionState state() {
-    return state.get();
+  private static boolean looksLikeClientRejection(String reason) {
+    if (reason == null) return false;
+    return reason.matches("(?is).*\\b(?:status(?: code)?|http)\\D*4\\d\\d\\b.*");
   }
 
-  public long droppedMessages() {
-    return droppedMessages.get();
-  }
-
-  public String lastError() {
-    return lastError;
-  }
-
-  public int reconnectAttempts() {
-    return reconnectAttempts;
-  }
-
-  public String lastProtocolRejectionCode() {
-    return lastProtocolRejectionCode;
-  }
-
-  public String lastAcceptedRelayMessageType() {
-    return lastAcceptedRelayMessageType;
-  }
+  public ConnectionState state() { return state.get(); }
+  public long droppedMessages() { return droppedMessages.get(); }
+  public String lastError() { return lastError; }
+  public int reconnectAttempts() { return reconnectAttempts; }
+  public long currentBackoffMillis() { return currentBackoffMillis; }
+  public Instant nextRetryAt() { return nextRetryAt; }
+  public Instant lastAuthenticatedAt() { return lastAuthenticatedAt; }
+  public String lastProtocolRejectionCode() { return lastProtocolRejectionCode; }
+  public String lastAcceptedRelayMessageType() { return lastAcceptedRelayMessageType; }
 
   public String currentSessionNoncePrefix() {
     String nonce = wireSession.nonce();
@@ -604,33 +570,19 @@ public final class GatewayClient implements MessageSink, AutoCloseable {
     return outbound.stream().filter(m -> m.priority() == MessagePriority.CRITICAL).count();
   }
 
-  public Instant lastConnectedAt() {
-    return lastConnectedAt;
-  }
-
-  public Instant lastMessageAt() {
-    return lastMessageAt;
-  }
-
-  public boolean hasGatewayVerificationKey() {
-    return gatewayPublicKey != null;
-  }
-
-  public boolean isAuthenticated() {
-    return authenticated.get();
-  }
+  public Instant lastConnectedAt() { return lastConnectedAt; }
+  public Instant lastMessageAt() { return lastMessageAt; }
+  public boolean hasGatewayVerificationKey() { return gatewayPublicKey != null; }
+  public boolean isAuthenticated() { return authenticated.get(); }
 
   @Override
   public void close() {
-    if (!closed.compareAndSet(false, true)) {
-      return;
-    }
+    if (!closed.compareAndSet(false, true)) return;
     running.set(false);
     authenticated.set(false);
     state.set(ConnectionState.STOPPED);
-    if (heartbeatTask != null) {
-      heartbeatTask.cancel(false);
-    }
+    synchronized (this) { cancelReconnectTask(); }
+    if (heartbeatTask != null) heartbeatTask.cancel(false);
     cancelAuthenticationTimeout();
     WebSocket socket = webSocket;
     webSocket = null;
@@ -656,30 +608,25 @@ public final class GatewayClient implements MessageSink, AutoCloseable {
   }
 
   private static String requiredString(JsonObject object, String name) {
-    if (!object.has(name) || !object.get(name).isJsonPrimitive()) {
+    if (!object.has(name) || !object.get(name).isJsonPrimitive())
       throw new IllegalArgumentException("Missing string field: " + name);
-    }
     String value = object.get(name).getAsString();
-    if (value.isBlank() || value.length() > 4096) {
+    if (value.isBlank() || value.length() > 4096)
       throw new IllegalArgumentException("Invalid string field: " + name);
-    }
     return value;
   }
 
   private static boolean requiredBoolean(JsonObject object, String name) {
     if (!object.has(name)
         || !object.get(name).isJsonPrimitive()
-        || !object.get(name).getAsJsonPrimitive().isBoolean()) {
+        || !object.get(name).getAsJsonPrimitive().isBoolean())
       throw new IllegalArgumentException("Missing boolean field: " + name);
-    }
     return object.get(name).getAsBoolean();
   }
 
   private static String rootMessage(Throwable error) {
     Throwable current = error;
-    while (current.getCause() != null) {
-      current = current.getCause();
-    }
+    while (current.getCause() != null) current = current.getCause();
     return current.getMessage() == null ? current.getClass().getSimpleName() : current.getMessage();
   }
 
@@ -701,9 +648,7 @@ public final class GatewayClient implements MessageSink, AutoCloseable {
         webSocket = socket;
         authenticated.set(false);
         state.set(ConnectionState.CONNECTED);
-        reconnectAttempts = 0;
         lastConnectedAt = Instant.now();
-        lastError = "";
         socket.request(1);
         sendHello();
         scheduleAuthenticationTimeout(socket);
@@ -724,9 +669,7 @@ public final class GatewayClient implements MessageSink, AutoCloseable {
       if (last) {
         String complete = fragments.toString();
         fragments.setLength(0);
-        if (running.get()) {
-          handleInbound(complete);
-        }
+        if (running.get()) handleInbound(complete);
       }
       socket.request(1);
       return null;
@@ -743,22 +686,16 @@ public final class GatewayClient implements MessageSink, AutoCloseable {
     @Override
     public CompletionStage<?> onClose(WebSocket socket, int statusCode, String reason) {
       if (statusCode == 4008) rememberProtocolRejection(reason);
-      if (running.get()) {
+      if (running.get())
         scheduler.execute(
-            () ->
-                handleDisconnect(
-                    socket,
-                    "Relay closed connection (" + statusCode + "): " + reason));
-      }
+            () -> handleDisconnect(socket, "Relay closed connection (" + statusCode + "): " + reason));
       return null;
     }
 
     @Override
     public void onError(WebSocket socket, Throwable error) {
-      if (running.get()) {
-        scheduler.execute(
-            () -> handleDisconnect(socket, "WebSocket error: " + rootMessage(error)));
-      }
+      if (running.get())
+        scheduler.execute(() -> handleDisconnect(socket, "WebSocket error: " + rootMessage(error)));
     }
   }
 }

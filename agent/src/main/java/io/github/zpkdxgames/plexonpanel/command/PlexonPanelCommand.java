@@ -6,6 +6,7 @@ import io.github.zpkdxgames.plexonpanel.identity.PairingState;
 import io.github.zpkdxgames.plexonpanel.integration.core.CoreBridge;
 import io.github.zpkdxgames.plexonpanel.protocol.ProtocolCodec;
 import io.github.zpkdxgames.plexonpanel.transport.GatewayClient;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
@@ -319,8 +320,12 @@ public final class PlexonPanelCommand implements CommandExecutor, TabCompleter {
     sendRow(sender, "Presence history", presence.get("state").toString());
     sendRow(sender, "Presence writer queue", presence.get("queueDepth").toString());
     sendRow(sender, "Last connected", formatInstant(gateway.lastConnectedAt()));
+    sendRow(sender, "Last authenticated", formatInstant(gateway.lastAuthenticatedAt()));
+    sendRow(sender, "Session age", formatSessionAge(gateway.lastAuthenticatedAt()));
     sendRow(sender, "Last relay message", formatInstant(gateway.lastMessageAt()));
     sendRow(sender, "Reconnect attempts", Integer.toString(gateway.reconnectAttempts()));
+    sendRow(sender, "Current backoff", formatDuration(gateway.currentBackoffMillis()));
+    sendRow(sender, "Next retry", formatInstant(gateway.nextRetryAt()));
     sendRow(sender, "Session nonce prefix", gateway.currentSessionNoncePrefix());
     sendRow(
         sender,
@@ -354,6 +359,22 @@ public final class PlexonPanelCommand implements CommandExecutor, TabCompleter {
 
   private static String formatInstant(Instant instant) {
     return instant == null ? "never" : instant.toString();
+  }
+
+  private static String formatSessionAge(Instant authenticatedAt) {
+    if (authenticatedAt == null) return "not authenticated";
+    long millis = Math.max(0L, Duration.between(authenticatedAt, Instant.now()).toMillis());
+    return formatDuration(millis);
+  }
+
+  private static String formatDuration(long millis) {
+    if (millis <= 0L) return "0s";
+    long seconds = Math.max(1L, millis / 1000L);
+    long minutes = seconds / 60L;
+    long hours = minutes / 60L;
+    if (hours > 0L) return hours + "h " + (minutes % 60L) + "m";
+    if (minutes > 0L) return minutes + "m " + (seconds % 60L) + "s";
+    return seconds + "s";
   }
 
   @Override
