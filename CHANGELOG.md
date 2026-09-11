@@ -1,3 +1,16 @@
+# Changelog
+
+## 3.2.0 — stable repository closure
+
+- Promote the accepted `3.2.0-rc.3` Java source line to stable `3.2.0` without changing protocol 3, identity/pairing/device-grant semantics, or the Paper/Host authority split.
+- Keep the accepted PlexonChats lifecycle/API compatibility repair: lifecycle-aware service discovery, current API/event contract, stale-reference avoidance and single-delivery GLOBAL chat semantics.
+- Keep PlexonCore diagnostic-only with supported API `>=1.0 <3.0`, pinned 2.0.4 compile boundary and no shaded Core runtime classes.
+- Generalize x64/ARM64 Build verification around the repository version instead of a hard-coded RC3 version.
+- Replace one-off version-specific publication workflows with one exact-`main` stable release workflow for the matched Paper/Host pair.
+- Publish JAR pair, examples, release manifest, test summary and SHA-256 checksums from the verified final source state.
+- Refresh current README/Core/API release documentation while preserving historical migration and acceptance evidence.
+- Keep live PlexonCraft deployment as a separate operational follow-up; the release manifest continues to report `runtimeCertification=NOT_EXECUTED`.
+
 ## 3.1.0 — PlexonCore migration candidate, live acceptance pending
 
 - Register the Paper agent as PlexonCore module `panel` against Core API `>=1.0 <2.0`, with `STARTING`/`READY`/`DEGRADED`/`FAILED` diagnostics and safe standalone fallback.
@@ -21,8 +34,6 @@
 - Make the PlexonCraft full-control preset pair new intended operators as Owner while preserving `Owner = Scopes.ALL` and local capability intersection.
 - Mark Java SIGTERM (143) as a successful intentional Host systemd stop while preserving `Restart=on-failure` and `RestartSec=5`.
 - Preserve protocol v3, identities, the shared access registry and existing immutable grants.
-
-# Changelog
 
 ## 3.0.1 — review candidate, live acceptance pending
 

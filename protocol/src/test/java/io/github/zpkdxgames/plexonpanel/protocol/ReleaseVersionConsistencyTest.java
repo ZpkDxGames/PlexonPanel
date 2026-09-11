@@ -9,10 +9,10 @@ import java.util.regex.Pattern;
 import org.junit.jupiter.api.Test;
 
 class ReleaseVersionConsistencyTest {
-  private static final String EXPECTED_VERSION = "3.2.0-rc.3";
+  private static final String EXPECTED_VERSION = "3.2.0";
 
   @Test
-  void phaseTwoRcArtifactNamesAgreeWithRootVersionWithoutRewritingHistoricalAcceptance() throws Exception {
+  void stableArtifactNamesAgreeWithRootVersionWithoutRewritingHistoricalAcceptance() throws Exception {
     Path root = repositoryRoot();
     String build = read(root, "build.gradle.kts");
     var matcher = Pattern.compile("(?m)^version\\s*=\\s*\"([^\"]+)\"\\s*$").matcher(build);
@@ -21,7 +21,6 @@ class ReleaseVersionConsistencyTest {
     assertEquals(EXPECTED_VERSION, version);
 
     assertTrue(read(root, "agent/src/main/resources/plugin.yml").contains("version: \"" + version + "\""));
-    assertTrue(read(root, ".github/workflows/build.yml").contains("PlexonPanel-" + version + "-${{ matrix.os }}"));
 
     String packager = read(root, "scripts/package-release.py");
     assertTrue(packager.contains("PlexonPanel-{version}.jar"));
