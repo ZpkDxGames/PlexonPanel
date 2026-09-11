@@ -1,69 +1,149 @@
-name: Prepare gated final release
+name: Release
+
 on:
-  workflow_dispatch:
-    inputs:
-      tag:
-        description: Existing reviewed tag (v3.1.0)
-        required: true
-        type: string
-      acceptance_verified:
-        description: All live Core, lifecycle, compatibility, Paper, ARM64, cloud, rclone, privacy and stability evidence was reviewed
-        required: true
-        type: boolean
-        default: false
+  push:
+    branches:
+      - 'release/stable'
+
 permissions:
   contents: write
+
 concurrency:
-  group: plexonpanel-release
+  group: plexonpanel-stable-release
   cancel-in-progress: false
+
 jobs:
-  draft:
-    if: inputs.acceptance_verified && inputs.tag == 'v3.1.0'
+  release:
     runs-on: ubuntu-24.04
-    timeout-minutes: 25
+    timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v7
+      - name: Checkout exact stable candidate
+        uses: actions/checkout@v7
         with:
-          ref: ${{ inputs.tag }}
-      - name: Require recorded acceptance
-        run: |
-          python3 - <<'PY'
-          import json
-          from pathlib import Path
-          gates=json.loads(Path('docs/release-gates.json').read_text())
-          required={
-            'paperDisposable','fullCapabilityAccessMatrix','highRiskConfirmationAudit',
-            'ubuntuArm64','cloudflareVercel','rclone','restoreCrashRecovery',
-            'stability30Minutes','playerPresenceLifecycle','orphanSessionRecovery',
-            'mixedVersionProtocol3','realtimeReconciliation','privacyScopeValidation',
-            'coreModuleRegistration','coreReloadNoTransportRestart','standaloneWithoutCore',
-            'panelLifecycleTwentyCycles'
-          }
-          assert gates['version']=='3.1.0' and set(gates['gates'])==required
-          assert all(g['passed'] is True and g['evidence'].strip() for g in gates['gates'].values()), 'Live acceptance is incomplete'
-          PY
+          fetch-depth: 0
+
       - uses: actions/setup-java@v5
         with:
           distribution: temurin
-          java-version: "25"
+          java-version: '25'
+
       - uses: gradle/actions/setup-gradle@v6
-      - name: Provision PlexonCore 1.0.0 API
+
+      - name: Provision PlexonCore 2.0.4 API
         shell: bash
         run: |
           set -euo pipefail
-          core_jar="${RUNNER_TEMP}/PlexonCore-1.0.0.jar"
-          curl --fail --location --silent --show-error --output "${core_jar}" \
-            "https://github.com/ZpkDxGames/PlexonCore/releases/download/v1.0.0/PlexonCore-1.0.0.jar"
-          echo "4abce6de93293e21b31cb874734430d5bdc77de17a4c3b98fd6a9006e1f13018  ${core_jar}" | sha256sum --check
+          core_jar="${RUNNER_TEMP}/PlexonCore-2.0.4.jar"
+          curl --fail --location --silent --show-error \
+            --output "${core_jar}" \
+            "https://github.com/ZpkDxGames/PlexonCore/releases/download/v2.0.4/PlexonCore-2.0.4.jar"
+          echo "61d625a717da9f46ee9231e1970d84b4c317ae12cf4090cdf7c9d39b6a1a9baf  ${core_jar}" | sha256sum --check
           mvn -B -ntp org.apache.maven.plugins:maven-install-plugin:3.1.4:install-file \
             -Dfile="${core_jar}" -DgroupId=com.zpkdxgames -DartifactId=PlexonCore \
-            -Dversion=1.0.0 -Dpackaging=jar -DgeneratePom=true
-      - run: ./gradlew --no-daemon clean test check javadoc :agent:jar :host-agent:jar
-      - run: python3 scripts/package-release.py
-      - name: Create draft for final operator review
+            -Dversion=2.0.4 -Dpackaging=jar -DgeneratePom=true
+
+      - name: Read project version
+        id: project
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(python3 - <<'PY'
+          import re
+          from pathlib import Path
+          text=Path('build.gradle.kts').read_text()
+          match=re.search(r'^version\s*=\s*"([^"]+)"\s*$', text, re.M)
+          if not match:
+              raise SystemExit('root Gradle version is missing')
+          print(match.group(1))
+          PY
+          )"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+
+      - name: Verify stable boundary
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ inputs.tag }}
+        shell: bash
         run: |
-          gh release create "$RELEASE_TAG" build/release/* --verify-tag --draft \
-            --title "PlexonPanel 3.1.0" --notes-file CHANGELOG.md
+          set -euo pipefail
+          VERSION='${{ steps.project.outputs.version }}'
+          test "${GITHUB_REF_NAME}" = 'release/stable'
+          case "${VERSION}" in
+            *-*) echo "Stable workflow refuses prerelease version: ${VERSION}" >&2; exit 1 ;;
+          esac
+          git fetch origin main
+          test "${GITHUB_SHA}" = "$(git rev-parse origin/main)"
+          test -s "docs/release-${VERSION}.md"
+          if gh release view "v${VERSION}" >/dev/null 2>&1; then
+            echo "v${VERSION} already exists" >&2
+            exit 1
+          fi
+          if git ls-remote --exit-code --tags origin "refs/tags/v${VERSION}" >/dev/null 2>&1; then
+            echo "v${VERSION} tag already exists" >&2
+            exit 1
+          fi
+
+      - name: Test, check, Javadoc and build matched pair
+        run: ./gradlew --no-daemon clean test check javadoc :agent:jar :host-agent:jar
+
+      - name: Package exact matched release
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/summarize-tests.py
+          python3 scripts/package-release.py
+          python3 - <<'PY'
+          import json, os, re, zipfile
+          from pathlib import Path
+
+          version=re.search(r'^version\s*=\s*"([^"]+)"\s*$', Path('build.gradle.kts').read_text(), re.M).group(1)
+          manifest=json.loads(Path('build/release/release-manifest.json').read_text())
+          assert manifest['sourceCommit'] == os.environ['GITHUB_SHA']
+          assert manifest['javaCandidateCommit'] == os.environ['GITHUB_SHA']
+          assert manifest['workingTreeModified'] is False
+          assert manifest['version'] == version
+          assert manifest['protocolVersion'] == 3
+          assert manifest['java'] == 25
+          assert manifest['runtimeCertification'] == 'NOT_EXECUTED'
+          assert manifest['dashboardCandidateCommit'] == 'bb2c1d76f38ce9ce49aa7f3ece278cc0df2d02f2'
+          assert manifest['dashboardCiRun'] == 34524470086
+
+          paper=Path(f'build/release/PlexonPanel-{version}.jar')
+          host=Path(f'build/release/plexonpanel-host-{version}.jar')
+          examples=Path(f'build/release/PlexonPanel-{version}-examples.zip')
+          assert paper.is_file() and host.is_file() and examples.is_file()
+
+          def major(path, entry):
+              with zipfile.ZipFile(path) as z:
+                  data=z.read(entry)
+              assert data[:4] == b'\xca\xfe\xba\xbe'
+              return int.from_bytes(data[6:8], 'big')
+
+          assert major(paper, 'io/github/zpkdxgames/plexonpanel/PlexonPanelPlugin.class') == 69
+          assert major(host, 'io/github/zpkdxgames/plexonpanel/host/HostMain.class') == 69
+          with zipfile.ZipFile(paper) as z:
+              names=set(z.namelist())
+              plugin_yml=z.read('plugin.yml').decode('utf-8')
+          assert f'version: "{version}"' in plugin_yml
+          assert 'api-version: "26.2"' in plugin_yml
+          assert 'io/github/zpkdxgames/plexonpanel/api/PlexonPanelAPI.class' in names
+          assert 'io/github/zpkdxgames/plexonpanel/integration/core/PlexonCoreBridge.class' in names
+          assert not any(name.startswith('com/zpkdxgames/plexoncore/') for name in names)
+          PY
+          (cd build/release && sha256sum --check SHA256SUMS.txt)
+          git diff --check
+
+      - name: Publish GitHub stable release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.project.outputs.version }}
+          target_commitish: ${{ github.sha }}
+          name: PlexonPanel ${{ steps.project.outputs.version }}
+          prerelease: false
+          body_path: docs/release-${{ steps.project.outputs.version }}.md
+          files: |
+            build/release/PlexonPanel-${{ steps.project.outputs.version }}.jar
+            build/release/plexonpanel-host-${{ steps.project.outputs.version }}.jar
+            build/release/PlexonPanel-${{ steps.project.outputs.version }}-examples.zip
+            build/release/release-manifest.json
+            build/release/SHA256SUMS.txt
+            build/release/test-summary.txt

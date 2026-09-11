@@ -1,6 +1,6 @@
-# PlexonPanel Local API — 3.1.0
+# PlexonPanel Local API — 3.2.0
 
-PlexonPanel 3.1.0 registers `io.github.zpkdxgames.plexonpanel.api.PlexonPanelAPI` through Bukkit `ServicesManager` after the Paper `AgentRuntime` has started successfully.
+PlexonPanel 3.2.0 registers `io.github.zpkdxgames.plexonpanel.api.PlexonPanelAPI` through Bukkit `ServicesManager` after the Paper `AgentRuntime` has started successfully.
 
 The service is **local-only and read-only**. It is intended for other installed Paper plugins that need sanitized Panel state. It is not a remote-control surface and does not replace protocol 3.
 
