@@ -1,5 +1,5 @@
 name: PlexonPanel
-version: "3.1.1"
+version: "3.2.0-rc.3"
 main: io.github.zpkdxgames.plexonpanel.PlexonPanelPlugin
 description: Secure Paper server monitoring and remote administration agent for PlexonPanel.
 api-version: "26.2"
@@ -12,7 +12,7 @@ softdepend:
 commands:
   plexonpanel:
     description: Manage the PlexonPanel server agent.
-    usage: /<command> [gui|status|pair [role]|devices|revoke|revoke-all|capabilities|audit|reload|diagnostics]
+    usage: /<command> [gui|status|pair [role]|devices|revoke|revoke-all|capabilities|audit|unpair|rotate|reload|diagnostics]
     aliases: [ppanel]
 
 permissions:
@@ -43,18 +43,13 @@ permissions:
     default: op
   plexonpanel.diagnostics:
     default: op
-
   plexonpanel.gui:
     default: op
-
   plexonpanel.devices:
     default: op
-
   plexonpanel.revoke:
     default: op
-
   plexonpanel.capabilities:
     default: op
-
   plexonpanel.audit:
     default: op
