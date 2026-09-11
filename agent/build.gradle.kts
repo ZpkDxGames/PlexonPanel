@@ -20,6 +20,7 @@ dependencies {
     testImplementation("org.junit.jupiter:junit-jupiter")
     testImplementation("io.papermc.paper:paper-api:26.2.build.121-stable")
     testImplementation("com.zpkdxgames:PlexonCore:2.0.4")
+    testImplementation(project(":integrations:plexonchats-api"))
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
 

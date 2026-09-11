@@ -1,59 +1,42 @@
 package io.github.zpkdxgames.plexonpanel.chat;
 
-import com.antondev.chats.api.PlexonChatsApi;
-import com.antondev.chats.api.event.PlexonPublicChatEvent;
-import com.antondev.chats.api.model.PlexonChatChannel;
+import com.antondev.chats.ChatChannel;
+import com.antondev.chats.api.PlexonChatEvent;
 import io.github.zpkdxgames.plexonpanel.model.ChatRecord;
 import io.github.zpkdxgames.plexonpanel.protocol.MessagePriority;
 import io.github.zpkdxgames.plexonpanel.protocol.MessageSink;
-import net.kyori.adventure.text.Component;
+import java.time.Instant;
+import java.util.UUID;
 import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer;
+import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
-import org.bukkit.plugin.RegisteredServiceProvider;
-import org.bukkit.plugin.java.JavaPlugin;
-
-import java.time.Instant;
 
 final class PlexonChatsListener implements Listener {
-    private final MessageSink sink;
-    private final PlainTextComponentSerializer plainText = PlainTextComponentSerializer.plainText();
-    private final PlexonChatsApi api;
+  private final MessageSink sink;
+  private final PlainTextComponentSerializer plainText = PlainTextComponentSerializer.plainText();
 
-    PlexonChatsListener(JavaPlugin plugin, MessageSink sink) {
-        this.sink = sink;
-        RegisteredServiceProvider<PlexonChatsApi> registration = plugin.getServer()
-            .getServicesManager()
-            .getRegistration(PlexonChatsApi.class);
-        this.api = registration == null ? null : registration.getProvider();
+  PlexonChatsListener(MessageSink sink) {
+    this.sink = sink;
+  }
+
+  @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+  public void onPlexonChat(PlexonChatEvent event) {
+    if (event.getChannel() != ChatChannel.GLOBAL) {
+      return;
     }
-
-    boolean hasApi() {
-        return api != null;
-    }
-
-    boolean publish(Component message, String actorId, String actorDisplayName) {
-        if (api == null) {
-            return false;
-        }
-        api.publishExternalGlobal(message, actorId, actorDisplayName);
-        return true;
-    }
-
-    @EventHandler(priority = EventPriority.MONITOR)
-    public void onPlexonChat(PlexonPublicChatEvent event) {
-        if (event.channel() != PlexonChatChannel.GLOBAL) {
-            return;
-        }
-        sink.send("chat.message", new ChatRecord(
+    Player sender = event.getPlayer();
+    sink.send(
+        "chat.message",
+        new ChatRecord(
             Instant.now().toString(),
-            event.messageId().toString(),
-            event.channel().name(),
-            event.senderId() == null ? null : event.senderId().toString(),
-            event.senderName(),
-            plainText.serialize(event.originalMessage()),
-            "PLEXONCHATS_" + event.source().name()
-        ), MessagePriority.EVENT);
-    }
+            UUID.randomUUID().toString(),
+            event.getChannel().name(),
+            sender == null ? null : sender.getUniqueId().toString(),
+            sender == null ? "unknown" : sender.getName(),
+            plainText.serialize(event.getMessage()),
+            "PLEXONCHATS"),
+        MessagePriority.EVENT);
+  }
 }
