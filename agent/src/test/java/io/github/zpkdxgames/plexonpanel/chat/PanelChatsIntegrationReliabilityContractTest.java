@@ -95,11 +95,14 @@ class PanelChatsIntegrationReliabilityContractTest {
     assertTrue(stream.contains("PLEXON_API_SERVICE = \"com.antondev.chats.api.PlexonChatsAPI\""));
     assertTrue(stream.contains("PLEXON_API_EVENT = \"com.antondev.chats.api.PlexonChatEvent\""));
     assertTrue(stream.contains("!settings.captureVanillaGlobal() || plexonListener != null"));
+    assertTrue(stream.contains("plexonListener != null"));
     assertFalse(stream.contains("runTaskTimer"));
     assertFalse(stream.contains("scheduleSyncRepeatingTask"));
     assertFalse(stream.contains("PlexonPublicChatEvent"));
-    assertFalse(stream.contains("PlexonChatsApi"));
 
+    assertTrue(listener.contains("import com.antondev.chats.api.PlexonChatEvent;"));
+    assertFalse(listener.contains("import com.antondev.chats.api.PlexonChatsApi;"));
+    assertFalse(listener.contains("publishExternalGlobal"));
     assertTrue(listener.contains("ignoreCancelled = true"));
     assertTrue(listener.contains("event.getChannel() != ChatChannel.GLOBAL"));
     assertEquals(1, occurrences(listener, "sink.send("));
