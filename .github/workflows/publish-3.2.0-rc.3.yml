@@ -38,7 +38,7 @@ jobs:
           grep -F "$ACCEPTED_INTEGRATION_SHA" docs/release-3.2.0-rc.3.md
           grep -F "$CHATS_SHA" docs/release-3.2.0-rc.3.md
           grep -F 'runtimeCertification' scripts/package-release.py
-          unexpected="$(git diff --name-only "$ACCEPTED_INTEGRATION_SHA..$GITHUB_SHA" | grep -Ev '^(build.gradle.kts|agent/src/main/resources/plugin.yml|\.github/workflows/build.yml|\.github/workflows/publish-3\.2\.0-rc\.3\.yml|docs/release-3\.2\.0-rc\.3\.md)$' || true)"
+          unexpected="$(git diff --name-only "$ACCEPTED_INTEGRATION_SHA..$GITHUB_SHA" | grep -Ev '^(build.gradle.kts|agent/src/main/resources/plugin.yml|\.github/workflows/build.yml|\.github/workflows/publish-3\.2\.0-rc\.3\.yml|docs/release-3\.2\.0-rc\.3\.md|protocol/src/test/java/io/github/zpkdxgames/plexonpanel/protocol/ReleaseVersionConsistencyTest\.java)$' || true)"
           if [[ -n "$unexpected" ]]; then
             echo "Non-release-preparation changes found after accepted integration commit:" >&2
             printf '%s\n' "$unexpected" >&2
