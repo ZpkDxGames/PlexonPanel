@@ -29,7 +29,8 @@ public record HostConfig(
       boolean restoreEnabled,
       String rcloneExecutable,
       String rcloneRemote,
-      String rcloneConfig) {}
+      String rcloneConfig,
+      List<String> liveSnapshotExcludes) {}
 
   public record ConsoleConfig(
       boolean enabled,
@@ -57,6 +58,10 @@ public record HostConfig(
           1000L,
           List.of());
     }
+  }
+
+  public static List<String> defaultLiveSnapshotExcludes() {
+    return List.of("logs", "crash-reports", "cache", ".cache", "tmp", "plugins/spark/tmp");
   }
 
   public static HostConfig load(Path path) throws java.io.IOException {
@@ -91,6 +96,33 @@ public record HostConfig(
               c.capabilities,
               c.backups,
               ConsoleConfig.defaults());
+    if (c.backups != null && c.backups.liveSnapshotExcludes == null) {
+      BackupConfig b = c.backups;
+      c =
+          new HostConfig(
+              c.serverId,
+              c.serverName,
+              c.relayUrl,
+              c.relayPublicKey,
+              c.serverRoot,
+              c.dataDirectory,
+              c.accessRegistry,
+              c.serviceName,
+              c.capabilities,
+              new BackupConfig(
+                  b.enabled,
+                  b.directory,
+                  b.include,
+                  b.retentionCount,
+                  b.intervalMinutes,
+                  b.maximumBytes,
+                  b.restoreEnabled,
+                  b.rcloneExecutable,
+                  b.rcloneRemote,
+                  b.rcloneConfig,
+                  defaultLiveSnapshotExcludes()),
+              c.console);
+    }
     UUID.fromString(c.serverId);
     if (c.serverName == null || c.serverName.length() > 64 || c.serverName.isBlank())
       throw new IllegalArgumentException("Invalid server label");
@@ -136,7 +168,9 @@ public record HostConfig(
         || b.intervalMinutes < 0
         || b.intervalMinutes > 525600
         || b.maximumBytes < 1048576
-        || b.maximumBytes > 1099511627776L)
+        || b.maximumBytes > 1099511627776L
+        || b.liveSnapshotExcludes == null
+        || b.liveSnapshotExcludes.size() > 32)
       throw new IllegalArgumentException("Invalid backup configuration");
     if (b.include.stream()
         .anyMatch(
@@ -146,6 +180,8 @@ public record HostConfig(
                     || s.startsWith(".")))
       throw new IllegalArgumentException(
           "Backup includes must be named top-level files or directories");
+    if (b.liveSnapshotExcludes.stream().anyMatch(s -> !validSnapshotExclusion(s)))
+      throw new IllegalArgumentException("Invalid live snapshot exclusion");
     if (b.rcloneRemote != null && !b.rcloneRemote.isBlank()) {
       if (!"/usr/bin/rclone".equals(b.rcloneExecutable)
           || !b.rcloneRemote.matches("[A-Za-z0-9][A-Za-z0-9_-]{0,63}:[A-Za-z0-9_ /.-]{0,200}")
@@ -156,6 +192,18 @@ public record HostConfig(
     }
     validateConsole(c.console);
     return c;
+  }
+
+  private static boolean validSnapshotExclusion(String value) {
+    if (value == null || value.isBlank() || value.length() > 200 || value.indexOf('\\') >= 0)
+      return false;
+    if (value.startsWith("/") || value.endsWith("/") || value.contains("//")) return false;
+    for (String part : value.split("/"))
+      if (part.isBlank()
+          || part.equals(".")
+          || part.equals("..")
+          || !part.matches("[A-Za-z0-9._-]{1,64}")) return false;
+    return true;
   }
 
   private static void validateConsole(ConsoleConfig console) {
