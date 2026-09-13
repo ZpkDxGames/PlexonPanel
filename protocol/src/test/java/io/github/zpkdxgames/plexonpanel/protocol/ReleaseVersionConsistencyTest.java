@@ -9,7 +9,7 @@ import java.util.regex.Pattern;
 import org.junit.jupiter.api.Test;
 
 class ReleaseVersionConsistencyTest {
-  private static final String EXPECTED_VERSION = "3.2.0";
+  private static final String EXPECTED_VERSION = "3.3.0";
 
   @Test
   void stableArtifactNamesAgreeWithRootVersionWithoutRewritingHistoricalAcceptance() throws Exception {

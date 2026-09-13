@@ -66,6 +66,8 @@ public record HostConfig(
     for (String scope : c.capabilities.keySet())
       if (!scope.startsWith("files.")
           && !scope.startsWith("backup.")
+          && !scope.startsWith("maintenance.")
+          && !scope.startsWith("provider.")
           && !scope.startsWith("server.")
           && !scope.startsWith("audit.")
           && !scope.startsWith("devices.")
