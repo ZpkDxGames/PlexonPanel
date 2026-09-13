@@ -53,7 +53,7 @@ public final class HostMain {
     audit.clean();
     HostConnection connection = new HostConnection(config, identity);
     SystemdService service = new SystemdService(config.serviceName());
-    PaperSaveLease leases = new PaperSaveLease(connection);
+    PaperSaveLease leases = new PaperSaveLease(connection, devices);
     PaperMaintenanceLink maintenanceLink = new PaperMaintenanceLink(connection, devices);
     AtomicBoolean paper = new AtomicBoolean();
     AtomicLong paperRevision = new AtomicLong();
