@@ -28,6 +28,7 @@ public final class AgentRuntime implements AutoCloseable {
   private final ControlPolicy policy;
   private final DeviceRegistry devices;
   private final io.github.zpkdxgames.plexonpanel.backup.BackupCoordinator backupCoordinator;
+  private final io.github.zpkdxgames.plexonpanel.backup.MaintenanceCoordinator maintenanceCoordinator;
   private final AtomicBoolean started = new AtomicBoolean();
   private final AtomicBoolean closed = new AtomicBoolean();
 
@@ -71,11 +72,16 @@ public final class AgentRuntime implements AutoCloseable {
     backupCoordinator =
         new io.github.zpkdxgames.plexonpanel.backup.BackupCoordinator(
             plugin, devices, policy, gateway);
+    maintenanceCoordinator =
+        new io.github.zpkdxgames.plexonpanel.backup.MaintenanceCoordinator(
+            plugin, devices, policy, gateway);
     gateway.setInboundHandler(
         message -> {
-          if (message.envelope().type().equals("backup.coordination"))
-            backupCoordinator.accept(message);
-          else actions.accept(message);
+          switch (message.envelope().type()) {
+            case "backup.coordination" -> backupCoordinator.accept(message);
+            case "maintenance.coordination" -> maintenanceCoordinator.accept(message);
+            default -> actions.accept(message);
+          }
         });
     gateway.setConnectedHandler(
         () -> {
