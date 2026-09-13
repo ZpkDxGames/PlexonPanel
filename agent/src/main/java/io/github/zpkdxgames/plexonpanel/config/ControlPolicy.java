@@ -68,7 +68,6 @@ public record ControlPolicy(
       c.put(scope, true);
     boolean backupCoordination = config.getBoolean("backups.enabled", false);
     c.put("backup.create", remote && backupCoordination);
-    c.put("maintenance.run", remote && backupCoordination);
     c.put("devices.revoke", remote && config.getBoolean("access.allow-dashboard-revoke", false));
     Map<String, Set<String>> roles = new TreeMap<>(String.CASE_INSENSITIVE_ORDER);
     roles.putAll(Scopes.ROLES);
