@@ -66,7 +66,9 @@ public record ControlPolicy(
     for (String scope :
         List.of("audit.view", "audit.view.self", "devices.view", "settings.view", "server.status"))
       c.put(scope, true);
-    c.put("backup.create", remote && config.getBoolean("backups.enabled", false));
+    boolean backupCoordination = config.getBoolean("backups.enabled", false);
+    c.put("backup.create", remote && backupCoordination);
+    c.put("maintenance.run", remote && backupCoordination);
     c.put("devices.revoke", remote && config.getBoolean("access.allow-dashboard-revoke", false));
     Map<String, Set<String>> roles = new TreeMap<>(String.CASE_INSENSITIVE_ORDER);
     roles.putAll(Scopes.ROLES);
