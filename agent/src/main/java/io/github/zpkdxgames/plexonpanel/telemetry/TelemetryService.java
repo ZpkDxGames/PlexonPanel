@@ -39,13 +39,15 @@ import org.bukkit.event.player.PlayerKickEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.event.server.PluginDisableEvent;
 import org.bukkit.event.server.PluginEnableEvent;
+import org.bukkit.event.world.WorldLoadEvent;
+import org.bukkit.event.world.WorldUnloadEvent;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.scheduler.BukkitTask;
 
 /**
  * Captures Paper-owned data on the primary thread and performs batching, serialization, and relay
- * writes only on bounded workers. Presence events have a dedicated worker so periodic telemetry
- * cannot delay them.
+ * writes only on bounded workers. Event bursts mark inventories dirty and are coalesced before a
+ * bounded main-thread capture; slow reconciliation timers remain as a correctness safety net.
  */
 public final class TelemetryService implements Listener, AutoCloseable {
   public record SnapshotRequest(boolean queued, boolean coalesced) {}
@@ -53,6 +55,8 @@ public final class TelemetryService implements Listener, AutoCloseable {
   private static final int TELEMETRY_QUEUE_CAPACITY = 16;
   private static final int EVENT_QUEUE_CAPACITY = 1024;
   private static final long SATURATION_WARNING_MILLIS = 60_000L;
+  private static final long INVENTORY_DEBOUNCE_TICKS = 10L;
+  private static final long PLAYER_DEBOUNCE_TICKS = 2L;
 
   private final JavaPlugin plugin;
   private final PanelSettings.Telemetry settings;
@@ -78,12 +82,20 @@ public final class TelemetryService implements Listener, AutoCloseable {
   private final AtomicLong skippedSnapshots = new AtomicLong();
   private final AtomicLong droppedPresenceEvents = new AtomicLong();
   private final AtomicLong nextSaturationWarning = new AtomicLong();
+  private final AtomicLong listenerSnapshotRequests = new AtomicLong();
+  private final AtomicLong coalescedRefreshes = new AtomicLong();
+  private final AtomicLong pluginInventoryDirtyEvents = new AtomicLong();
+  private final AtomicLong worldInventoryDirtyEvents = new AtomicLong();
+  private final AtomicLong playerInventoryDirtyEvents = new AtomicLong();
   private final AtomicReference<List<?>> lastPluginInventory = new AtomicReference<>();
   private final AtomicReference<List<?>> lastWorldInventory = new AtomicReference<>();
   private BukkitTask serverTask;
   private BukkitTask playerTask;
   private BukkitTask pluginTask;
   private BukkitTask worldsTask;
+  private BukkitTask pluginDebounceTask;
+  private BukkitTask worldDebounceTask;
+  private BukkitTask playerDebounceTask;
   private ScheduledFuture<?> systemTask;
 
   public TelemetryService(
@@ -173,8 +185,7 @@ public final class TelemetryService implements Listener, AutoCloseable {
 
   /** A Paper-authorized manual refresh. Concurrent requests collapse into one pending capture. */
   public SnapshotRequest requestPlayerSnapshot() {
-    if (!settings.enabled() || closed.get())
-      throw new SecurityException("CAPABILITY_DISABLED");
+    if (!settings.enabled() || closed.get()) throw new SecurityException("CAPABILITY_DISABLED");
     return requestPlayerSnapshot(true);
   }
 
@@ -183,6 +194,7 @@ public final class TelemetryService implements Listener, AutoCloseable {
     if (!playerSnapshotInFlight.compareAndSet(false, true)) {
       if (demand) playerSnapshotPending.set(true);
       skippedSnapshots.incrementAndGet();
+      coalescedRefreshes.incrementAndGet();
       return new SnapshotRequest(true, true);
     }
     long epoch = transportEpoch.get();
@@ -224,6 +236,7 @@ public final class TelemetryService implements Listener, AutoCloseable {
     if (closed.get() || !settings.enabled()) return;
     if (!serverSendInFlight.compareAndSet(false, true)) {
       skippedSnapshots.incrementAndGet();
+      coalescedRefreshes.incrementAndGet();
       return;
     }
     long epoch = transportEpoch.get();
@@ -245,6 +258,7 @@ public final class TelemetryService implements Listener, AutoCloseable {
       pluginSnapshotPending.set(true);
       if (force) pluginForcePending.set(true);
       skippedSnapshots.incrementAndGet();
+      coalescedRefreshes.incrementAndGet();
       return;
     }
     long epoch = transportEpoch.get();
@@ -286,6 +300,7 @@ public final class TelemetryService implements Listener, AutoCloseable {
       worldSnapshotPending.set(true);
       if (force) worldForcePending.set(true);
       skippedSnapshots.incrementAndGet();
+      coalescedRefreshes.incrementAndGet();
       return;
     }
     long epoch = transportEpoch.get();
@@ -346,16 +361,19 @@ public final class TelemetryService implements Listener, AutoCloseable {
             firstSeen(player, now),
             totalPlayTime(player));
     emitPresence(captured);
+    markPlayerInventoryDirty();
   }
 
   @EventHandler(priority = EventPriority.MONITOR)
   public void onQuit(PlayerQuitEvent event) {
     closeSession(event.getPlayer(), PresenceTermination.QUIT);
+    markPlayerInventoryDirty();
   }
 
   @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
   public void onKick(PlayerKickEvent event) {
     closeSession(event.getPlayer(), PresenceTermination.KICK);
+    markPlayerInventoryDirty();
   }
 
   private void closeSession(Player player, PresenceTermination termination) {
@@ -400,23 +418,97 @@ public final class TelemetryService implements Listener, AutoCloseable {
 
   @EventHandler(priority = EventPriority.MONITOR)
   public void onPluginEnable(PluginEnableEvent event) {
-    if (event.getPlugin() != plugin && settings.enabled()) requestPluginSnapshot(false);
+    if (event.getPlugin() != plugin && settings.enabled()) markPluginInventoryDirty();
   }
 
   @EventHandler(priority = EventPriority.MONITOR)
   public void onPluginDisable(PluginDisableEvent event) {
-    if (event.getPlugin() != plugin && settings.enabled()) requestPluginSnapshot(false);
+    if (event.getPlugin() != plugin && settings.enabled()) markPluginInventoryDirty();
+  }
+
+  @EventHandler(priority = EventPriority.MONITOR)
+  public void onWorldLoad(WorldLoadEvent event) {
+    if (settings.enabled()) markWorldInventoryDirty();
+  }
+
+  @EventHandler(priority = EventPriority.MONITOR)
+  public void onWorldUnload(WorldUnloadEvent event) {
+    if (settings.enabled()) markWorldInventoryDirty();
+  }
+
+  private void markPluginInventoryDirty() {
+    pluginInventoryDirtyEvents.incrementAndGet();
+    if (pluginDebounceTask != null) {
+      pluginDebounceTask.cancel();
+      coalescedRefreshes.incrementAndGet();
+    }
+    pluginDebounceTask =
+        Bukkit.getScheduler()
+            .runTaskLater(
+                plugin,
+                () -> {
+                  pluginDebounceTask = null;
+                  listenerSnapshotRequests.incrementAndGet();
+                  requestPluginSnapshot(false);
+                },
+                INVENTORY_DEBOUNCE_TICKS);
+  }
+
+  private void markWorldInventoryDirty() {
+    worldInventoryDirtyEvents.incrementAndGet();
+    if (worldDebounceTask != null) {
+      worldDebounceTask.cancel();
+      coalescedRefreshes.incrementAndGet();
+    }
+    worldDebounceTask =
+        Bukkit.getScheduler()
+            .runTaskLater(
+                plugin,
+                () -> {
+                  worldDebounceTask = null;
+                  listenerSnapshotRequests.incrementAndGet();
+                  requestWorldSnapshot(false);
+                },
+                INVENTORY_DEBOUNCE_TICKS);
+  }
+
+  private void markPlayerInventoryDirty() {
+    if (!settings.enabled()) return;
+    playerInventoryDirtyEvents.incrementAndGet();
+    if (playerDebounceTask != null) {
+      playerDebounceTask.cancel();
+      coalescedRefreshes.incrementAndGet();
+    }
+    playerDebounceTask =
+        Bukkit.getScheduler()
+            .runTaskLater(
+                plugin,
+                () -> {
+                  playerDebounceTask = null;
+                  listenerSnapshotRequests.incrementAndGet();
+                  requestPlayerSnapshot(false);
+                },
+                PLAYER_DEBOUNCE_TICKS);
   }
 
   public Map<String, Object> diagnostics() {
-    return Map.of(
-        "telemetryQueueDepth", telemetryWorker.getQueue().size(),
-        "telemetryQueueCapacity", TELEMETRY_QUEUE_CAPACITY,
-        "presenceEventQueueDepth", eventWorker.getQueue().size(),
-        "presenceEventQueueCapacity", EVENT_QUEUE_CAPACITY,
-        "skippedSnapshots", skippedSnapshots.get(),
-        "droppedPresenceEvents", droppedPresenceEvents.get(),
-        "playerSnapshotInFlight", playerSnapshotInFlight.get());
+    Map<String, Object> values = new LinkedHashMap<>();
+    values.put("telemetryQueueDepth", telemetryWorker.getQueue().size());
+    values.put("telemetryQueueCapacity", TELEMETRY_QUEUE_CAPACITY);
+    values.put("telemetryQueueHighWaterBound", TELEMETRY_QUEUE_CAPACITY);
+    values.put("presenceEventQueueDepth", eventWorker.getQueue().size());
+    values.put("presenceEventQueueCapacity", EVENT_QUEUE_CAPACITY);
+    values.put("skippedSnapshots", skippedSnapshots.get());
+    values.put("droppedPresenceEvents", droppedPresenceEvents.get());
+    values.put("listenerTriggeredSnapshotRequests", listenerSnapshotRequests.get());
+    values.put("coalescedRefreshCount", coalescedRefreshes.get());
+    values.put("pluginInventoryDirtyEvents", pluginInventoryDirtyEvents.get());
+    values.put("worldInventoryDirtyEvents", worldInventoryDirtyEvents.get());
+    values.put("playerInventoryDirtyEvents", playerInventoryDirtyEvents.get());
+    values.put("playerSnapshotInFlight", playerSnapshotInFlight.get());
+    values.put("pluginSnapshotInFlight", pluginSnapshotInFlight.get());
+    values.put("worldSnapshotInFlight", worldSnapshotInFlight.get());
+    return Map.copyOf(values);
   }
 
   private List<ObservedPlayer> captureObservedPlayers() {
@@ -488,7 +580,8 @@ public final class TelemetryService implements Listener, AutoCloseable {
   private void warnSaturation(String message) {
     long now = System.currentTimeMillis();
     long next = nextSaturationWarning.get();
-    if (now >= next && nextSaturationWarning.compareAndSet(next, now + SATURATION_WARNING_MILLIS))
+    if (now >= next
+        && nextSaturationWarning.compareAndSet(next, now + SATURATION_WARNING_MILLIS))
       plugin.getLogger().warning("PlexonPanel: " + message);
   }
 
@@ -502,8 +595,16 @@ public final class TelemetryService implements Listener, AutoCloseable {
     if (!closed.compareAndSet(false, true)) return;
     transportEpoch.incrementAndGet();
     HandlerList.unregisterAll(this);
-    for (BukkitTask task : new BukkitTask[] {serverTask, playerTask, pluginTask, worldsTask})
-      if (task != null) task.cancel();
+    for (BukkitTask task :
+        new BukkitTask[] {
+          serverTask,
+          playerTask,
+          pluginTask,
+          worldsTask,
+          pluginDebounceTask,
+          worldDebounceTask,
+          playerDebounceTask
+        }) if (task != null) task.cancel();
     if (systemTask != null) systemTask.cancel(false);
     telemetryWorker.shutdownNow();
     eventWorker.shutdownNow();
