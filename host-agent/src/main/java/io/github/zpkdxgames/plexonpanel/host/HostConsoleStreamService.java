@@ -286,13 +286,15 @@ public final class HostConsoleStreamService implements AutoCloseable {
 
   public void sendRecentSnapshot() {
     if (!settings.enabled() || !connection.authenticated()) return;
+    // Source authority must be established before any buffered replay. This is especially important
+    // immediately after authentication, when the journal follower may already be healthy.
+    announceStatus();
     List<ConsoleLine> copy;
     synchronized (this) {
       copy = List.copyOf(recent);
     }
     for (Map<String, Object> batch : SnapshotBatches.split("lines", copy, 100))
       connection.send("console.lines", batch, MessagePriority.EVENT);
-    announceStatus();
   }
 
   public void announceStatus() {
