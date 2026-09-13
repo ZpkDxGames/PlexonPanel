@@ -1,6 +1,7 @@
 package io.github.zpkdxgames.plexonpanel.host;
 
 import com.google.gson.*;
+import io.github.zpkdxgames.plexonpanel.console.ConsoleRedactor;
 import io.github.zpkdxgames.plexonpanel.security.Scopes;
 import java.net.URI;
 import java.nio.file.*;
@@ -16,7 +17,8 @@ public record HostConfig(
     String accessRegistry,
     String serviceName,
     Map<String, Boolean> capabilities,
-    BackupConfig backups) {
+    BackupConfig backups,
+    ConsoleConfig console) {
   public record BackupConfig(
       boolean enabled,
       String directory,
@@ -28,6 +30,34 @@ public record HostConfig(
       String rcloneExecutable,
       String rcloneRemote,
       String rcloneConfig) {}
+
+  public record ConsoleConfig(
+      boolean enabled,
+      String source,
+      String journalExecutable,
+      int initialReplayLines,
+      int recentLines,
+      int queueCapacity,
+      int batchSize,
+      long batchIntervalMillis,
+      int maximumLineBytes,
+      long cursorPersistenceMillis,
+      List<String> redactPatterns) {
+    static ConsoleConfig defaults() {
+      return new ConsoleConfig(
+          false,
+          "JOURNALD",
+          "/usr/bin/journalctl",
+          500,
+          2500,
+          4096,
+          100,
+          200L,
+          8192,
+          1000L,
+          List.of());
+    }
+  }
 
   public static HostConfig load(Path path) throws java.io.IOException {
     if (Files.size(path) > 65536) throw new java.io.IOException("Host config exceeds limit");
@@ -42,10 +72,25 @@ public record HostConfig(
             "accessRegistry",
             "serviceName",
             "capabilities",
-            "backups")
+            "backups",
+            "console")
         .containsAll(raw.keySet()))
       throw new IllegalArgumentException("Unknown host configuration key");
     HostConfig c = new Gson().fromJson(raw, HostConfig.class);
+    if (c.console == null)
+      c =
+          new HostConfig(
+              c.serverId,
+              c.serverName,
+              c.relayUrl,
+              c.relayPublicKey,
+              c.serverRoot,
+              c.dataDirectory,
+              c.accessRegistry,
+              c.serviceName,
+              c.capabilities,
+              c.backups,
+              ConsoleConfig.defaults());
     UUID.fromString(c.serverId);
     if (c.serverName == null || c.serverName.length() > 64 || c.serverName.isBlank())
       throw new IllegalArgumentException("Invalid server label");
@@ -59,7 +104,8 @@ public record HostConfig(
       throw new IllegalArgumentException(
           "Pinned WSS /v1/agent URL required (ws:// is allowed only for loopback)");
     io.github.zpkdxgames.plexonpanel.identity.KeyCodec.decodePublic(c.relayPublicKey);
-    if (!c.serviceName.matches("[A-Za-z0-9][A-Za-z0-9_.@-]{0,90}\\.service"))
+    if (c.serviceName == null
+        || !c.serviceName.matches("[A-Za-z0-9][A-Za-z0-9_.@-]{0,90}\\.service"))
       throw new IllegalArgumentException("Invalid configured systemd service");
     if (c.capabilities == null || !Scopes.ALL.containsAll(c.capabilities.keySet()))
       throw new IllegalArgumentException("Unknown host scope");
@@ -72,7 +118,9 @@ public record HostConfig(
           && !scope.startsWith("audit.")
           && !scope.startsWith("devices.")
           && !scope.equals("telemetry.view")
-          && !scope.equals("settings.view"))
+          && !scope.equals("settings.view")
+          && !scope.equals("console.view.errors")
+          && !scope.equals("console.view.full"))
         throw new IllegalArgumentException("Scope is not a host capability");
     for (String value : List.of(c.serverRoot, c.dataDirectory, c.accessRegistry))
       if (!Path.of(value).isAbsolute())
@@ -106,7 +154,32 @@ public record HostConfig(
           || !Path.of(b.rcloneConfig).isAbsolute())
         throw new IllegalArgumentException("Invalid locally configured rclone provider");
     }
+    validateConsole(c.console);
     return c;
+  }
+
+  private static void validateConsole(ConsoleConfig console) {
+    if (!"JOURNALD".equals(console.source))
+      throw new IllegalArgumentException("Unsupported Host console source");
+    if (!"/usr/bin/journalctl".equals(console.journalExecutable))
+      throw new IllegalArgumentException("Host journal executable must be /usr/bin/journalctl");
+    if (console.initialReplayLines < 0 || console.initialReplayLines > 5000)
+      throw new IllegalArgumentException("Invalid console initial replay size");
+    if (console.recentLines < 100 || console.recentLines > 10000)
+      throw new IllegalArgumentException("Invalid console recent history size");
+    if (console.queueCapacity < 128 || console.queueCapacity > 65536)
+      throw new IllegalArgumentException("Invalid console queue capacity");
+    if (console.batchSize < 1 || console.batchSize > 100)
+      throw new IllegalArgumentException("Invalid console batch size");
+    if (console.batchIntervalMillis < 50 || console.batchIntervalMillis > 5000)
+      throw new IllegalArgumentException("Invalid console batch interval");
+    if (console.maximumLineBytes < 512 || console.maximumLineBytes > 65536)
+      throw new IllegalArgumentException("Invalid console maximum line size");
+    if (console.cursorPersistenceMillis < 250 || console.cursorPersistenceMillis > 60000)
+      throw new IllegalArgumentException("Invalid console cursor persistence interval");
+    if (console.redactPatterns == null || console.redactPatterns.size() > 32)
+      throw new IllegalArgumentException("Invalid console redaction patterns");
+    new ConsoleRedactor(console.redactPatterns);
   }
 
   private static boolean isLoopbackWebSocket(URI uri) {
@@ -132,6 +205,9 @@ public record HostConfig(
           Boolean.TRUE.equals(result.get(s))
               && backups.enabled
               && (!s.equals("backup.restore") || backups.restoreEnabled));
+    for (String s : List.of("console.view.errors", "console.view.full"))
+      result.put(s, Boolean.TRUE.equals(result.get(s)) && console.enabled);
+    result.put("console.execute.allowed", false);
     return Map.copyOf(result);
   }
 }

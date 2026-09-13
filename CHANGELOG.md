@@ -1,5 +1,17 @@
 # Changelog
 
+## 3.4.0 — Host-authoritative Linux console and relay parity
+
+- Add a Host-owned journald console source for the configured PlexonCraft systemd service with fixed executable/arguments, bounded replay/history/queues/batches, cursor and invocation persistence, restart backoff, drop accounting, shared severity classification, and pre-transport redaction.
+- Make Host console authority depend on authenticated source health and local console capability; keep Paper `latest.log` as an automatically resumable fallback without intentionally replaying Host-owned intervals.
+- Preserve Paper as the sole `console.execute` authority. Host never advertises command execution, and the matched relay rejects attempts to route console commands to Host.
+- Extend Protocol 3 console line metadata with optional source/session/journal fields without introducing Protocol 4, re-pairing, a new server identity, or mutable device grants.
+- Consolidate the standalone relay release line into the canonical Dashboard repository and require Worker/standalone parity for Host console authority, scope filtering, ready-state metadata, and Paper-only command execution.
+- Bound and deduplicate Dashboard console history across Host/Paper transitions while keeping Host output visible when Paper is offline and keeping clear/export actions browser-local.
+- Debounce listener-driven plugin/world/roster refreshes and preserve existing bounded telemetry workers, in-flight coalescing, slow reconciliation timers, and holder-based GUI event rejection.
+- Add backward-compatible Host `console` configuration. Omitted console configuration migrates to disabled defaults; the full-control example explicitly enables Host journald viewing.
+- Keep live PlexonCraft deployment and restart/failure acceptance as a separate runtime gate; source/release manifests continue to report `runtimeCertification=NOT_EXECUTED` until those checks are actually performed.
+
 ## 3.2.0 — stable repository closure
 
 - Promote the accepted `3.2.0-rc.3` Java source line to stable `3.2.0` without changing protocol 3, identity/pairing/device-grant semantics, or the Paper/Host authority split.

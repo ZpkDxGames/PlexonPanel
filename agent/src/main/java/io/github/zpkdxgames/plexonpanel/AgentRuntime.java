@@ -40,7 +40,8 @@ public final class AgentRuntime implements AutoCloseable {
       Path serverRoot)
       throws java.io.IOException {
     this.settings = settings;
-    this.policy = ControlPolicy.load(plugin.getConfig(), settings, plugin.getDataFolder().toPath());
+    this.policy =
+        ControlPolicy.load(plugin.getConfig(), settings, plugin.getDataFolder().toPath());
     this.devices =
         new DeviceRegistry(
             plugin.getDataFolder().toPath().resolve("access").resolve("devices.json"),
@@ -80,6 +81,10 @@ public final class AgentRuntime implements AutoCloseable {
           switch (message.envelope().type()) {
             case "backup.coordination" -> backupCoordinator.accept(message);
             case "maintenance.coordination" -> maintenanceCoordinator.accept(message);
+            case "console.authority" ->
+                console.setHostAuthority(
+                    message.body().has("hostAuthoritative")
+                        && message.body().get("hostAuthoritative").getAsBoolean());
             default -> actions.accept(message);
           }
         });
@@ -101,9 +106,7 @@ public final class AgentRuntime implements AutoCloseable {
   }
 
   public void start() {
-    if (closed.get() || !started.compareAndSet(false, true)) {
-      return;
-    }
+    if (closed.get() || !started.compareAndSet(false, true)) return;
     chat.start();
     console.start();
     telemetry.start();
@@ -140,9 +143,7 @@ public final class AgentRuntime implements AutoCloseable {
 
   @Override
   public void close() {
-    if (!closed.compareAndSet(false, true)) {
-      return;
-    }
+    if (!closed.compareAndSet(false, true)) return;
     backupCoordinator.close();
     actions.close();
     telemetry.close();

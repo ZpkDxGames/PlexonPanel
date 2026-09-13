@@ -1,30 +1,16 @@
 package io.github.zpkdxgames.plexonpanel.console;
 
-import java.util.ArrayList;
 import java.util.List;
-import java.util.regex.Pattern;
-import java.util.regex.PatternSyntaxException;
 
+/** Backward-compatible Paper adapter over the shared Protocol 3 redactor. */
 public final class LogRedactor {
-    private final List<Pattern> patterns;
+  private final ConsoleRedactor delegate;
 
-    public LogRedactor(List<String> expressions) {
-        List<Pattern> compiled = new ArrayList<>();
-        for (String expression : expressions) {
-            try {
-                compiled.add(Pattern.compile(expression));
-            } catch (PatternSyntaxException error) {
-                throw new IllegalArgumentException("Invalid console redaction pattern: " + expression, error);
-            }
-        }
-        this.patterns = List.copyOf(compiled);
-    }
+  public LogRedactor(List<String> expressions) {
+    delegate = new ConsoleRedactor(expressions);
+  }
 
-    public String redact(String input) {
-        String result = input;
-        for (Pattern pattern : patterns) {
-            result = pattern.matcher(result).replaceAll("<redacted>");
-        }
-        return result;
-    }
+  public String redact(String input) {
+    return delegate.redact(input);
+  }
 }
