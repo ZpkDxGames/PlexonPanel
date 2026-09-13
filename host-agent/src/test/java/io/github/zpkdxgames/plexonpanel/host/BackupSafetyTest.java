@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.*;
 
 import java.io.*;
 import java.nio.file.*;
+import java.security.KeyPairGenerator;
 import java.util.*;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.zip.*;
@@ -13,14 +14,18 @@ import org.junit.jupiter.api.io.TempDir;
 class BackupSafetyTest {
   @TempDir Path temporary;
 
+  private static String relayPublicKey() throws Exception {
+    return io.github.zpkdxgames.plexonpanel.identity.KeyCodec.encodePublic(
+        KeyPairGenerator.getInstance("Ed25519").generateKeyPair().getPublic());
+  }
+
   BackupManager manager(Path root, long max) throws Exception {
     return new BackupManager(
         new HostConfig(
             UUID.randomUUID().toString(),
             "Test Server",
             "ws://127.0.0.1/v1/agent",
-            io.github.zpkdxgames.plexonpanel.identity.KeyCodec.encodePublic(
-                io.github.zpkdxgames.plexonpanel.identity.KeyCodec.generate().getPublic()),
+            relayPublicKey(),
             root.toString(),
             temporary.resolve("data").toString(),
             temporary.resolve("access.json").toString(),
@@ -88,8 +93,7 @@ class BackupSafetyTest {
             UUID.randomUUID().toString(),
             "Test Server",
             "ws://127.0.0.1/v1/agent",
-            io.github.zpkdxgames.plexonpanel.identity.KeyCodec.encodePublic(
-                io.github.zpkdxgames.plexonpanel.identity.KeyCodec.generate().getPublic()),
+            relayPublicKey(),
             root.toString(),
             temporary.resolve("policy-data").toString(),
             temporary.resolve("policy-access.json").toString(),
