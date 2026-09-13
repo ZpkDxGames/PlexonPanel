@@ -20,8 +20,8 @@ if not version_match:
     raise SystemExit("Cannot read the release version from build.gradle.kts")
 version = version_match.group(1)
 
-DASHBOARD_CANDIDATE = "bb2c1d76f38ce9ce49aa7f3ece278cc0df2d02f2"
-DASHBOARD_CI_RUN = 34524470086
+DASHBOARD_CANDIDATE = "bc07b2b5b850f357e21ecb470873f5b558764c58"
+DASHBOARD_CI_RUN = 34769723268
 JAVA_ROLLBACK_VERSION = "v3.1.1"
 JAVA_ROLLBACK_COMMIT = "e0984b625d692de6076afa7e20c4fe4b35f07e9a"
 DASHBOARD_ROLLBACK_COMMIT = "03777c7dc108b54dda625c7f56f5e723ca35124f"
