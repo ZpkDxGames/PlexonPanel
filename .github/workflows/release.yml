@@ -104,8 +104,8 @@ jobs:
           assert manifest['protocolVersion'] == 3
           assert manifest['java'] == 25
           assert manifest['runtimeCertification'] == 'NOT_EXECUTED'
-          assert manifest['dashboardCandidateCommit'] == 'bc07b2b5b850f357e21ecb470873f5b558764c58'
-          assert manifest['dashboardCiRun'] == 34769723268
+          assert manifest['dashboardCandidateCommit'] == '16d0768952d77b8054c5b8b88785d3f903c5359d'
+          assert manifest['dashboardCiRun'] == 34775174696
 
           paper=Path(f'build/release/PlexonPanel-{version}.jar')
           host=Path(f'build/release/plexonpanel-host-{version}.jar')
