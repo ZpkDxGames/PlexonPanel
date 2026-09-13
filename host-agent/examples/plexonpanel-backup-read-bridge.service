@@ -1,0 +1,41 @@
+[Unit]
+Description=PlexonPanel narrow backup read ACL bridge
+Documentation=https://github.com/ZpkDxGames/PlexonPanel/blob/main/docs/BACKUP_READ_CONTRACT.md
+After=local-fs.target
+Before=plexonpanel-host.service
+
+[Service]
+Type=simple
+User=root
+Group=root
+ExecStart=/usr/bin/python3 /usr/local/lib/plexonpanel/backup-read-bridge.py /etc/plexonpanel-host/read-bridge.json
+Restart=on-failure
+RestartSec=3s
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+ProtectProc=invisible
+ProcSubset=pid
+RestrictSUIDSGID=true
+RestrictRealtime=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+RestrictAddressFamilies=AF_UNIX
+IPAddressDeny=any
+SystemCallArchitectures=native
+CapabilityBoundingSet=CAP_DAC_READ_SEARCH CAP_FOWNER
+AmbientCapabilities=CAP_DAC_READ_SEARCH CAP_FOWNER
+ReadOnlyPaths=/etc/plexonpanel-host/read-bridge.json
+ReadWritePaths=/opt/plexoncraft/server
+
+[Install]
+WantedBy=multi-user.target
