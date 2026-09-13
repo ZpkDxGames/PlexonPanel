@@ -30,11 +30,17 @@
     "backup.create": true,
     "backup.download": true,
     "backup.delete": true,
-    "backup.restore": true
+    "backup.restore": true,
+    "maintenance.view": true,
+    "maintenance.configure": true,
+    "maintenance.restart": true,
+    "maintenance.run": true,
+    "provider.view": true,
+    "provider.test": true
   },
   "backups": {
     "enabled": true,
-    "directory": "/var/backups/plexonpanel",
+    "directory": "/var/lib/plexonpanel-host/backups",
     "include": [
       "world",
       "world_nether",
@@ -49,7 +55,7 @@
     "maximumBytes": 21474836480,
     "restoreEnabled": true,
     "rcloneExecutable": "/usr/bin/rclone",
-    "rcloneRemote": "",
+    "rcloneRemote": "gdrive:PlexonCraft",
     "rcloneConfig": "/etc/plexonpanel-host/rclone.conf"
   }
 }
