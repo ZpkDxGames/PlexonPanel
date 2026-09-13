@@ -9,9 +9,7 @@ import java.util.*;
 import org.bukkit.World;
 import org.bukkit.plugin.java.JavaPlugin;
 
-/**
- * A renewable save lease always restores original per-world autosave state, including on disable.
- */
+/** A renewable save lease always restores original per-world autosave state, including on disable. */
 public final class BackupCoordinator implements AutoCloseable {
   private final JavaPlugin plugin;
   private final DeviceRegistry devices;
@@ -48,66 +46,119 @@ public final class BackupCoordinator implements AutoCloseable {
     UUID.fromString(id);
     UUID.fromString(requestedLease);
     try {
-      if (!operation.equals("resume")) {
-        if (bool(m.body(), "automatic")) {
-          if (!plugin.getConfig().getBoolean("backups.enabled", false)
-              || !plugin.getConfig().getBoolean("backups.allow-host-schedule", false)
-              || policy.hostPublicKey().isBlank()) throw new SecurityException();
-        } else
-          devices.authorize(
-              text(m.body(), "deviceId", 36),
-              integer(m.body(), "generation", -1, 1, Long.MAX_VALUE),
-              "backup.create",
-              policy.capabilities());
-      }
+      authorize(m, operation);
       plugin
           .getServer()
           .getScheduler()
-          .runTask(
-              plugin,
-              () -> {
-                boolean ok = false;
-                try {
-                  switch (operation) {
-                    case "prepare" -> {
-                      if (lease != null) throw new IllegalStateException();
-                      lease = requestedLease;
-                      expiry = System.currentTimeMillis() + 60000;
-                      for (World world : plugin.getServer().getWorlds()) {
-                        previous.put(world.getUID(), world.isAutoSave());
-                        world.setAutoSave(false);
-                      }
-                      if (!plugin
-                          .getServer()
-                          .dispatchCommand(plugin.getServer().getConsoleSender(), "save-all flush"))
-                        throw new IllegalStateException();
-                      ok = true;
-                    }
-                    case "renew" -> {
-                      if (!requestedLease.equals(lease)) throw new IllegalStateException();
-                      expiry = System.currentTimeMillis() + 60000;
-                      ok = true;
-                    }
-                    case "resume" -> {
-                      if (requestedLease.equals(lease)) resume();
-                      ok = true;
-                    }
-                    default -> throw new IllegalArgumentException();
-                  }
-                } catch (Exception e) {
-                  if (operation.equals("prepare") && requestedLease.equals(lease)) resume();
-                }
-                sink.send(
-                    "backup.coordination.result",
-                    Map.of("requestId", id, "leaseId", requestedLease, "success", ok),
-                    MessagePriority.CRITICAL);
-              });
+          .runTask(plugin, () -> execute(id, requestedLease, operation));
+    } catch (SecurityException e) {
+      result(
+          id,
+          requestedLease,
+          false,
+          "PAPER_COORDINATION_DENIED",
+          "AUTHORIZE",
+          "Paper policy denied the save coordination request.");
     } catch (Exception e) {
-      sink.send(
-          "backup.coordination.result",
-          Map.of("requestId", id, "leaseId", requestedLease, "success", false),
-          MessagePriority.CRITICAL);
+      result(
+          id,
+          requestedLease,
+          false,
+          "PAPER_COORDINATION_UNAVAILABLE",
+          "COORDINATING_PAPER",
+          "Paper could not schedule the save coordination request.");
     }
+  }
+
+  private void authorize(DecodedMessage m, String operation) throws Exception {
+    if (operation.equals("resume")) return;
+    if (bool(m.body(), "automatic")) {
+      if (!plugin.getConfig().getBoolean("backups.enabled", false)
+          || !plugin.getConfig().getBoolean("backups.allow-host-schedule", false)
+          || policy.hostPublicKey().isBlank()) throw new SecurityException("Host schedule denied");
+      return;
+    }
+    devices.authorize(
+        text(m.body(), "deviceId", 36),
+        integer(m.body(), "generation", -1, 1, Long.MAX_VALUE),
+        "backup.create",
+        policy.capabilities());
+  }
+
+  private void execute(String id, String requestedLease, String operation) {
+    String code = "OK", phase = operation.equals("prepare") ? "PREPARE" : operation.toUpperCase(Locale.ROOT);
+    String message = "Paper save coordination completed.";
+    boolean ok = false;
+    try {
+      switch (operation) {
+        case "prepare" -> {
+          if (lease != null) {
+            code = "SAVE_LEASE_BUSY";
+            message = "Another Paper save lease is already active.";
+            break;
+          }
+          lease = requestedLease;
+          expiry = System.currentTimeMillis() + 60000;
+          for (World world : plugin.getServer().getWorlds()) {
+            previous.put(world.getUID(), world.isAutoSave());
+            world.setAutoSave(false);
+          }
+          if (!plugin
+              .getServer()
+              .dispatchCommand(plugin.getServer().getConsoleSender(), "save-all flush")) {
+            code = "SAVE_FLUSH_FAILED";
+            message = "Paper could not complete the requested save flush.";
+            break;
+          }
+          ok = true;
+        }
+        case "renew" -> {
+          if (!requestedLease.equals(lease)) {
+            code = "SAVE_LEASE_LOST";
+            message = "The requested Paper save lease is no longer active.";
+            break;
+          }
+          expiry = System.currentTimeMillis() + 60000;
+          ok = true;
+        }
+        case "resume" -> {
+          if (requestedLease.equals(lease)) resume();
+          ok = true;
+        }
+        default -> {
+          code = "PAPER_COORDINATION_DENIED";
+          message = "Paper rejected an unknown save coordination operation.";
+        }
+      }
+    } catch (Exception e) {
+      code = operation.equals("prepare") ? "SAVE_FLUSH_FAILED" : "PAPER_COORDINATION_UNAVAILABLE";
+      message =
+          operation.equals("prepare")
+              ? "Paper could not complete save preparation."
+              : "Paper could not complete save coordination.";
+    } finally {
+      if (!ok && operation.equals("prepare") && requestedLease.equals(lease)) resume();
+    }
+    result(id, requestedLease, ok, code, phase, message);
+  }
+
+  private void result(
+      String requestId,
+      String requestedLease,
+      boolean success,
+      String code,
+      String phase,
+      String message) {
+    sink.send(
+        "backup.coordination.result",
+        Map.of(
+            "requestId", requestId,
+            "leaseId", requestedLease,
+            "success", success,
+            "code", code,
+            "phase", phase,
+            "message", message),
+        MessagePriority.CRITICAL);
   }
 
   private void resume() {
