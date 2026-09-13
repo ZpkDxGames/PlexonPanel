@@ -8,11 +8,12 @@ import java.nio.file.*;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.time.Instant;
 import java.util.*;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.*;
 import java.util.zip.*;
 
-/** Cold full-server restore points. Paper must be stopped for create and restore. */
+/** Cold full-server restore points. Archive creation always requires stopped Paper. */
 public final class FullRestorePointManager {
   public record Metadata(
       String backupId,
@@ -88,7 +89,12 @@ public final class FullRestorePointManager {
       for (Path file : files.filter(p -> p.getFileName().toString().matches("[0-9a-f-]{36}\\.json")).limit(1001).toList()) {
         if (Files.isSymbolicLink(file) || Files.size(file) > 32_768) continue;
         Metadata value = GSON.fromJson(Files.readString(file), Metadata.class);
-        if (value != null && "FULL_RESTORE_POINT".equals(value.type)) result.add(value);
+        if (value != null && "FULL_RESTORE_POINT".equals(value.type)) {
+          Path local = restorePoints.resolve(value.backupId + ".zip");
+          boolean localAvailable =
+              Files.isRegularFile(local, LinkOption.NOFOLLOW_LINKS) && !Files.isSymbolicLink(local);
+          result.add(withLocalState(value, localAvailable, value.verification));
+        }
       }
     }
     result.sort(Comparator.comparing(Metadata::timestamp).reversed());
@@ -308,6 +314,7 @@ public final class FullRestorePointManager {
   }
 
   public synchronized RestoreGrant prepareRestore(String backupId, String deviceId) throws Exception {
+    ensureLocalArchive(backupId);
     verify(backupId);
     restoreGrants.entrySet().removeIf(e -> e.getValue().expiresAt < System.currentTimeMillis());
     if (restoreGrants.size() >= 8) throw new SecurityException("BUSY");
@@ -342,10 +349,17 @@ public final class FullRestorePointManager {
     Path extract = staging.resolve("restore-" + restoreId),
         rollback = staging.resolve("rollback-" + restoreId),
         journal = metadataDirectory.resolve("restore-journal.json");
+    boolean stoppedByRestore = false;
     try {
-      if (!service.stopped() || paperConnected.getAsBoolean())
-        throw new SecurityException("SERVER_MUST_BE_STOPPED");
       if (Files.exists(journal)) throw new IllegalStateException("RESTORE_RECOVERY_REQUIRED");
+      if (!service.stopped() || paperConnected.getAsBoolean()) {
+        service.action("stop");
+        stoppedByRestore = true;
+        waitForStopped(180);
+      }
+      if (!service.stopped() || paperConnected.getAsBoolean())
+        throw new IOException("SERVER_STOP_TIMEOUT");
+      ensureLocalArchive(backupId);
       Metadata selected = verify(backupId);
       String emergencyJob = UUID.randomUUID().toString();
       Metadata emergency =
@@ -389,12 +403,27 @@ public final class FullRestorePointManager {
       Files.deleteIfExists(journal);
       deleteTree(extract);
       deleteTree(rollback);
-      if (startAfter) service.action("start");
+      String state = "stopped";
+      if (startAfter) {
+        service.action("start");
+        waitForPaper(180);
+        state = "running";
+      }
       return Map.of(
           "backupId", selected.backupId,
           "emergencyBackupId", emergency.backupId,
-          "state", startAfter ? "starting" : "stopped",
+          "state", state,
           "integrity", "VERIFIED");
+    } catch (Exception failure) {
+      if (stoppedByRestore && !Files.exists(journal) && service.stopped()) {
+        try {
+          service.action("start");
+          waitForPaper(180);
+        } catch (Exception ignored) {
+          // Preserve the restore failure; startup failure is visible from service status/audit.
+        }
+      }
+      throw failure;
     } finally {
       if (!Files.exists(journal)) {
         deleteTree(extract);
@@ -441,6 +470,40 @@ public final class FullRestorePointManager {
 
   public Map<String, Object> testProvider(int timeoutSeconds) throws Exception {
     return provider.test(timeoutSeconds);
+  }
+
+  private void ensureLocalArchive(String backupId) throws Exception {
+    UUID.fromString(backupId);
+    Path target = restorePoints.resolve(backupId + ".zip");
+    if (Files.isRegularFile(target, LinkOption.NOFOLLOW_LINKS) && !Files.isSymbolicLink(target)) return;
+    Metadata value = metadata(backupId);
+    if (!value.offsite || !provider.configured() || value.remotePath == null || value.remotePath.isBlank())
+      throw new IOException("Full restore-point archive unavailable");
+    MaintenanceSettings maintenance =
+        MaintenanceSettings.load(Path.of(config.dataDirectory()).resolve("maintenance-settings.json"));
+    String filename = value.remotePath.substring(value.remotePath.lastIndexOf('/') + 1);
+    if (!filename.matches("[A-Za-z0-9][A-Za-z0-9_.-]{0,127}\\.zip"))
+      throw new IOException("REMOTE_UNAVAILABLE");
+    if (maintenance.fullRestorePoint().retentionMode().equals("SINGLE_CURRENT")
+        && !filename.equals(maintenance.fullRestorePoint().canonicalFilename()))
+      throw new IOException("REMOTE_UNAVAILABLE");
+    Path downloaded =
+        provider.fetchCanonical(
+            staging, filename, maintenance.fullRestorePoint().uploadTimeoutSeconds());
+    try {
+      if (Files.size(downloaded) != value.archiveBytes)
+        throw new IOException("REMOTE_VERIFY_FAILED");
+      String hash = BackupManager.fileHash(downloaded);
+      if (!hash.equals(value.sha256)) throw new IOException("RESTORE_HASH_MISMATCH");
+      try (FileChannel channel = FileChannel.open(downloaded, StandardOpenOption.WRITE)) {
+        channel.force(true);
+      }
+      Files.move(downloaded, target, StandardCopyOption.ATOMIC_MOVE);
+      Metadata local = withLocalState(value, true, "REMOTE_FETCH_VERIFIED");
+      AtomicFiles.writeUtf8(metadataDirectory.resolve(backupId + ".json"), GSON.toJson(local));
+    } finally {
+      Files.deleteIfExists(downloaded);
+    }
   }
 
   private Scan scan(MaintenanceSettings.FullRestorePoint settings) throws IOException {
@@ -568,6 +631,35 @@ public final class FullRestorePointManager {
         remotePath == null ? "" : remotePath, verification, value.initiatedBy, value.automatic,
         value.emergency, value.restartPerformed, offsite ? "SUCCESS" : "SUCCESS_LOCAL",
         errorCode == null ? "" : errorCode);
+  }
+
+  private Metadata withLocalState(Metadata value, boolean local, String verification) {
+    return new Metadata(
+        value.backupId, value.jobId, value.type, value.timestamp, value.startedAt,
+        value.completedAt, value.durationMillis, value.serverName, value.serverVersion,
+        value.paperVersion, value.plexonPanelVersion, value.archiveBytes, value.sourceBytes,
+        value.entryCount, value.sha256, local, value.offsite, value.remoteProvider,
+        value.remotePath, verification, value.initiatedBy, value.automatic, value.emergency,
+        value.restartPerformed, value.result, value.errorCode);
+  }
+
+  private void waitForStopped(int seconds) throws Exception {
+    long until = System.nanoTime() + TimeUnit.SECONDS.toNanos(seconds);
+    while (System.nanoTime() < until) {
+      if (service.stopped() && !paperConnected.getAsBoolean()) return;
+      Thread.sleep(250);
+    }
+    throw new IOException("SERVER_STOP_TIMEOUT");
+  }
+
+  private void waitForPaper(int seconds) throws Exception {
+    long until = System.nanoTime() + TimeUnit.SECONDS.toNanos(seconds);
+    while (System.nanoTime() < until) {
+      Map<String, Object> status = service.status();
+      if ("active".equals(status.get("state")) && paperConnected.getAsBoolean()) return;
+      Thread.sleep(250);
+    }
+    throw new IOException("PAPER_RECONNECT_TIMEOUT");
   }
 
   private void checkStopped() throws IOException {
