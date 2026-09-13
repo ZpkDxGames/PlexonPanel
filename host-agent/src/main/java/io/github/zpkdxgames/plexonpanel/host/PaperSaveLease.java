@@ -4,6 +4,7 @@ import static io.github.zpkdxgames.plexonpanel.control.JsonFields.*;
 
 import io.github.zpkdxgames.plexonpanel.control.OperationFailure;
 import io.github.zpkdxgames.plexonpanel.protocol.DecodedMessage;
+import io.github.zpkdxgames.plexonpanel.protocol.MessagePriority;
 import io.github.zpkdxgames.plexonpanel.security.DeviceRegistry;
 import java.util.*;
 import java.util.concurrent.*;
@@ -15,15 +16,18 @@ public final class PaperSaveLease implements AutoCloseable {
   private record Pending(String operation, CompletableFuture<Result> result) {}
 
   private final HostConnection connection;
+  private final DeviceRegistry devices;
   private final ConcurrentHashMap<String, Pending> pending = new ConcurrentHashMap<>();
   private final ScheduledExecutorService renewer = Executors.newSingleThreadScheduledExecutor();
 
-  public PaperSaveLease(HostConnection connection) {
+  public PaperSaveLease(HostConnection connection, DeviceRegistry devices) {
     this.connection = connection;
+    this.devices = devices;
   }
 
   public void accept(DecodedMessage message) {
     try {
+      if (!message.envelope().type().equals("backup.coordination.result")) return;
       String requestId = text(message.body(), "requestId", 36);
       UUID.fromString(requestId);
       Pending future = pending.remove(requestId);
@@ -54,15 +58,21 @@ public final class PaperSaveLease implements AutoCloseable {
 
   private Result request(Map<String, Object> body, String operation, int seconds) {
     String id = body.get("requestId").toString();
+    if (pending.size() >= 4)
+      return new Result(
+          false,
+          "PAPER_COORDINATION_UNAVAILABLE",
+          "COORDINATING_PAPER",
+          "Too many Paper save coordination requests are already pending.");
     CompletableFuture<Result> future = new CompletableFuture<>();
     pending.put(id, new Pending(operation, future));
     try {
-      if (!connection.sendRaw("backup.coordination", body))
+      if (!connection.send("backup.coordination", body, MessagePriority.CRITICAL))
         return new Result(
             false,
             "PAPER_COORDINATION_UNAVAILABLE",
             "COORDINATING_PAPER",
-            "The relay could not deliver the save coordination request to Paper.");
+            "The relay could not accept the save coordination request for Paper.");
       try {
         return future.get(seconds, TimeUnit.SECONDS);
       } catch (TimeoutException e) {
@@ -97,15 +107,26 @@ public final class PaperSaveLease implements AutoCloseable {
     body.put("leaseId", leaseId);
     body.put("operation", "prepare");
     body.put("automatic", automatic);
-    if (device != null) {
-      body.put("deviceId", device.deviceId());
-      body.put("generation", device.generation());
-    }
+    addDeviceContext(body, device);
     Result prepared = request(body, "prepare", 15);
     if (!prepared.success()) throw failure(prepared);
     Lease lease = new Lease(leaseId, device, automatic);
     lease.task = renewer.scheduleAtFixedRate(lease::renew, 20, 20, TimeUnit.SECONDS);
     return lease;
+  }
+
+  private void addDeviceContext(Map<String, Object> body, DeviceRegistry.Device device) {
+    if (device == null) return;
+    try {
+      body.put("deviceId", device.deviceId());
+      body.put("generation", devices.snapshot().generation());
+    } catch (Exception failure) {
+      throw new OperationFailure(
+          "PAPER_COORDINATION_UNAVAILABLE",
+          "COORDINATING_PAPER",
+          "The Host could not read the local device authorization generation.",
+          true);
+    }
   }
 
   private static OperationFailure failure(Result result) {
@@ -129,19 +150,22 @@ public final class PaperSaveLease implements AutoCloseable {
 
     private void renew() {
       if (closed) return;
-      String requestId = UUID.randomUUID().toString();
-      Map<String, Object> body = new LinkedHashMap<>();
-      body.put("requestId", requestId);
-      body.put("leaseId", id);
-      body.put("operation", "renew");
-      body.put("automatic", automatic);
-      if (device != null) {
-        body.put("deviceId", device.deviceId());
-        body.put("generation", device.generation());
-      }
-      Result result = request(body, "renew", 8);
-      if (!result.success()) {
-        unhealthyReason = result;
+      try {
+        String requestId = UUID.randomUUID().toString();
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("requestId", requestId);
+        body.put("leaseId", id);
+        body.put("operation", "renew");
+        body.put("automatic", automatic);
+        addDeviceContext(body, device);
+        Result result = request(body, "renew", 8);
+        if (!result.success()) {
+          unhealthyReason = result;
+          healthy = false;
+        }
+      } catch (OperationFailure failure) {
+        unhealthyReason =
+            new Result(false, failure.code(), failure.phase(), failure.getMessage());
         healthy = false;
       }
     }
@@ -167,16 +191,17 @@ public final class PaperSaveLease implements AutoCloseable {
       if (closed) return;
       closed = true;
       if (task != null) task.cancel(false);
-      Map<String, Object> body = new LinkedHashMap<>();
-      body.put("requestId", UUID.randomUUID().toString());
-      body.put("leaseId", id);
-      body.put("operation", "resume");
-      body.put("automatic", automatic);
-      if (device != null) {
-        body.put("deviceId", device.deviceId());
-        body.put("generation", device.generation());
+      try {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("requestId", UUID.randomUUID().toString());
+        body.put("leaseId", id);
+        body.put("operation", "resume");
+        body.put("automatic", automatic);
+        addDeviceContext(body, device);
+        request(body, "resume", 8);
+      } catch (OperationFailure ignored) {
+        // Paper watchdog restores the original autosave state if resume delivery fails.
       }
-      request(body, "resume", 8);
     }
   }
 
