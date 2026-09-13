@@ -10,7 +10,9 @@ PlexonPanel 3.4.0 is the matched Paper/Host release for Host-authoritative Linux
 - Signed wire protocol remains **3** under `/v1`.
 - Existing server identity, pairing state, device generations/revisions and immutable grants are preserved.
 - PlexonCore remains compile-only/non-shaded with the existing supported runtime boundary.
-- The exact matched Dashboard/relay commit and CI run are recorded in `release-manifest.json`; runtime certification remains a separate field.
+- Matched Dashboard/relay source: `ZpkDxGames/PlexonPanel-Dashboard@16d0768952d77b8054c5b8b88785d3f903c5359d`.
+- Matched Dashboard/relay post-merge CI: GitHub Actions run `34775174696`, successful.
+- The same provenance is recorded in `release-manifest.json`; runtime certification remains a separate field.
 
 ## Host-authoritative console
 
