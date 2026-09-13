@@ -27,6 +27,7 @@ public final class HostConnection implements MessageSink, AutoCloseable {
   private final ScheduledExecutorService scheduler =
       Executors.newSingleThreadScheduledExecutor(new NamedThreadFactory("plexonpanel-host-link"));
   private final AgentSession wireSession = new AgentSession();
+  private final HostConsoleStreamService console;
 
   private record Packet(String text, String session) {}
 
@@ -48,6 +49,7 @@ public final class HostConnection implements MessageSink, AutoCloseable {
   public HostConnection(HostConfig config, DeviceIdentity identity) {
     this.config = config;
     this.identity = identity;
+    this.console = new HostConsoleStreamService(config, this);
   }
 
   public void handlers(Consumer<DecodedMessage> handler, Runnable connected) {
@@ -71,8 +73,13 @@ public final class HostConnection implements MessageSink, AutoCloseable {
     return lastFailure;
   }
 
+  public Map<String, Object> consoleDiagnostics() {
+    return console.diagnostics();
+  }
+
   public void start() {
     if (!running.compareAndSet(false, true)) return;
+    console.start();
     sender =
         Thread.ofPlatform()
             .daemon(true)
@@ -280,9 +287,13 @@ public final class HostConnection implements MessageSink, AutoCloseable {
               lastFailure = "";
               log("Authenticated with relay");
               connected.run();
+              console.sendRecentSnapshot();
             }
             case "gateway.snapshot_request" -> {
-              if (authenticated) connected.run();
+              if (authenticated) {
+                connected.run();
+                console.sendRecentSnapshot();
+              }
             }
             default -> {
               if (authenticated) handler.accept(m);
@@ -342,6 +353,7 @@ public final class HostConnection implements MessageSink, AutoCloseable {
 
   public void close() {
     if (!running.compareAndSet(true, false)) return;
+    console.close();
     disconnect(null, "");
     if (sender != null) sender.interrupt();
     scheduler.shutdownNow();
