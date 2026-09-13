@@ -47,6 +47,12 @@ public final class Scopes {
           "backup.download",
           "backup.delete",
           "backup.restore",
+          "maintenance.view",
+          "maintenance.configure",
+          "maintenance.restart",
+          "maintenance.run",
+          "provider.view",
+          "provider.test",
           "server.status",
           "server.start",
           "server.stop",
@@ -67,6 +73,9 @@ public final class Scopes {
           "files.delete",
           "backup.delete",
           "backup.restore",
+          "maintenance.configure",
+          "maintenance.restart",
+          "maintenance.run",
           "server.stop",
           "server.restart",
           "devices.revoke");
@@ -77,6 +86,8 @@ public final class Scopes {
       if (s.startsWith("player.")
           || s.startsWith("files.")
           || s.startsWith("backup.")
+          || s.startsWith("maintenance.")
+          || s.startsWith("provider.")
           || s.startsWith("server.")) actions.put(s, s);
     actions.put("files.download.chunk", "files.download");
     actions.put("files.transfer.cancel", "files.download");
@@ -92,6 +103,19 @@ public final class Scopes {
     actions.put("backup.download.cancel", "backup.download");
     actions.put("backup.list", "backup.view");
     actions.put("backup.restore.prepare", "backup.restore");
+    actions.put("backup.full.list", "backup.view");
+    actions.put("backup.full.verify", "backup.view");
+    actions.put("backup.full.retry-upload", "backup.create");
+    actions.put("backup.full.delete", "backup.delete");
+    actions.put("backup.full.restore.prepare", "backup.restore");
+    actions.put("backup.full.restore", "backup.restore");
+    actions.put("maintenance.status", "maintenance.view");
+    actions.put("maintenance.settings.get", "maintenance.view");
+    actions.put("maintenance.settings.update", "maintenance.configure");
+    actions.put("maintenance.restart.now", "maintenance.restart");
+    actions.put("maintenance.full-backup.create", "maintenance.run");
+    actions.put("provider.status", "provider.view");
+    actions.put("provider.test", "provider.test");
     actions.put("audit.list", "audit.view");
     actions.put("audit.self", "audit.view.self");
     actions.put("devices.list", "devices.view");
@@ -132,6 +156,11 @@ public final class Scopes {
             "files.download",
             "backup.view",
             "backup.create",
+            "maintenance.view",
+            "maintenance.restart",
+            "maintenance.run",
+            "provider.view",
+            "provider.test",
             "plugins.config",
             "plugins.reload",
             "server.restart",
