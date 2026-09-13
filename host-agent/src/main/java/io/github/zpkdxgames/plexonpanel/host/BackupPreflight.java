@@ -39,7 +39,7 @@ final class BackupPreflight {
 
   Map<String, Object> run() {
     List<String> missing = new ArrayList<>(), unreadable = new ArrayList<>(), symlinks = new ArrayList<>();
-    long[] durable = {0}, volatileExcluded = {0};
+    long[] durable = {0}, volatileExcluded = {0}, unreadableCount = {0};
     for (String include : config.backups().include()) {
       Path source = root.resolve(include).normalize();
       if (!source.startsWith(root) || !Files.exists(source, LinkOption.NOFOLLOW_LINKS)) {
@@ -84,6 +84,7 @@ final class BackupPreflight {
                 try (InputStream input = Files.newInputStream(file, LinkOption.NOFOLLOW_LINKS)) {
                   input.readNBytes(1);
                 } catch (IOException failure) {
+                  unreadableCount[0]++;
                   addBounded(unreadable, relative);
                 }
                 return FileVisitResult.CONTINUE;
@@ -93,11 +94,15 @@ final class BackupPreflight {
               public FileVisitResult visitFileFailed(Path file, IOException failure) {
                 String relative = relative(file);
                 if (LiveSnapshotPolicy.volatileExcluded(config, relative)) volatileExcluded[0]++;
-                else addBounded(unreadable, relative);
+                else {
+                  unreadableCount[0]++;
+                  addBounded(unreadable, relative);
+                }
                 return FileVisitResult.CONTINUE;
               }
             });
       } catch (IOException failure) {
+        unreadableCount[0]++;
         addBounded(unreadable, include);
       }
     }
@@ -124,7 +129,7 @@ final class BackupPreflight {
     result.put("configuredIncludes", List.copyOf(config.backups().include()));
     result.put("missingIncludes", List.copyOf(missing));
     result.put("durableFileCount", durable[0]);
-    result.put("unreadableDurableCount", unreadable.size());
+    result.put("unreadableDurableCount", unreadableCount[0]);
     result.put("unreadableDurableExamples", List.copyOf(unreadable));
     result.put("volatileExcludedCount", volatileExcluded[0]);
     result.put("volatileExclusions", List.copyOf(config.backups().liveSnapshotExcludes()));

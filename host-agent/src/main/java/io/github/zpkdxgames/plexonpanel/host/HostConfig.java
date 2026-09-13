@@ -30,7 +30,32 @@ public record HostConfig(
       String rcloneExecutable,
       String rcloneRemote,
       String rcloneConfig,
-      List<String> liveSnapshotExcludes) {}
+      List<String> liveSnapshotExcludes) {
+    public BackupConfig(
+        boolean enabled,
+        String directory,
+        List<String> include,
+        int retentionCount,
+        int intervalMinutes,
+        long maximumBytes,
+        boolean restoreEnabled,
+        String rcloneExecutable,
+        String rcloneRemote,
+        String rcloneConfig) {
+      this(
+          enabled,
+          directory,
+          include,
+          retentionCount,
+          intervalMinutes,
+          maximumBytes,
+          restoreEnabled,
+          rcloneExecutable,
+          rcloneRemote,
+          rcloneConfig,
+          HostConfig.defaultLiveSnapshotExcludes());
+    }
+  }
 
   public record ConsoleConfig(
       boolean enabled,
