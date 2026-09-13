@@ -51,6 +51,7 @@ public final class HostMain {
     HostConnection connection = new HostConnection(config, identity);
     SystemdService service = new SystemdService(config.serviceName());
     PaperSaveLease leases = new PaperSaveLease(connection, devices);
+    PaperMaintenanceLink maintenanceLink = new PaperMaintenanceLink(connection, devices);
     AtomicBoolean paper = new AtomicBoolean();
     AtomicLong paperRevision = new AtomicLong();
     ReentrantLock operationLock = new ReentrantLock();
@@ -62,11 +63,32 @@ public final class HostMain {
             paper::get,
             progress -> connection.send("backup.progress", progress, MessagePriority.EVENT),
             operationLock);
+    FullRestorePointManager fullBackups =
+        new FullRestorePointManager(
+            config,
+            service,
+            paper::get,
+            operationLock,
+            progress -> connection.send("backup.progress", progress, MessagePriority.EVENT));
+    MaintenanceManager maintenance =
+        new MaintenanceManager(
+            config,
+            service,
+            maintenanceLink,
+            paper::get,
+            paperRevision::get,
+            operationLock,
+            audit,
+            connection,
+            fullBackups);
     BackupTransfers transfers = new BackupTransfers();
     if (args.length == 2) {
       if (!args[1].equals("--recover-restore"))
         throw new IllegalArgumentException("Unknown local operation");
       backups.recover();
+      fullBackups.recoverRestore();
+      maintenance.close();
+      maintenanceLink.close();
       leases.close();
       connection.close();
       return;
@@ -158,16 +180,89 @@ public final class HostMain {
                   transfers.cancel(text(p, "transferId", 36), device.deviceId());
                   return Map.of();
                 }
+                case "backup.full.list" -> {
+                  var all = fullBackups.list();
+                  int page = (int) integer(p, "page", 0, 0, 100);
+                  int first = Math.min(all.size(), page * 50),
+                      last = Math.min(all.size(), first + 50);
+                  return Map.of(
+                      "backups", all.subList(first, last),
+                      "page", page,
+                      "hasMore", last < all.size(),
+                      "recoveryRequired", fullBackups.recoveryRequired());
+                }
+                case "backup.full.verify" -> {
+                  var result = fullBackups.verify(text(p, "backupId", 36));
+                  return Map.of("backupId", result.backupId(), "sha256", result.sha256(), "verification", "VERIFIED");
+                }
+                case "backup.full.retry-upload" -> {
+                  var result =
+                      fullBackups.retryUpload(
+                          text(p, "backupId", 36),
+                          UUID.randomUUID().toString(),
+                          maintenance.settings().fullRestorePoint());
+                  return Map.of("backup", result);
+                }
+                case "backup.full.delete" -> {
+                  fullBackups.delete(text(p, "backupId", 36));
+                  return Map.of();
+                }
+                case "backup.full.restore.prepare" -> {
+                  requireOwner(device);
+                  String id = text(p, "backupId", 36);
+                  var grant = fullBackups.prepareRestore(id, device.deviceId());
+                  return Map.of(
+                      "confirmationToken", grant.token(),
+                      "serverName", config.serverName(),
+                      "expiresInSeconds", 60,
+                      "message", "A verified emergency full restore point will be created before replacement.");
+                }
+                case "backup.full.restore" -> {
+                  requireOwner(device);
+                  return fullBackups.restore(
+                      text(p, "backupId", 36),
+                      text(p, "confirmationToken", 36),
+                      text(p, "serverName", 64),
+                      device.deviceId(),
+                      device.name(),
+                      maintenance.settings().fullRestorePoint(),
+                      !p.has("startAfter") || p.get("startAfter").getAsBoolean());
+                }
+                case "maintenance.status" -> {
+                  return maintenance.status();
+                }
+                case "maintenance.settings.get" -> {
+                  return Map.of("settings", maintenance.settings());
+                }
+                case "maintenance.settings.update" -> {
+                  if (!p.has("settings") || !p.get("settings").isJsonObject())
+                    throw new IllegalArgumentException("SCHEDULE_INVALID");
+                  return Map.of("settings", maintenance.updateSettings(p.get("settings")));
+                }
+                case "maintenance.restart.now" -> {
+                  boolean skip = p.has("skipCountdown") && p.get("skipCountdown").getAsBoolean();
+                  return Map.of("jobId", maintenance.restartNow(device, skip), "state", "QUEUED");
+                }
+                case "maintenance.full-backup.create" -> {
+                  boolean skip = p.has("skipCountdown") && p.get("skipCountdown").getAsBoolean();
+                  return Map.of("jobId", maintenance.fullRestorePointNow(device, skip), "state", "QUEUED");
+                }
+                case "provider.status" -> {
+                  return fullBackups.providerStatus();
+                }
+                case "provider.test" -> {
+                  return fullBackups.testProvider(30);
+                }
                 case "server.status" -> {
                   var status = new HashMap<>(service.status());
                   status.put("paperConnected", paper.get());
-                  status.put("recoveryRequired", backups.recoveryRequired());
+                  status.put("recoveryRequired", backups.recoveryRequired() || fullBackups.recoveryRequired());
                   return status;
                 }
                 case "server.start", "server.stop", "server.restart" -> {
                   if (!operationLock.tryLock()) throw new SecurityException("BUSY");
                   try {
-                    if (backups.recoveryRequired())
+                    if (backups.recoveryRequired() || fullBackups.recoveryRequired())
                       throw new SecurityException("RESTORE_RECOVERY_REQUIRED");
                     long revision = paperRevision.get();
                     if (action.equals("server.restart") || action.equals("server.stop")) {
@@ -184,8 +279,7 @@ public final class HostMain {
                           && System.nanoTime() < until) Thread.sleep(250);
                       if (!paper.get() || paperRevision.get() <= revision)
                         throw new IllegalStateException(
-                            "Service command accepted, but authenticated Paper reconnection was not"
-                                + " observed");
+                            "Service command accepted, but authenticated Paper reconnection was not observed");
                     }
                     return Map.of(
                         "state",
@@ -219,7 +313,7 @@ public final class HostMain {
           try {
             var status = new HashMap<>(service.status());
             status.put("paperConnected", paper.get());
-            status.put("recoveryRequired", backups.recoveryRequired());
+            status.put("recoveryRequired", backups.recoveryRequired() || fullBackups.recoveryRequired());
             connection.send("service.status", status, MessagePriority.TELEMETRY);
           } catch (Exception e) {
             System.err.println("Host service snapshot unavailable: " + e.getClass().getSimpleName());
@@ -234,6 +328,7 @@ public final class HostMain {
               if (online) paperRevision.incrementAndGet();
             }
             case "backup.coordination.result" -> leases.accept(m);
+            case "maintenance.coordination.result" -> maintenanceLink.accept(m);
             default -> engine.accept(m);
           }
         },
@@ -255,81 +350,58 @@ public final class HostMain {
                     try {
                       audit.append(
                           Map.of(
-                              "timestamp",
-                              Instant.now().toString(),
-                              "requestId",
-                              id,
-                              "serverId",
-                              config.serverId(),
-                              "deviceId",
-                              "local-schedule",
-                              "role",
-                              "Local",
-                              "actorLabel",
-                              "Host schedule",
-                              "actionType",
-                              "backup.create",
-                              "outcome",
-                              "STARTED"));
+                              "timestamp", Instant.now().toString(),
+                              "requestId", id,
+                              "serverId", config.serverId(),
+                              "deviceId", "local-schedule",
+                              "role", "Local",
+                              "actorLabel", "Host schedule",
+                              "actionType", "backup.create",
+                              "outcome", "STARTED"));
                       var result = backups.create(null, true, false);
                       audit.append(
                           Map.of(
-                              "timestamp",
-                              Instant.now().toString(),
-                              "requestId",
-                              id,
-                              "serverId",
-                              config.serverId(),
-                              "deviceId",
-                              "local-schedule",
-                              "role",
-                              "Local",
-                              "actorLabel",
-                              "Host schedule",
-                              "actionType",
-                              "backup.create",
-                              "outcome",
-                              "SUCCESS",
-                              "metadata",
-                              Map.of("backupId", result.backupId(), "sha256", result.sha256())));
+                              "timestamp", Instant.now().toString(),
+                              "requestId", id,
+                              "serverId", config.serverId(),
+                              "deviceId", "local-schedule",
+                              "role", "Local",
+                              "actorLabel", "Host schedule",
+                              "actionType", "backup.create",
+                              "outcome", "SUCCESS",
+                              "metadata", Map.of("backupId", result.backupId(), "sha256", result.sha256())));
                     } catch (Exception e) {
                       try {
                         audit.append(
                             Map.of(
-                                "timestamp",
-                                Instant.now().toString(),
-                                "requestId",
-                                id,
-                                "serverId",
-                                config.serverId(),
-                                "deviceId",
-                                "local-schedule",
-                                "actorLabel",
-                                "Host schedule",
-                                "actionType",
-                                "backup.create",
-                                "outcome",
-                                "FAILED",
-                                "code",
-                                "BACKUP_FAILED"));
+                                "timestamp", Instant.now().toString(),
+                                "requestId", id,
+                                "serverId", config.serverId(),
+                                "deviceId", "local-schedule",
+                                "actorLabel", "Host schedule",
+                                "actionType", "backup.create",
+                                "outcome", "FAILED",
+                                "code", "BACKUP_FAILED"));
                       } catch (Exception ignored) {
                       }
-                      System.err.println(
-                          "Scheduled backup failed: " + e.getClass().getSimpleName());
+                      System.err.println("Scheduled live snapshot failed: " + e.getClass().getSimpleName());
                     }
                   });
             } catch (RejectedExecutionException busy) {
-              System.err.println("Scheduled backup skipped: previous job still running");
+              System.err.println("Scheduled live snapshot skipped: previous job still running");
             }
           },
           config.backups().intervalMinutes(),
           config.backups().intervalMinutes(),
           TimeUnit.MINUTES);
     }
+    maintenance.start();
     Runtime.getRuntime()
         .addShutdownHook(
             new Thread(
                 () -> {
+                  maintenance.close();
+                  maintenanceLink.close();
                   scheduledBackups.shutdownNow();
                   engine.close();
                   leases.close();
@@ -340,5 +412,9 @@ public final class HostMain {
                 }));
     connection.start();
     new CountDownLatch(1).await();
+  }
+
+  private static void requireOwner(DeviceRegistry.Device device) {
+    if (device == null || !"Owner".equals(device.role())) throw new SecurityException("OWNER_REQUIRED");
   }
 }
