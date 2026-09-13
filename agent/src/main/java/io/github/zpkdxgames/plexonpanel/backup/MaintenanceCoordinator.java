@@ -36,10 +36,12 @@ public final class MaintenanceCoordinator {
             || !plugin.getConfig().getBoolean("backups.allow-host-schedule", false)
             || policy.hostPublicKey().isBlank()) throw new SecurityException("Host scheduling disabled");
       } else {
+        // maintenance.run is deliberately Host-only. Paper reuses its existing backup.create
+        // coordination capability solely for warning/save-flush authorization.
         devices.authorize(
             text(message.body(), "deviceId", 36),
             integer(message.body(), "generation", -1, 1, Long.MAX_VALUE),
-            operation.equals("notice") ? "maintenance.run" : "maintenance.run",
+            "backup.create",
             policy.capabilities());
       }
       plugin
