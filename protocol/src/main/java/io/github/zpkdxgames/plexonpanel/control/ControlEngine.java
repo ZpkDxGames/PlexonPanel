@@ -110,7 +110,8 @@ public final class ControlEngine implements AutoCloseable {
         throw new SecurityException("CONFIRMATION_REQUIRED");
       if ((action.equals("player.op")
               || action.equals("player.deop")
-              || action.startsWith("backup.restore"))
+              || action.startsWith("backup.restore")
+              || action.startsWith("backup.full.restore"))
           && !device.role().equals("Owner")) throw new SecurityException("OWNER_REQUIRED");
       audit.begin(
           entry(id, deviceId, device, action, parameters, "STARTED", "INTENT", started, Map.of()));
@@ -118,7 +119,16 @@ public final class ControlEngine implements AutoCloseable {
       if (data == null) data = backend.execute(action, parameters, device);
       operationCompleted = true;
       Map<String, Object> metadata = new TreeMap<>();
-      for (String key : List.of("oldHash", "sha256", "bytes", "destination", "backupId"))
+      for (String key :
+          List.of(
+              "oldHash",
+              "sha256",
+              "bytes",
+              "destination",
+              "backupId",
+              "phase",
+              "warnings",
+              "skippedTransientCount"))
         if (data.containsKey(key)) metadata.put(key, data.get(key));
       audit.append(
           entry(id, deviceId, device, action, parameters, "SUCCESS", "OK", started, metadata));
@@ -133,49 +143,68 @@ public final class ControlEngine implements AutoCloseable {
             Map.of());
       else reply(id, action, deviceId, "SUCCESS", "OK", "Operation completed.", data);
     } catch (Exception error) {
+      OperationFailure failure = error instanceof OperationFailure f ? f : null;
       String status =
-          error instanceof SafeFiles.ConflictException
-              ? "CONFLICT"
-              : error instanceof SecurityException || error instanceof IllegalArgumentException
-                  ? "DENIED"
-                  : "FAILED";
+          failure != null
+              ? "FAILED"
+              : error instanceof SafeFiles.ConflictException
+                  ? "CONFLICT"
+                  : error instanceof SecurityException || error instanceof IllegalArgumentException
+                      ? "DENIED"
+                      : "FAILED";
       String code =
-          error instanceof SecurityException
-                  && error.getMessage() != null
-                  && error.getMessage().matches("[A-Z_]{1,64}")
-              ? error.getMessage()
-              : status.equals("CONFLICT")
-                  ? "STALE_FILE"
-                  : status.equals("DENIED") ? "INVALID_PARAMETERS" : "OPERATION_FAILED";
+          failure != null
+              ? failure.code()
+              : error instanceof SecurityException
+                      && error.getMessage() != null
+                      && error.getMessage().matches("[A-Z_]{1,64}")
+                  ? error.getMessage()
+                  : status.equals("CONFLICT")
+                      ? "STALE_FILE"
+                      : status.equals("DENIED") ? "INVALID_PARAMETERS" : "OPERATION_FAILED";
       if (operationCompleted) {
         status = "NOT_AVAILABLE";
         code = "AUDIT_UNAVAILABLE";
+        failure = null;
       }
+      Map<String, Object> safeFailureData =
+          failure == null ? Map.of() : new TreeMap<>(failure.safeData());
+      Map<String, Object> auditMetadata = new TreeMap<>(safeFailureData);
+      auditMetadata.put("exceptionClass", error.getClass().getSimpleName());
       try {
         audit.append(
-            entry(id, deviceId, device, action, parameters, status, code, started, Map.of()));
+            entry(id, deviceId, device, action, parameters, status, code, started, auditMetadata));
       } catch (Exception ignored) {
         code = "AUDIT_UNAVAILABLE";
+        safeFailureData = Map.of();
+        failure = null;
       }
       String message =
           operationCompleted
               ? "The operation completed but its result could not be recorded. Verify local state"
                     + " before retrying."
-              : switch (code) {
-                case "CAPABILITY_DISABLED" -> "This capability is disabled in local policy.";
-                case "SCOPE_DENIED", "OWNER_REQUIRED" ->
-                    "This device does not have the required scope or role.";
-                case "DEVICE_REVOKED", "DEVICE_EXPIRED" -> "This device must be paired again.";
-                case "CONFIRMATION_REQUIRED" -> "Confirm this operation before submitting it.";
-                case "STALE_FILE" -> "The file changed. Reload it and review your edits.";
-                case "DUPLICATE_REQUEST" ->
-                    "This request ID was already used; the action was not repeated.";
-                case "RATE_LIMITED", "BUSY" -> "Too many requests. Wait before trying again.";
-                default ->
-                    "The operation could not be completed. Check local policy, parameters and the"
-                        + " server log.";
-              };
-      reply(id, action, deviceId, status, code, message, Map.of());
+              : failure != null
+                  ? failure.getMessage()
+                  : switch (code) {
+                    case "CAPABILITY_DISABLED" -> "This capability is disabled in local policy.";
+                    case "SCOPE_DENIED", "OWNER_REQUIRED" ->
+                        "This device does not have the required scope or role.";
+                    case "DEVICE_REVOKED", "DEVICE_EXPIRED" -> "This device must be paired again.";
+                    case "CONFIRMATION_REQUIRED" -> "Confirm this operation before submitting it.";
+                    case "STALE_FILE" -> "The file changed. Reload it and review your edits.";
+                    case "DUPLICATE_REQUEST" ->
+                        "This request ID was already used; the action was not repeated.";
+                    case "RATE_LIMITED", "BUSY" -> "Too many requests. Wait before trying again.";
+                    default ->
+                        "The operation could not be completed. Check local policy, parameters and the"
+                            + " server log.";
+                  };
+      String phase = failure == null ? "" : failure.phase();
+      String path = failure == null || failure.safeRelativePath() == null ? "" : failure.safeRelativePath();
+      System.err.printf(
+          "PlexonPanel control failure requestId=%s action=%s code=%s phase=%s exception=%s path=%s%n",
+          safeLog(id), safeLog(action), safeLog(code), safeLog(phase), error.getClass().getSimpleName(), safeLog(path));
+      reply(id, action, deviceId, status, code, message, safeFailureData);
     }
   }
 
@@ -188,7 +217,7 @@ public final class ControlEngine implements AutoCloseable {
           "protocolVersion",
           3,
           "version",
-          "3.0.2",
+          implementationVersion(),
           "maxEditableBytes",
           SafeFiles.MAX_TEXT_BYTES);
     if (action.equals("devices.list")) return Map.of("devices", devices.snapshot().devices());
@@ -326,6 +355,17 @@ public final class ControlEngine implements AutoCloseable {
     } catch (RuntimeException ignored) {
     }
     return action;
+  }
+
+  private static String implementationVersion() {
+    String value = ControlEngine.class.getPackage().getImplementationVersion();
+    return value == null || value.isBlank() ? "development" : value;
+  }
+
+  private static String safeLog(String value) {
+    if (value == null) return "";
+    String sanitized = value.replaceAll("[\\r\\n\\t]", "_");
+    return sanitized.length() <= 160 ? sanitized : sanitized.substring(0, 160);
   }
 
   public void close() {
