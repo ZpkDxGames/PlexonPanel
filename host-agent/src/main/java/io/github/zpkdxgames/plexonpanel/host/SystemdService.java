@@ -1,5 +1,6 @@
 package io.github.zpkdxgames.plexonpanel.host;
 
+import io.github.zpkdxgames.plexonpanel.control.OperationFailure;
 import java.io.*;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
@@ -7,6 +8,17 @@ import java.util.concurrent.*;
 
 public final class SystemdService {
   private final String service;
+
+  private static final class CommandFailure extends IOException {
+    final int exitCode;
+    final String output;
+
+    CommandFailure(int exitCode, String output) {
+      super("Configured host operation failed");
+      this.exitCode = exitCode;
+      this.output = output == null ? "" : output;
+    }
+  }
 
   public SystemdService(String service) {
     if (!service.matches("[A-Za-z0-9][A-Za-z0-9_.@-]{0,90}\\.service"))
@@ -57,7 +69,26 @@ public final class SystemdService {
   public void action(String action) throws Exception {
     if (!Set.of("start", "stop", "restart").contains(action))
       throw new SecurityException("UNKNOWN_ACTION");
-    run(List.of("/usr/bin/systemctl", action, "--no-ask-password", service), 180);
+    try {
+      run(List.of("/usr/bin/systemctl", action, "--no-ask-password", service), 180);
+    } catch (CommandFailure failure) {
+      String output = failure.output.toLowerCase(Locale.ROOT);
+      if (output.contains("access denied")
+          || output.contains("not authorized")
+          || output.contains("authentication is required")
+          || output.contains("interactive authentication required")
+          || output.contains("permission denied"))
+        throw new OperationFailure(
+            "SYSTEMD_PERMISSION_DENIED",
+            "SYSTEMD_CONTROL",
+            "The Host is not authorized to control the configured Paper service.",
+            false);
+      throw new OperationFailure(
+          "SYSTEMD_OPERATION_FAILED",
+          "SYSTEMD_CONTROL",
+          "The configured Paper service operation failed on the Host.",
+          true);
+    }
   }
 
   static String run(List<String> arguments, int seconds) throws Exception {
@@ -88,9 +119,7 @@ public final class SystemdService {
         throw new IOException("Configured host operation timed out");
       }
       String output = reader.get(5, TimeUnit.SECONDS);
-      if (process.exitValue() != 0)
-        throw new IOException(
-            "Configured host operation failed with exit code " + process.exitValue());
+      if (process.exitValue() != 0) throw new CommandFailure(process.exitValue(), output);
       return output;
     } finally {
       if (process.isAlive()) process.destroyForcibly();
