@@ -135,7 +135,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          git add scripts/package-release.py .github/workflows/build.yml docs/PHASE2_RUNTIME_GATES.md
+          # GitHub Actions tokens cannot publish workflow-file changes. Commit only
+          # the validated non-workflow provenance files here; build.yml is updated
+          # directly through the repository API after this run passes.
+          git add scripts/package-release.py docs/PHASE2_RUNTIME_GATES.md
           git diff --cached --check
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
