@@ -1,273 +1,318 @@
-# PlexonPanel 3.4.1 runtime-certification gates
+# PlexonPanel 3.4.1 — Step 8 production certification gates
 
-Stable `v3.4.1` promotion is blocked until the matched Paper plugin, Host companion, Dashboard/relay, backup provider, scheduler, and restore workflow have been exercised end-to-end on the authorized PlexonCraft production-equivalent host.
+PlexonPanel 3.4.1 source integration is complete only when the matched Paper plugin, Host Companion, Dashboard/relay, Google Drive provider, systemd lifecycle, and **Fully Backup Now** workflow have been exercised end-to-end on the authorized PlexonCraft host.
 
-Repository CI is necessary but is not runtime certification. A green unit/build result must never be recorded as a live PASS for the gates below.
+Repository CI is required evidence, but it is not runtime certification. Never convert a green unit/build result into a live PASS for a gate that was not actually executed.
 
-## Current source-integration baseline
+## Step 8 accepted source baseline
 
-- Java/Paper/Host Step 6 authorization merge: `0aae99f90aa296492a0afc1ac8add1c45320ca61` (current main at provenance refresh: `cec455117127995df7296e58f8de7c9bc7ffcd66`, which retains that merge and adds later non-authorization work)
-- Dashboard/relay Step 6 authorization merge: `54b79f98201fc56835f8ff1cca20853ce4bebc39`
-- Dashboard post-merge CI: `34880343784` — **PASS**
-- Java Step 6 pull-request CI: `34860089290` — **PASS** on Ubuntu 24.04 x64 and ARM, including matched JAR build and release-contract packaging.
-- Production relay deployment run: `34855843392` — **FAIL before deployment** because `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, and `PRODUCTION_RELAY_URL` were not configured in the GitHub Actions environment. No new Worker revision was deployed by that run.
-- Protocol: `3`
-- Java: `25`
-- Runtime certification at source integration: `NOT_EXECUTED`
+At this Step 8 documentation refresh:
 
-Step 6/7 source integration is therefore repository-green but **not production-certified**. Production relay deployment must succeed against the accepted Dashboard/relay commit, and the live Host/Paper/journald acceptance checks must run on the authorized PlexonCraft host before Step 7 can be recorded as runtime PASS.
+- backend/Paper/Host `main` contains the Step 8 merge `3a00bc75f8ad0fb2a953845fee4efa6e5d065d55`;
+- Dashboard/relay accepted `main` is `c051d59010ec1d09f6a5a624246a6b108b85ae12`;
+- Dashboard final-main CI run `34905567114` passed application checks, Worker/standalone relay tests, both relay smoke suites, standalone packaging, and the production Next.js build;
+- backend candidate CI run `34905789066` passed on Linux x64 and Linux ARM64;
+- the candidate PR merge ref `a438185b0719c497d8d7b4f4edce8d0cdfef78f6` and backend merge `3a00bc75f8ad0fb2a953845fee4efa6e5d065d55` share Git tree `6af00a2bcf4b72214c87133b14117b78ac7f2173`;
+- Paper JAR SHA-256 from the matched x64/ARM64 candidate artifacts is `84f3189212aa181dce651cd83e05e23c826246661fb44bfecedbec954df7d219`;
+- Host JAR SHA-256 is `8516ad2d68e090bb3672fbd39050bceb1a0df325a5fa7776f277982dcea375e5`;
+- protocol remains `3` and Java remains `25`;
+- runtime certification remains `NOT_EXECUTED` until the live gates below are completed.
 
-If any repository changes are merged after this document, record the exact deployed `main` commit in the acceptance evidence. Do not silently treat the implementation baseline above as the deployed release SHA.
+The GitHub production-relay workflow has not deployed this accepted dashboard revision: source validation passed, but deployment configuration was absent (`CLOUDFLARE_API_TOKEN`; the workflow environment also showed `CLOUDFLARE_ACCOUNT_ID` and `PRODUCTION_RELAY_URL` unset). Vercel production identity also remains a separate deployment check.
 
-## Required evidence for every gate
+If any repository changes after this document, the acceptance record must use the exact deployed `main` commit. Do not silently treat the source baseline above as the final deployed SHA.
+
+## Final backup contract
+
+Automatic backups and live snapshots are retired product behavior.
+
+> Automatic backups are retired. Full backup creation is manually initiated through **Fully Backup Now** and executed by the always-on Host Companion.
+
+The production flow to certify is:
+
+`Dashboard`
+→ **Fully Backup Now**
+→ explicit confirmation
+→ Host `backup.preflight`
+→ durable Host job
+→ mandatory 30-minute warning countdown
+→ Host-local warning delivery at 30m / 15m / 1m / 30s / 15s / 5s
+→ affirmative `save-all flush`
+→ Host stops the configured Minecraft systemd unit
+→ Host independently proves Minecraft is stopped
+→ cold full-server archive through `.partial` staging
+→ local SHA-256/metadata verification
+→ Google Drive/rclone staging, promotion, and final verification
+→ Host automatically starts Minecraft when this workflow stopped it
+→ startup/readiness verification
+→ durable `COMPLETED` state.
+
+A bounded remote/provider failure after local verification must preserve the local restore point and previous known-good remote copy, restore Minecraft availability, record `DEGRADED`, and permit **Retry Upload** without another shutdown.
+
+Paper is not a prerequisite for this critical path. Browser refresh/disconnect never owns or cancels the job.
+
+## Evidence required for every live gate
 
 Record:
 
-- exact Java/Paper/Host deployed commit;
-- exact Dashboard/relay deployed commit and relay configuration revision;
-- Paper JAR SHA-256 and Host JAR SHA-256;
-- server ID and service identity, without exposing credentials or secrets;
-- test operator;
+- exact deployed backend/Paper/Host commit;
+- exact deployed Dashboard/relay commit;
+- Paper and Host JAR SHA-256 values;
+- target CPU architecture (`linux-x64` or `linux-arm64`);
+- service identity and server ID without exposing credentials;
+- operator;
 - UTC start/end timestamps;
-- observed result and bounded relevant logs;
-- PASS / FAIL / NOT_EXECUTED status;
-- rollback action and rollback result when a failure is induced;
-- any deviation from the configured production topology.
+- relevant bounded request/job IDs and sanitized logs;
+- PASS / FAIL / NOT_EXECUTED;
+- rollback/recovery action and result for induced failures.
 
-Never include OAuth material, rclone config contents, private keys, access tokens, device secrets, or raw credential-bearing command output in the evidence bundle.
+Never include RCON secrets, rclone config contents, OAuth material, private keys, access tokens, device secrets, or credential-bearing command output.
 
-## 1. Upgrade and identity preservation
+## Safe pre-deployment inspection
 
-PASS requires all of the following:
+Before replacing live files, inspect the actual production host.
 
-- upgrade from the currently deployed Panel without deleting the stable server identity or device registry;
-- Paper plugin starts and registers with PlexonCore correctly;
-- Host companion starts under the intended non-root service identity;
-- existing pairing remains valid or migrates deterministically;
-- a new one-use pairing can be completed when explicitly tested;
-- Dashboard connects to the correct server and does not create a duplicate server record;
-- plugin restart, Host restart, Dashboard refresh, and relay interruption recover without duplicate sessions or stale action authority.
+```bash
+systemctl status plexonpanel-host.service --no-pager
+systemctl status plexoncraft.service --no-pager
 
-## 2. General control-plane and telemetry sanity
+systemctl show plexonpanel-host.service \
+  -p User -p Group -p ActiveState -p SubState -p MainPID
+systemctl show plexoncraft.service \
+  -p ActiveState -p SubState -p MainPID
 
-Verify:
+sudo find /opt/plexonpanel-host -maxdepth 1 -type f \
+  -name 'plexonpanel-host-*.jar' -exec sha256sum {} \;
+sudo find /opt/plexoncraft/server/plugins -maxdepth 1 -type f \
+  -name 'PlexonPanel*.jar' -exec sha256sum {} \;
 
-- online/offline state, players, TPS, MSPT, heap, process/system CPU, and uptime are sane;
-- unavailable CPU is never represented as a valid `0%` sample;
-- console streaming is bounded, live, and reconnect-safe;
-- chat stream preserves its origin and does not echo-loop;
-- permitted actions succeed and denied/disabled capabilities fail on the authoritative server/Host side;
-- remote command execution remains main-thread controlled and returns one structured result per request ID;
-- duplicate/stale request replay, malformed payloads, protocol mismatch, wrong-server routing, and replaced sessions are rejected;
-- multi-server isolation is verified when more than one server is configured;
-- Cloudflare/relay exposure is limited to the intended control-plane surface.
+sudo test -r /etc/plexonpanel-host/host-config.json
+sudo jq 'keys' /etc/plexonpanel-host/host-config.json
 
-### Step 7 console-history acceptance
+journalctl -u plexonpanel-host.service -n 100 --no-pager
+journalctl -u plexoncraft.service -n 100 --no-pager
+```
 
-For the Host-authoritative console architecture added in Step 7, PASS additionally requires:
+Use `jq 'keys'` only as a safe structural check. Do not print the entire Host configuration into an acceptance transcript.
 
-1. stop Paper while leaving the Host Companion online;
-2. browse retained console history through Host-owned journald history actions and verify no Paper fallback data is fabricated;
-3. start Paper again and verify new server output continues through the same Host-owned console UI;
-4. restart the Host Companion and verify cursor/replay recovery does not create an unsafe duplicate stream or lose the declared Host authority;
-5. verify historical queries remain restricted to the configured systemd unit and documented journald retention;
-6. verify `console.execute` remains Paper-only and is unavailable while Paper is offline.
+Do **not** recursively `chown` the Minecraft server, use `chmod 777`, run the Host as root, disclose rclone/RCON secrets, or delete known-good backup data.
 
-## 3. Backup read bridge and permission-drift gate
-
-This gate specifically targets the failure mode where repeated Paper saves alter ownership or access on files required by the non-root Host backup process.
+## Gate 1 — Host independence
 
 PASS requires:
 
-1. Confirm the Host service runs as its intended non-root identity.
-2. Confirm the configured backup roots are readable through the supported local backup-read ACL/permission bridge.
-3. Execute repeated authoritative Paper save cycles using `save-all flush` under normal server operation.
-4. Re-check the same backup roots and representative world files after the saves.
-5. Run `backup.preflight` through the real control path.
-6. Confirm no permission repair requires broad world-writable permissions, root execution of the Host service, or manual ownership drift.
-7. Confirm denied/unreadable files are surfaced as an explicit bounded preflight failure rather than an optimistic Ready state.
+1. Minecraft starts online and the Host is connected/authenticated.
+2. Dashboard is paired/authenticated.
+3. Stop Minecraft while leaving `plexonpanel-host.service` running.
+4. Host remains connected and authorized.
+5. Dashboard remains authenticated.
+6. Host-owned journald console history remains accessible.
+7. Host backup/provider/systemd actions remain available while Paper is offline.
+8. Start Minecraft again and verify one authoritative Paper + Host session returns.
 
-Record representative ownership/mode/ACL metadata before and after the test, but do not include secrets or unrelated player data.
+Useful service proof:
 
-## 4. Backup preflight and Paper↔Host save coordination
+```bash
+systemctl show plexonpanel-host.service -p ActiveState -p SubState -p MainPID
+systemctl show plexoncraft.service -p ActiveState -p SubState -p MainPID
+```
 
-PASS requires:
+## Gate 2 — Warning channel and durable countdown
 
-- the Host requests the structured Paper save lease before a live snapshot;
-- Paper performs/acknowledges the intended save coordination without Protocol 4;
-- a successful preflight is only reported after the authoritative save/flush boundary and filesystem checks complete;
-- failed Paper coordination is returned to the Host immediately instead of degrading into an opaque relay timeout;
-- phase/status progression is observable and terminates deterministically;
-- stale or duplicate coordination responses cannot complete a newer backup request.
+Run an authorized **Fully Backup Now** operation and observe the real countdown.
 
-Induce at least one safe coordination failure and verify that the Dashboard reports a structured failure with action/status/code context rather than a generic success or endless spinner.
+PASS requires warnings at:
 
-## 5. Google Drive / rclone provider gate
+- 30 minutes;
+- 15 minutes;
+- 1 minute;
+- 30 seconds;
+- 15 seconds;
+- 5 seconds.
 
-When off-site backup is configured, verify the exact loaded Host configuration rather than browser-local assumptions.
+Confirm warnings are delivered through the Host-local command channel/RCON, not Paper backup coordination. Refresh/reconnect the Dashboard during countdown and verify it reconstructs the Host-owned deadline/remaining state rather than creating a browser timer.
 
-PASS requires:
-
-- provider state distinguishes `CONFIGURED_UNTESTED`, `CONNECTED`, and `DEGRADED` correctly;
-- Provider Test reaches the configured remote through the fixed Host-side rclone executable and config path;
-- the browser never receives rclone configuration contents or provider credentials;
-- `lastTestAt` tracks the latest test attempt;
-- `lastSuccessfulVerificationAt` remains the timestamp of the latest successful provider verification even after a later failed test;
-- remote labels shown to the Dashboard are bounded and sanitized;
-- provider command output remains bounded and secret-redacted;
-- the remote canonical restore point is only promoted after staging verification succeeds.
-
-For Google Drive, confirm the expected destination exists and is accessible using the production Host credentials without displaying those credentials in the evidence.
-
-## 6. Live snapshot success gate
-
-Run an actual live snapshot while the server is online.
+## Gate 3 — Final save boundary
 
 PASS requires:
 
-- preflight passes first;
-- save coordination completes;
-- snapshot phases progress through the expected bounded lifecycle;
-- configured restore-point roots are included and unsafe/unconfigured external paths are not silently added;
-- symlink and volatile-file policy behaves as documented;
-- the local archive and metadata are created successfully;
-- integrity/size verification succeeds before off-site promotion;
-- inventory/status reports the resulting restore point truthfully;
-- the Dashboard transitions from active progress to a confirmed success state without requiring a page reload;
-- a second request cannot create an unsafe overlapping backup operation.
+- Host sends `save-all flush` through the configured local command channel;
+- an affirmative response is required;
+- blank, failed, timed-out, or invalid responses prevent the destructive stop boundary;
+- the failure is bounded and visible as a Host-owned job failure.
 
-Record archive size, duration, job/request ID, resulting canonical filename, and SHA-256 when available.
+Do not expose the command-channel secret while testing.
 
-## 7. Provider-outage and degraded-mode gate
-
-Induce a controlled provider failure without corrupting the last known-good restore point. Examples include temporarily denying remote reachability or using an authorized reversible provider-side test condition.
+## Gate 4 — Cold stop proof
 
 PASS requires:
 
-- the local backup result is not falsely described as remotely verified;
-- provider status becomes explicit `DEGRADED` / failed state;
-- the last successful verification timestamp is preserved;
-- failed staging is not promoted over the canonical remote restore point;
-- cleanup/rollback leaves the previous canonical restore point recoverable;
-- the Dashboard retains last-confirmed data only with an explicit stale/unavailable indication;
-- retrying after provider recovery succeeds without Host restart unless the configuration itself changed.
+- Host requests stop of the configured Minecraft systemd unit;
+- the unit reaches inactive/stopped state;
+- `MainPID` is zero/not alive;
+- archive work does not begin before both conditions are proven.
 
-Restore normal provider access and record the recovery result.
+Observe without changing permissions:
 
-## 8. Host restart and loaded-configuration gate
+```bash
+systemctl show plexoncraft.service \
+  -p ActiveState -p SubState -p MainPID -p Result
+```
 
-PASS requires:
-
-- Host restart preserves server identity and device authorization;
-- loaded backup/provider configuration after restart matches the intended file on disk;
-- configuration changes that require restart are not falsely reported as already active;
-- provider state and maintenance settings return from the running Host, not optimistic browser defaults;
-- reconnect does not replay stale destructive requests;
-- Paper/Host/Dashboard return to one authoritative session for the server.
-
-## 9. Cold restore-point gate
-
-Create the configured cold/full restore point during an authorized maintenance window with the server in the required stopped/quiesced state.
+## Gate 5 — Local cold archive
 
 PASS requires:
 
-- the intended configured server data is captured without transient live-write races;
-- the archive completes within the configured storage/size limits;
-- metadata identifies the restore point and its verification state;
-- off-site promotion follows the same staging-before-canonical safety rule when enabled;
-- the server can subsequently start normally from the unchanged production data before any restore drill begins.
+- unique `.partial` staging during archive creation;
+- configured persistent server content is present;
+- transient/secret Host paths are excluded;
+- symlink/traversal protections hold;
+- final ZIP is readable;
+- SHA-256 and metadata match;
+- backup inventory reports the verified local restore point.
 
-Do not delete the known-good production copy as part of this test.
+Record the backup ID, archive size, duration, and final archive SHA-256. Do not include unrelated player data in evidence.
 
-## 10. Maintenance scheduler and collision gate
+## Gate 6 — Google Drive / rclone
 
-Verify the scheduler that is actually authoritative in Protocol 3. `backups.intervalMinutes` remains the live-snapshot interval mechanism; do not certify removed/dead calendar fields as working features.
-
-PASS requires:
-
-- the configured recurring backup interval is reflected by the running Host;
-- disabled scheduling performs no unattended backup action;
-- due maintenance executes once, not multiple times after reconnect/restart;
-- simultaneous or overlapping maintenance intents serialize safely rather than running destructive operations concurrently;
-- skipped/deferred work is visible as such instead of being reported as completed;
-- unattended destructive scheduling remains disabled unless explicitly intended and validated for the deployment;
-- restart scheduling, if enabled for the deployment, performs the documented warning/save/stop/start lifecycle and recovers the control plane afterward.
-
-Record at least one real scheduled execution rather than only a manual `run now` action.
-
-## 11. Restore drill
-
-A stable release requires an actual restore drill in an authorized maintenance window. Use a disposable copy/staging target or another explicitly approved production-equivalent method whenever possible; do not overwrite the only known-good production data.
+Use the Host-owned Provider Test and the real full-backup upload path.
 
 PASS requires:
 
-- the selected restore point is the exact intended canonical artifact;
-- remote download, when used, completes to staging and is verified before replacement;
-- path traversal, symlink, malformed archive, wrong-server, oversized/unsupported, or unauthorized restore inputs are rejected;
-- destructive restore requires the intended high-risk capability/authorization path;
-- current data is protected by the documented rollback/safety mechanism before replacement;
-- restore completes without partial mixed-version data;
-- Paper and Host start after restore;
-- server identity/device authorization behaves according to the documented restore design;
-- Dashboard reconnects to the expected server;
-- rollback from an intentionally failed rehearsal is demonstrated and recorded.
+- provider is configured and reaches the intended remote using the fixed Host-side rclone executable/config;
+- browser/relay never receives rclone credentials/config contents;
+- staging upload completes;
+- staging verification succeeds before promotion;
+- canonical promotion succeeds;
+- promoted object is verified;
+- previous known-good remote data remains protected until the new object is verified;
+- `lastTestAt` and `lastSuccessfulVerificationAt` remain truthful and distinct.
 
-Record the restored artifact SHA-256, start/end timestamps, service start result, and rollback result.
+The acceptance record may name the configured remote label/path, but must not contain OAuth/config secrets.
 
-## 12. Dashboard recovery and operator-truth gate
-
-Exercise the Backups & Maintenance workspace across success and failure cases.
+## Gate 7 — Automatic restart and readiness
 
 PASS requires:
 
-- Ready / Warning / Failed / Unknown / Not configured states correspond to authoritative data;
-- stale last-confirmed data is visibly labeled stale and is never presented as fresh truth;
-- preflight, phase, failure, provider, inventory, scheduling, and recovery diagnostics remain readable on desktop and mobile layouts;
-- `ActionError` exposes only bounded safe context (`request`, `action`, `status`, `code`, approved data) and no raw stack/secret material;
-- Provider shows both Last test and Last successful verification;
-- browser restore/download controls preserve the 64 MiB browser download ceiling and server-side capability gates;
-- Worker relay and standalone relay produce equivalent Paper-coordination failure behavior.
+- if the manual full-backup workflow stopped Minecraft, it starts Minecraft again automatically;
+- readiness verification succeeds;
+- Dashboard reflects the service online again;
+- legacy serialized `restartAfter: false` cannot suppress restart;
+- an upload/provider failure after local verification still restores Minecraft availability.
 
-## 13. Failure recovery, soak, and security gate
+Proof:
+
+```bash
+systemctl show plexoncraft.service \
+  -p ActiveState -p SubState -p MainPID -p Result
+```
+
+## Gate 8 — Dashboard reconnect and Paper independence
+
+During a real backup:
+
+1. close or disconnect the Dashboard;
+2. reopen/reconnect it;
+3. verify the same durable Host job ID and current phase are recovered;
+4. ensure stale progress from another job ID is ignored;
+5. verify the operation continues while Paper is offline during stopped-server phases;
+6. verify Host-owned console history remains available while Paper is offline.
+
+## Gate 9 — Controlled degraded remote failure and Retry Upload
+
+In a safe reversible test, force a provider/network failure **after a valid local archive exists**.
 
 PASS requires:
 
-- relay interruption and reconnection recover deterministically;
-- plugin and Host restarts do not leave stale sessions authorized;
-- repeated backup status polling does not cause unbounded queue, DOM, or memory growth;
-- at least 30 minutes of representative control-plane soak completes without busy reconnect loops or material MSPT regression against the accepted baseline;
-- repository/dependency review has zero known HIGH/CRITICAL release-blocking defects for the shipped product graph;
-- no credential, token, private config, absolute sensitive path, or raw stack trace is exposed through Dashboard/relay responses or evidence logs.
+- local archive stays verified;
+- previous known-good remote object remains protected;
+- Minecraft returns online;
+- job becomes `DEGRADED` / retryable rather than falsely complete;
+- Dashboard exposes **Retry Upload**;
+- restore provider access;
+- Retry Upload succeeds using the existing local archive;
+- no second Minecraft shutdown occurs.
 
-## Acceptance record
+If destructive fault injection is not authorized, this may remain the only explicitly documented `NOT_EXECUTED` destructive gate. Do not mark it PASS from mocks alone.
 
-Use a gate table or equivalent evidence record containing at least:
+## Gate 10 — Recovery and failure matrix
 
-| Gate | Status | Evidence / run ID | Started UTC | Ended UTC | Operator | Rollback result |
+At minimum document/test the production behavior for:
+
+- duplicate **Fully Backup Now** click;
+- Dashboard disconnect/refresh;
+- Host restart during countdown;
+- Host restart after Minecraft may have stopped;
+- command channel unavailable/auth failure;
+- final save negative/blank/timed out;
+- systemd permission denied;
+- stop timeout or Java process still alive;
+- low local disk;
+- backup-path permission error;
+- symlink/traversal rejection;
+- archive/local-verification failure;
+- rclone missing/config missing;
+- Drive auth/network/staging/promotion/verification failure;
+- Retry Upload success;
+- Minecraft restart failure/readiness timeout;
+- authorization mirror while Paper is offline;
+- journald history while Paper is offline.
+
+Ambiguous destructive state must fail closed into durable recovery handling; do not clear recovery state merely to make the Dashboard green.
+
+## Deployment identity gate
+
+Dashboard and relay are one release unit even though Vercel and Cloudflare deploy separately.
+
+After deployment require:
+
+```text
+Dashboard GET /api/build gitCommit == accepted Dashboard main SHA
+Relay GET /healthz gitCommit       == accepted Dashboard main SHA
+Protocol                           == 3 on both
+Relay runtimeKind                  == cloudflare-worker
+```
+
+Settings → Diagnostics must report the control-plane build as matched. `Unverified` or `Mismatch` is not a production PASS.
+
+The production relay workflow requires:
+
+```text
+GitHub Actions secret:   CLOUDFLARE_API_TOKEN
+GitHub Actions secret:   CLOUDFLARE_ACCOUNT_ID
+GitHub Actions variable: PRODUCTION_RELAY_URL
+```
+
+`PRODUCTION_RELAY_URL` must be the exact public HTTPS relay origin used by the Vercel production environment's `NEXT_PUBLIC_PLEXON_RELAY_URL`.
+
+## Acceptance table
+
+| Gate | Status | Evidence / request/job ID | Started UTC | Ended UTC | Operator | Recovery / rollback |
 | --- | --- | --- | --- | --- | --- | --- |
-| Upgrade / identity | NOT_EXECUTED |  |  |  |  |  |
-| Control plane / telemetry | NOT_EXECUTED | Step 7 repository CI only; live test pending |  |  |  |  |
-| Backup read bridge | NOT_EXECUTED |  |  |  |  |  |
-| Save coordination / preflight | NOT_EXECUTED |  |  |  |  |  |
-| Provider / Google Drive | NOT_EXECUTED |  |  |  |  |  |
-| Live snapshot | NOT_EXECUTED |  |  |  |  |  |
-| Provider outage / recovery | NOT_EXECUTED |  |  |  |  |  |
-| Host restart / loaded config | NOT_EXECUTED |  |  |  |  |  |
-| Cold restore point | NOT_EXECUTED |  |  |  |  |  |
-| Scheduler / collision | NOT_EXECUTED |  |  |  |  |  |
-| Restore drill | NOT_EXECUTED |  |  |  |  |  |
-| Dashboard recovery truth | NOT_EXECUTED |  |  |  |  |  |
-| Soak / security | NOT_EXECUTED |  |  |  |  |  |
+| Host independence | NOT_EXECUTED |  |  |  |  |  |
+| Warning channel / countdown | NOT_EXECUTED |  |  |  |  |  |
+| Final save boundary | NOT_EXECUTED |  |  |  |  |  |
+| Cold stop proof | NOT_EXECUTED |  |  |  |  |  |
+| Local cold archive | NOT_EXECUTED |  |  |  |  |  |
+| Google Drive / rclone | NOT_EXECUTED |  |  |  |  |  |
+| Automatic restart / readiness | NOT_EXECUTED |  |  |  |  |  |
+| Dashboard reconnect / Paper independence | NOT_EXECUTED |  |  |  |  |  |
+| Degraded remote failure / Retry Upload | NOT_EXECUTED |  |  |  |  |  |
+| Recovery / failure matrix | NOT_EXECUTED |  |  |  |  |  |
+| Dashboard + relay deployed identity | NOT_EXECUTED |  |  |  |  |  |
 
 ## Stable-promotion rule
 
-Do **not** create or move `v3.4.1`, publish a stable GitHub release, or label runtime certification PASS while any required gate is FAIL or NOT_EXECUTED.
+Do **not** create or move `v3.4.1`, publish a stable GitHub release, or mark runtime certification PASS while a required production gate is FAIL or NOT_EXECUTED, except that an explicitly unauthorized destructive degraded-provider fault-injection gate may remain the sole documented `NOT_EXECUTED` exception if the release owner accepts that limitation.
 
-After every required gate passes:
+After the required gates pass:
 
-1. record exact deployed Java and Dashboard commits plus CI provenance;
-2. record final artifact SHA-256 values;
-3. record the completed runtime acceptance table and rollback evidence;
-4. build/package from the exact accepted source commit so `release-manifest.json` records that commit;
-5. verify the packaged manifest still reports Protocol 3, Java 25, the accepted Dashboard commit/CI run, and runtime certification PASS;
-6. only then create immutable tag `v3.4.1` and publish the stable release artifacts.
+1. record exact deployed backend and Dashboard commits plus CI/deployment provenance;
+2. record final Paper and Host JAR SHA-256 values;
+3. record the completed acceptance table and recovery evidence;
+4. package from the exact accepted source commit so `release-manifest.json` names that commit;
+5. update the manifest to runtime certification PASS only from real evidence;
+6. verify Protocol 3, Java 25, accepted Dashboard SHA/CI, architecture support, and checksums;
+7. only then create immutable tag `v3.4.1` and publish stable release artifacts.
+
+Until then, source may be repository-green, but production certification remains `NOT_EXECUTED`.
