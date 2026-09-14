@@ -63,12 +63,34 @@ jobs:
         run: python3 scripts/apply-step6-host-auth.py
 
       - name: Test and build backend pair
-        run: ./gradlew --no-daemon clean test check javadoc :agent:jar :host-agent:jar
+        id: validate
+        shell: bash
+        run: |
+          set +e
+          ./gradlew --no-daemon clean test check javadoc :agent:jar :host-agent:jar > step6-backend-validation.log 2>&1
+          code=$?
+          echo "exit_code=${code}" >> "$GITHUB_OUTPUT"
+          tail -n 250 step6-backend-validation.log
+          exit 0
+
+      - name: Upload backend validation diagnostics
+        uses: actions/upload-artifact@v4
+        with:
+          name: step6-backend-validation
+          path: step6-backend-validation.log
+          if-no-files-found: error
+          retention-days: 2
+
+      - name: Enforce backend validation result
+        if: steps.validate.outputs.exit_code != '0'
+        run: exit 1
 
       - name: Commit validated transformation
+        if: steps.validate.outputs.exit_code == '0'
         shell: bash
         run: |
           set -euo pipefail
+          rm -f step6-backend-validation.log
           git rm scripts/apply-step6-host-auth.py .github/workflows/apply-step6-host-auth.yml
           git add -A
           git diff --cached --check
