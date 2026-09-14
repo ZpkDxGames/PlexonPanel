@@ -4,6 +4,7 @@ import java.io.*;
 import java.net.*;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.*;
 import java.nio.file.attribute.PosixFilePermission;
 import java.util.*;
@@ -40,20 +41,20 @@ public final class RconMinecraftCommandChannel implements MinecraftCommandChanne
         "tellraw @a {\"text\":\""
             + text
             + "\",\"color\":\"yellow\",\"bold\":true}";
-    return executeFixed(command);
+    return executeFixed(command, false);
   }
 
   @Override
   public Result saveAllFlush() {
-    return executeFixed("save-all flush");
+    return executeFixed("save-all flush", true);
   }
 
   @Override
   public Result readinessProbe() {
-    return executeFixed("list");
+    return executeFixed("list", false);
   }
 
-  private Result executeFixed(String command) {
+  private Result executeFixed(String command, boolean requireAffirmativeResponse) {
     if (!config.enabled()) return Result.failed("COMMAND_CHANNEL_DISABLED");
     byte[] secret = null;
     try {
@@ -74,12 +75,15 @@ public final class RconMinecraftCommandChannel implements MinecraftCommandChanne
             output,
             COMMAND_REQUEST_ID,
             COMMAND_TYPE,
-            command.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            command.getBytes(StandardCharsets.UTF_8));
         for (int i = 0; i < 8; i++) {
           Packet response = readPacket(input);
           if (response.requestId == -1) throw new RconFailure("RCON_PROTOCOL_ERROR");
-          if (response.requestId == COMMAND_REQUEST_ID && response.type == COMMAND_RESPONSE_TYPE)
+          if (response.requestId == COMMAND_REQUEST_ID && response.type == COMMAND_RESPONSE_TYPE) {
+            if (requireAffirmativeResponse && !affirmative(response.body))
+              return Result.failed("RCON_COMMAND_REJECTED");
             return Result.ok();
+          }
         }
         throw new RconFailure("RCON_PROTOCOL_ERROR");
       }
@@ -96,6 +100,18 @@ public final class RconMinecraftCommandChannel implements MinecraftCommandChanne
     } finally {
       if (secret != null) Arrays.fill(secret, (byte) 0);
     }
+  }
+
+  private static boolean affirmative(String response) {
+    if (response == null || response.isBlank()) return false;
+    String normalized = response.trim().toLowerCase(Locale.ROOT);
+    return !normalized.contains("unknown command")
+        && !normalized.contains("unknown or incomplete command")
+        && !normalized.contains("incorrect argument")
+        && !normalized.contains("syntax error")
+        && !normalized.contains("exception")
+        && !normalized.startsWith("error")
+        && !normalized.startsWith("failed");
   }
 
   private InetAddress resolveLoopbackTarget() throws IOException, RconFailure {
@@ -185,8 +201,10 @@ public final class RconMinecraftCommandChannel implements MinecraftCommandChanne
     byte[] body = new byte[bodyLength];
     buffer.get(body);
     if (buffer.get() != 0 || buffer.get() != 0) throw new RconFailure("RCON_PROTOCOL_ERROR");
+    String response = new String(body, StandardCharsets.UTF_8);
     Arrays.fill(body, (byte) 0);
-    return new Packet(requestId, type);
+    Arrays.fill(packet, (byte) 0);
+    return new Packet(requestId, type, response);
   }
 
   private static byte[] readExactly(InputStream input, int length) throws IOException {
@@ -203,7 +221,7 @@ public final class RconMinecraftCommandChannel implements MinecraftCommandChanne
     return seconds + (seconds == 1 ? " second" : " seconds");
   }
 
-  private record Packet(int requestId, int type) {}
+  private record Packet(int requestId, int type, String body) {}
 
   private static final class RconFailure extends Exception {
     final String code;
