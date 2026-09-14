@@ -56,7 +56,8 @@ public final class HostMain {
         new HostConsoleHistory(config.serviceName(), config.console());
     SystemdService service = new SystemdService(config.serviceName());
     PaperSaveLease leases = new PaperSaveLease(connection, devices);
-    PaperMaintenanceLink maintenanceLink = new PaperMaintenanceLink(connection, devices);
+    MaintenanceCommandChannel maintenanceCommands =
+        new RconMaintenanceCommandChannel(config.maintenanceCommand());
     AtomicBoolean paper = new AtomicBoolean();
     AtomicLong paperRevision = new AtomicLong();
     ReentrantLock operationLock = new ReentrantLock();
@@ -79,9 +80,7 @@ public final class HostMain {
         new MaintenanceManager(
             config,
             service,
-            maintenanceLink,
-            paper::get,
-            paperRevision::get,
+            maintenanceCommands,
             operationLock,
             audit,
             connection,
@@ -93,7 +92,6 @@ public final class HostMain {
       backups.recover();
       fullBackups.recoverRestore();
       maintenance.close();
-      maintenanceLink.close();
       leases.close();
       connection.close();
       return;
@@ -351,7 +349,6 @@ public final class HostMain {
               if (online) paperRevision.incrementAndGet();
             }
             case "backup.coordination.result" -> leases.accept(m);
-            case "maintenance.coordination.result" -> maintenanceLink.accept(m);
             default -> engine.accept(m);
           }
         },
@@ -429,7 +426,6 @@ public final class HostMain {
             new Thread(
                 () -> {
                   maintenance.close();
-                  maintenanceLink.close();
                   scheduledBackups.shutdownNow();
                   engine.close();
                   leases.close();
