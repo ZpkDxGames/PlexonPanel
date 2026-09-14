@@ -6,16 +6,16 @@ Repository CI is necessary but is not runtime certification. A green unit/build 
 
 ## Current source-integration baseline
 
-- Java/Paper/Host Step 7 merge: `57c4842a6d91827205de3f00dc0a0c35e58674c5`
-- Dashboard/relay Step 7 merge: `a5e99a4f23d9e65db942a27012fbe74e368579e3`
-- Dashboard post-merge CI: `34855843387` — **PASS**
-- Java current-main-equivalent source-gate CI: `34856187122` — **PASS** on Ubuntu 24.04 x64 and ARM; the CI-only branch differed from Java `main` only by `docs/STEP7_CURRENT_MAIN_CI_TRIGGER.md` and was closed unmerged.
+- Java/Paper/Host Step 6 authorization merge: `0aae99f90aa296492a0afc1ac8add1c45320ca61` (current main at provenance refresh: `cec455117127995df7296e58f8de7c9bc7ffcd66`, which retains that merge and adds later non-authorization work)
+- Dashboard/relay Step 6 authorization merge: `54b79f98201fc56835f8ff1cca20853ce4bebc39`
+- Dashboard post-merge CI: `34880343784` — **PASS**
+- Java Step 6 pull-request CI: `34860089290` — **PASS** on Ubuntu 24.04 x64 and ARM, including matched JAR build and release-contract packaging.
 - Production relay deployment run: `34855843392` — **FAIL before deployment** because `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, and `PRODUCTION_RELAY_URL` were not configured in the GitHub Actions environment. No new Worker revision was deployed by that run.
 - Protocol: `3`
 - Java: `25`
 - Runtime certification at source integration: `NOT_EXECUTED`
 
-Step 7 source integration is therefore repository-green but **not production-certified**. Production relay deployment must succeed against the accepted Dashboard/relay commit, and the live Host/Paper/journald acceptance checks must run on the authorized PlexonCraft host before Step 7 can be recorded as runtime PASS.
+Step 6/7 source integration is therefore repository-green but **not production-certified**. Production relay deployment must succeed against the accepted Dashboard/relay commit, and the live Host/Paper/journald acceptance checks must run on the authorized PlexonCraft host before Step 7 can be recorded as runtime PASS.
 
 If any repository changes are merged after this document, record the exact deployed `main` commit in the acceptance evidence. Do not silently treat the implementation baseline above as the deployed release SHA.
 
