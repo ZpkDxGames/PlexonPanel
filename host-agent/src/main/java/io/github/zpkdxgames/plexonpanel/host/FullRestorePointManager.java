@@ -13,7 +13,7 @@ import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.*;
 import java.util.zip.*;
 
-/** Cold full-server restore points. Archive creation always requires stopped Paper. */
+/** Cold full-server restore points. Archive creation always requires a proven-stopped service. */
 public final class FullRestorePointManager {
   public record Metadata(
       String backupId,
@@ -81,6 +81,7 @@ public final class FullRestorePointManager {
     Files.createDirectories(staging);
     for (Path path : List.of(base, restorePoints, metadataDirectory, staging))
       if (Files.isSymbolicLink(path)) throw new IOException("Backup storage may not be a symlink");
+    PartialBackupRecovery.clean(staging);
   }
 
   public List<Metadata> list() throws IOException {
@@ -146,8 +147,7 @@ public final class FullRestorePointManager {
       boolean uploadOffsite)
       throws Exception {
     UUID.fromString(jobId);
-    if (!service.stopped() || paperConnected.getAsBoolean())
-      throw new SecurityException("SERVER_MUST_BE_STOPPED");
+    if (!service.stopped()) throw new SecurityException("SERVER_MUST_BE_STOPPED");
     long startedNanos = System.nanoTime();
     String backupId = UUID.randomUUID().toString(), startedAt = Instant.now().toString();
     Path partial = staging.resolve(backupId + ".partial"),
@@ -222,6 +222,10 @@ public final class FullRestorePointManager {
       if (archiveBytes > settings.maximumBytes()) throw new IOException("BACKUP_SIZE_LIMIT");
       emit(jobId, backupId, "HASHING", archiveBytes, scan.bytes, entries[0]);
       String hash = BackupManager.fileHash(finalArchive);
+      LocalBackupVerifier.Result verified =
+          LocalBackupVerifier.verify(finalArchive, hash, entries[0], settings.maximumBytes());
+      if (verified.expandedBytes() != bytes[0])
+        throw new IOException("LOCAL_BACKUP_SIZE_MISMATCH");
       Metadata local =
           new Metadata(
               backupId,
@@ -238,12 +242,12 @@ public final class FullRestorePointManager {
               archiveBytes,
               bytes[0],
               entries[0],
-              hash,
+              verified.sha256(),
               true,
               false,
               provider.configured() ? "RCLONE" : "LOCAL",
               "",
-              "LOCAL_SHA256_VERIFIED",
+              "VERIFIED_LOCAL",
               initiatedBy,
               automatic,
               emergency,
@@ -308,9 +312,15 @@ public final class FullRestorePointManager {
 
   public Metadata verify(String backupId) throws IOException {
     Metadata value = metadata(backupId);
-    String actual = BackupManager.fileHash(archive(backupId));
-    if (!actual.equals(value.sha256)) throw new IOException("RESTORE_HASH_MISMATCH");
-    return value;
+    LocalBackupVerifier.Result verified =
+        LocalBackupVerifier.verify(
+            archive(backupId), value.sha256(), value.entryCount(), Math.max(1L, value.sourceBytes()));
+    if (verified.expandedBytes() != value.sourceBytes())
+      throw new IOException("LOCAL_BACKUP_SIZE_MISMATCH");
+    Metadata result = withLocalState(value, true, "VERIFIED_LOCAL");
+    if (!result.equals(value))
+      AtomicFiles.writeUtf8(metadataDirectory.resolve(backupId + ".json"), GSON.toJson(result));
+    return result;
   }
 
   public synchronized RestoreGrant prepareRestore(String backupId, String deviceId) throws Exception {
@@ -493,8 +503,11 @@ public final class FullRestorePointManager {
     try {
       if (Files.size(downloaded) != value.archiveBytes)
         throw new IOException("REMOTE_VERIFY_FAILED");
-      String hash = BackupManager.fileHash(downloaded);
-      if (!hash.equals(value.sha256)) throw new IOException("RESTORE_HASH_MISMATCH");
+      LocalBackupVerifier.Result verified =
+          LocalBackupVerifier.verify(
+              downloaded, value.sha256(), value.entryCount(), Math.max(1L, value.sourceBytes()));
+      if (verified.expandedBytes() != value.sourceBytes())
+        throw new IOException("LOCAL_BACKUP_SIZE_MISMATCH");
       try (FileChannel channel = FileChannel.open(downloaded, StandardOpenOption.WRITE)) {
         channel.force(true);
       }
@@ -646,7 +659,7 @@ public final class FullRestorePointManager {
   private void waitForStopped(int seconds) throws Exception {
     long until = System.nanoTime() + TimeUnit.SECONDS.toNanos(seconds);
     while (System.nanoTime() < until) {
-      if (service.stopped() && !paperConnected.getAsBoolean()) return;
+      if (service.stopped()) return;
       Thread.sleep(250);
     }
     throw new IOException("SERVER_STOP_TIMEOUT");
@@ -664,8 +677,7 @@ public final class FullRestorePointManager {
 
   private void checkStopped() throws IOException {
     try {
-      if (!service.stopped() || paperConnected.getAsBoolean())
-        throw new IOException("SERVER_STATE_CHANGED_DURING_BACKUP");
+      if (!service.stopped()) throw new IOException("SERVER_STATE_CHANGED_DURING_BACKUP");
       if (Thread.currentThread().isInterrupted()) throw new IOException("BACKUP_CANCELLED");
     } catch (IOException e) {
       throw e;
