@@ -1,0 +1,14 @@
+{
+  "serverRoot": "/opt/plexoncraft/server",
+  "hostUser": "plexonpanel-host",
+  "include": [
+    "Survival_World",
+    "Survival_World_nether",
+    "Survival_World_the_end",
+    "plugins",
+    "server.properties",
+    "bukkit.yml",
+    "spigot.yml",
+    "config"
+  ]
+}

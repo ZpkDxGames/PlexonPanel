@@ -18,7 +18,6 @@ class MaintenanceSettingsTest {
     assertEquals("America/Sao_Paulo", settings.timezone());
     assertFalse(settings.restart().schedule().enabled());
     assertFalse(settings.fullRestorePoint().schedule().enabled());
-    assertFalse(settings.liveSnapshot().schedule().enabled());
     assertTrue(settings.fullRestorePoint().restartAfter());
     assertEquals("SINGLE_CURRENT", settings.fullRestorePoint().retentionMode());
   }
@@ -45,8 +44,7 @@ class MaintenanceSettingsTest {
                 900,
                 "SIZE_AND_HASH_WHEN_AVAILABLE",
                 8L * 1024 * 1024 * 1024,
-                List.of("logs", "cache")),
-            defaults.liveSnapshot());
+                List.of("logs", "cache")));
 
     configured.save(path);
     assertTrue(Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS));
@@ -57,6 +55,42 @@ class MaintenanceSettingsTest {
   }
 
   @Test
+  void legacyLiveSnapshotMemberIsIgnoredRatherThanAdvertisedAsFunctional() throws Exception {
+    Path path = temporary.resolve("maintenance.json");
+    Files.writeString(
+        path,
+        """
+        {
+          "schemaVersion": 1,
+          "timezone": "America/Sao_Paulo",
+          "restart": {
+            "schedule": {"enabled": false, "type": "DAILY", "weekdays": [], "time": "04:00"},
+            "warningSeconds": [60, 10],
+            "stopTimeoutSeconds": 180,
+            "startupTimeoutSeconds": 180
+          },
+          "fullRestorePoint": {
+            "schedule": {"enabled": false, "type": "WEEKLY", "weekdays": ["SUNDAY"], "time": "04:00"},
+            "retentionMode": "SINGLE_CURRENT",
+            "retentionCount": 1,
+            "restartAfter": true,
+            "canonicalFilename": "PlexonCraft-Latest.zip",
+            "uploadTimeoutSeconds": 1800,
+            "verificationMode": "SIZE_AND_HASH_WHEN_AVAILABLE",
+            "maximumBytes": 1099511627776,
+            "excludes": ["logs"]
+          },
+          "liveSnapshot": {
+            "schedule": {"enabled": true, "type": "DAILY", "weekdays": [], "time": "03:00"}
+          }
+        }
+        """);
+    var loaded = MaintenanceSettings.load(path);
+    assertNotNull(loaded);
+    assertFalse(loaded.restart().schedule().enabled());
+  }
+
+  @Test
   void invalidTimezoneScheduleAndExclusionFailClosed() {
     var base = MaintenanceSettings.migratedDefaults();
     assertThrows(
@@ -64,7 +98,7 @@ class MaintenanceSettingsTest {
         () ->
             MaintenanceSettings.fromJson(
                 JsonParser.parseString(
-                    "{\"schemaVersion\":1,\"timezone\":\"Not/A_Zone\",\"restart\":{},\"fullRestorePoint\":{},\"liveSnapshot\":{}}")));
+                    "{\"schemaVersion\":1,\"timezone\":\"Not/A_Zone\",\"restart\":{},\"fullRestorePoint\":{}}")));
 
     var invalidWeekly =
         new MaintenanceSettings(
@@ -80,8 +114,7 @@ class MaintenanceSettingsTest {
                 1800,
                 "SIZE_AND_HASH_WHEN_AVAILABLE",
                 1024L * 1024 * 1024,
-                List.of("logs")),
-            base.liveSnapshot());
+                List.of("logs")));
     assertThrows(IllegalArgumentException.class, () -> MaintenanceSettings.validate(invalidWeekly));
 
     var traversalExclude =
@@ -98,8 +131,7 @@ class MaintenanceSettingsTest {
                 1800,
                 "SIZE_AND_HASH_WHEN_AVAILABLE",
                 1024L * 1024 * 1024,
-                List.of("../secrets")),
-            base.liveSnapshot());
+                List.of("../secrets")));
     assertThrows(IllegalArgumentException.class, () -> MaintenanceSettings.validate(traversalExclude));
   }
 

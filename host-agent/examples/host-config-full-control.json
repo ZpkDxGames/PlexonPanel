@@ -58,7 +58,15 @@
     "restoreEnabled": true,
     "rcloneExecutable": "/usr/bin/rclone",
     "rcloneRemote": "gdrive:PlexonCraft",
-    "rcloneConfig": "/etc/plexonpanel-host/rclone.conf"
+    "rcloneConfig": "/etc/plexonpanel-host/rclone.conf",
+    "liveSnapshotExcludes": [
+      "logs",
+      "crash-reports",
+      "cache",
+      ".cache",
+      "tmp",
+      "plugins/spark/tmp"
+    ]
   },
   "console": {
     "enabled": true,

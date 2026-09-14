@@ -1,5 +1,6 @@
 package io.github.zpkdxgames.plexonpanel.host;
 
+import io.github.zpkdxgames.plexonpanel.control.OperationFailure;
 import java.io.*;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.*;
@@ -18,6 +19,9 @@ public final class RcloneBackupProvider {
 
   private static final int OUTPUT_LIMIT = 64 * 1024;
   private final HostConfig.BackupConfig config;
+  private volatile String lastTestAt = "";
+  private volatile String lastTestState = "NOT_TESTED";
+  private volatile String lastSuccessfulVerificationAt = "";
 
   public RcloneBackupProvider(HostConfig.BackupConfig config) {
     this.config = Objects.requireNonNull(config);
@@ -28,37 +32,73 @@ public final class RcloneBackupProvider {
   }
 
   public Map<String, Object> status() {
-    return Map.of(
-        "provider", configured() ? "RCLONE" : "LOCAL",
-        "configured", configured(),
-        "remote", configured() ? safeRemoteLabel() : "",
-        "executable", configured() ? config.rcloneExecutable() : "");
+    boolean configured = configured();
+    String state =
+        !configured
+            ? "LOCAL"
+            : lastTestState.equals("CONNECTED")
+                ? "CONNECTED"
+                : lastTestState.equals("ERROR") ? "DEGRADED" : "CONFIGURED_UNTESTED";
+    Map<String, Object> result = new LinkedHashMap<>();
+    result.put("provider", configured ? "RCLONE" : "LOCAL");
+    result.put("providerMode", configured ? "RCLONE" : "LOCAL");
+    result.put("configured", configured);
+    result.put("status", state);
+    result.put("remote", configured ? safeRemoteLabel() : "");
+    result.put("lastTestAt", lastTestAt);
+    result.put("lastTestState", lastTestState);
+    result.put("lastSuccessfulVerificationAt", lastSuccessfulVerificationAt);
+    return Map.copyOf(result);
   }
 
-  public Map<String, Object> test(int timeoutSeconds) throws Exception {
-    requireConfigured();
+  public Map<String, Object> test(int timeoutSeconds) {
+    if (!configured())
+      throw new OperationFailure(
+          "RCLONE_UNAVAILABLE",
+          "PROVIDER_TEST",
+          "No off-site rclone provider is configured on the running Host.",
+          false);
     long started = System.nanoTime();
-    run(
-        List.of(
-            config.rcloneExecutable(),
-            "lsjson",
-            remoteRoot(),
-            "--max-depth",
-            "1",
-            "--config",
-            config.rcloneConfig()),
-        timeoutSeconds);
-    return Map.of(
-        "provider",
-        "RCLONE",
-        "status",
-        "CONNECTED",
-        "remote",
-        safeRemoteLabel(),
-        "checkedAt",
-        Instant.now().toString(),
-        "durationMillis",
-        TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started));
+    String checkedAt = Instant.now().toString();
+    try {
+      requireConfigured();
+      run(
+          List.of(
+              config.rcloneExecutable(),
+              "lsjson",
+              remoteRoot(),
+              "--max-depth",
+              "1",
+              "--config",
+              config.rcloneConfig()),
+          timeoutSeconds);
+      lastTestAt = checkedAt;
+      lastTestState = "CONNECTED";
+      lastSuccessfulVerificationAt = checkedAt;
+      return Map.of(
+          "provider",
+          "RCLONE",
+          "status",
+          "CONNECTED",
+          "remote",
+          safeRemoteLabel(),
+          "checkedAt",
+          checkedAt,
+          "durationMillis",
+          TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started));
+    } catch (OperationFailure failure) {
+      lastTestAt = checkedAt;
+      lastTestState = "ERROR";
+      throw failure;
+    } catch (Exception failure) {
+      lastTestAt = checkedAt;
+      lastTestState = "ERROR";
+      throw new OperationFailure(
+          "RCLONE_TEST_FAILED",
+          "PROVIDER_TEST",
+          "The running Host could not reach or validate the configured off-site provider.",
+          true);
+    }
   }
 
   public Promotion uploadAndPromote(
@@ -118,11 +158,13 @@ public final class RcloneBackupProvider {
     safeDelete(stageJson, timeoutSeconds);
     safeDelete(previousZip, timeoutSeconds);
     safeDelete(previousJson, timeoutSeconds);
+    String verifiedAt = Instant.now().toString();
+    lastSuccessfulVerificationAt = verifiedAt;
     return new Promotion(
         true,
         true,
         safeRemoteLabel() + "/" + canonicalFilename,
-        Instant.now().toString(),
+        verifiedAt,
         "Remote staging verified before canonical promotion");
   }
 

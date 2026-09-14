@@ -7,13 +7,15 @@ import java.nio.file.*;
 import java.time.*;
 import java.util.*;
 
-/** Host-owned, non-secret maintenance configuration edited through the control plane. */
+/**
+ * Host-owned, non-secret maintenance configuration edited through the control plane.
+ *
+ * <p>Live snapshots intentionally remain governed only by HostConfig.backups.intervalMinutes in
+ * protocol 3. The former liveSnapshot calendar field was never executed and is deliberately not
+ * represented here; Gson safely ignores that legacy JSON member when loading older settings.
+ */
 public record MaintenanceSettings(
-    int schemaVersion,
-    String timezone,
-    Restart restart,
-    FullRestorePoint fullRestorePoint,
-    LiveSnapshot liveSnapshot) {
+    int schemaVersion, String timezone, Restart restart, FullRestorePoint fullRestorePoint) {
   private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
 
   public record Schedule(boolean enabled, String type, List<String> weekdays, String time) {
@@ -47,8 +49,6 @@ public record MaintenanceSettings(
     }
   }
 
-  public record LiveSnapshot(Schedule schedule) {}
-
   public static MaintenanceSettings migratedDefaults() {
     Schedule disabledDaily = new Schedule(false, "DAILY", List.of(), "04:00");
     Schedule disabledWeekly =
@@ -66,8 +66,7 @@ public record MaintenanceSettings(
             1800,
             "SIZE_AND_HASH_WHEN_AVAILABLE",
             1_099_511_627_776L,
-            List.of("logs", "crash-reports", "cache", ".cache")),
-        new LiveSnapshot(new Schedule(false, "DAILY", List.of(), "03:00")));
+            List.of("logs", "crash-reports", "cache", ".cache")));
   }
 
   public static MaintenanceSettings load(Path path) throws IOException {
@@ -97,13 +96,10 @@ public record MaintenanceSettings(
     if (settings == null || settings.schemaVersion != 1)
       throw new IllegalArgumentException("Unsupported maintenance settings schema");
     ZoneId.of(settings.timezone);
-    if (settings.restart == null
-        || settings.fullRestorePoint == null
-        || settings.liveSnapshot == null)
+    if (settings.restart == null || settings.fullRestorePoint == null)
       throw new IllegalArgumentException("Incomplete maintenance settings");
     validateSchedule(settings.restart.schedule);
     validateSchedule(settings.fullRestorePoint.schedule);
-    validateSchedule(settings.liveSnapshot.schedule);
     if (settings.restart.warningSeconds.size() > 16
         || settings.restart.warningSeconds.stream().anyMatch(v -> v == null || v < 0 || v > 86_400)
         || settings.restart.stopTimeoutSeconds < 30

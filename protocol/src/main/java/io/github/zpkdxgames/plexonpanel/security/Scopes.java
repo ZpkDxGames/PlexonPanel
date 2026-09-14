@@ -73,6 +73,7 @@ public final class Scopes {
           "files.delete",
           "backup.delete",
           "backup.restore",
+          "backup.full.restore",
           "maintenance.configure",
           "maintenance.restart",
           "maintenance.run",
@@ -102,6 +103,7 @@ public final class Scopes {
     actions.put("backup.download.chunk", "backup.download");
     actions.put("backup.download.cancel", "backup.download");
     actions.put("backup.list", "backup.view");
+    actions.put("backup.preflight", "backup.view");
     actions.put("backup.restore.prepare", "backup.restore");
     actions.put("backup.full.list", "backup.view");
     actions.put("backup.full.verify", "backup.view");

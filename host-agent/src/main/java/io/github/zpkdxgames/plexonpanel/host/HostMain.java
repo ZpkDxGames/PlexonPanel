@@ -35,7 +35,10 @@ public final class HostMain {
     if (!System.getProperty("os.name").equals("Linux")
         || ProcessHandle.current().info().user().orElse("root").equals("root"))
       throw new SecurityException("Run the host companion as a dedicated non-root Linux user");
-    HostConfig config = HostConfig.load(Path.of(args[0]));
+    Path configPath = Path.of(args[0]).toAbsolutePath().normalize();
+    Instant hostStartedAt = Instant.now();
+    long configLoadedMtime = Files.getLastModifiedTime(configPath, LinkOption.NOFOLLOW_LINKS).toMillis();
+    HostConfig config = HostConfig.load(configPath);
     Path data = Path.of(config.dataDirectory());
     Files.createDirectories(data);
     DeviceIdentity stored = new IdentityStore(data).loadOrCreate(),
@@ -133,12 +136,17 @@ public final class HostMain {
                       "hasMore",
                       last < all.size(),
                       "provider",
-                      config.backups().rcloneRemote() == null
-                              || config.backups().rcloneRemote().isBlank()
-                          ? "LOCAL"
-                          : "RCLONE",
+                      fullBackups.providerStatus().getOrDefault("provider", "UNKNOWN"),
                       "recoveryRequired",
                       backups.recoveryRequired());
+                }
+                case "backup.preflight" -> {
+                  var result = new LinkedHashMap<>(backups.preflight(connection::authenticated));
+                  result.putAll(fullBackups.providerStatus());
+                  result.put("hostStartedAt", hostStartedAt.toString());
+                  result.put("hostConfigLoadedAt", Instant.ofEpochMilli(configLoadedMtime).toString());
+                  result.put("hostConfigRestartRequired", configChanged(configPath, configLoadedMtime));
+                  return Map.copyOf(result);
                 }
                 case "backup.create" -> {
                   var result = backups.create(device, false, false);
@@ -248,7 +256,11 @@ public final class HostMain {
                   return Map.of("jobId", maintenance.fullRestorePointNow(device, skip), "state", "QUEUED");
                 }
                 case "provider.status" -> {
-                  return fullBackups.providerStatus();
+                  var result = new LinkedHashMap<>(fullBackups.providerStatus());
+                  result.put("hostStartedAt", hostStartedAt.toString());
+                  result.put("hostConfigLoadedAt", Instant.ofEpochMilli(configLoadedMtime).toString());
+                  result.put("hostConfigRestartRequired", configChanged(configPath, configLoadedMtime));
+                  return Map.copyOf(result);
                 }
                 case "provider.test" -> {
                   return fullBackups.testProvider(30);
@@ -381,7 +393,11 @@ public final class HostMain {
                                 "actorLabel", "Host schedule",
                                 "actionType", "backup.create",
                                 "outcome", "FAILED",
-                                "code", "BACKUP_FAILED"));
+                                "code", e instanceof OperationFailure failure ? failure.code() : "BACKUP_FAILED",
+                                "metadata",
+                                    e instanceof OperationFailure failure
+                                        ? failure.safeData()
+                                        : Map.of()));
                       } catch (Exception ignored) {
                       }
                       System.err.println("Scheduled live snapshot failed: " + e.getClass().getSimpleName());
@@ -412,6 +428,14 @@ public final class HostMain {
                 }));
     connection.start();
     new CountDownLatch(1).await();
+  }
+
+  private static boolean configChanged(Path path, long loadedMtime) {
+    try {
+      return Files.getLastModifiedTime(path, LinkOption.NOFOLLOW_LINKS).toMillis() != loadedMtime;
+    } catch (Exception ignored) {
+      return false;
+    }
   }
 
   private static void requireOwner(DeviceRegistry.Device device) {
