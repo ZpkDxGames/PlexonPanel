@@ -20,6 +20,35 @@ public record HostConfig(
     BackupConfig backups,
     ConsoleConfig console,
     MaintenanceCommandConfig maintenanceCommand) {
+
+  /** Source-compatible constructor for tests and integrations compiled before the RCON field. */
+  public HostConfig(
+      String serverId,
+      String serverName,
+      String relayUrl,
+      String relayPublicKey,
+      String serverRoot,
+      String dataDirectory,
+      String accessRegistry,
+      String serviceName,
+      Map<String, Boolean> capabilities,
+      BackupConfig backups,
+      ConsoleConfig console) {
+    this(
+        serverId,
+        serverName,
+        relayUrl,
+        relayPublicKey,
+        serverRoot,
+        dataDirectory,
+        accessRegistry,
+        serviceName,
+        capabilities,
+        backups,
+        console,
+        MaintenanceCommandConfig.defaults());
+  }
+
   public record BackupConfig(
       boolean enabled,
       String directory,
