@@ -1,14 +1,8 @@
-# PlexonPanel 3.0.2 — PlexonCraft full local capability preset
+# PlexonPanel — PlexonCraft full local Paper capability preset
 #
-# This file intentionally enables every capability that the Paper agent can
-# truthfully execute. It is NOT the public default. Copy only the settings you
-# intend to use into plugins/PlexonPanel/config.yml and configure the relay and
-# Host public keys before enabling their connections.
-#
-# Protocol 3, immutable device grants, local capability checks, confirmation,
-# audit, path confinement, command allow/deny rules, and signed transport remain
-# mandatory. Existing paired devices do not gain newly added scopes; re-pair an
-# intended Owner device after applying this policy when its grant is stale.
+# Paper exposes only Bukkit/Paper runtime capabilities. Full backup, provider,
+# maintenance, and systemd lifecycle authority belongs exclusively to the Linux
+# PlexonPanel Host Companion.
 
 gateway:
   enabled: false
@@ -24,12 +18,8 @@ gateway:
 
 telemetry:
   enabled: true
-  # Lightweight TPS/MSPT health snapshots at 4 Hz so Dashboard 3.0's
-  # browser-local 250/500/1000/2000 ms display cadences have fresh source data.
   server-interval-ticks: 5
   player-snapshot-interval-seconds: 30
-  # JVM/process system telemetry is intentionally slower than the lightweight
-  # Paper health snapshot; Host publishes machine telemetry at 250 ms.
   system-interval-seconds: 1
   world-interval-seconds: 10
   plugin-interval-seconds: 60
@@ -75,8 +65,6 @@ remote-actions:
   console:
     enabled: true
     mode: ALLOWLIST_WITH_CONFIRMATION
-    # Keep this explicit. Full capability means the path is available under
-    # local policy; it does not mean every arbitrary Minecraft command is safe.
     allow:
       - "^(tps|mspt)(\\s.*)?$"
       - "^paper version$"
@@ -98,9 +86,6 @@ remote-actions:
     feed: true
     kill: true
     op: true
-  # Only explicitly verified, locally allowlisted operations belong here.
-  # This maps the PlexonPanel entry to its own safe policy reload command and
-  # deliberately does NOT expose generic Bukkit/Paper /reload.
   plugin-reload-commands:
     PlexonPanel: "plexonpanel reload"
 
@@ -131,10 +116,4 @@ files:
     upload: true
 
 host:
-  # Set this to the separately generated Host companion public key before the
-  # Paper/Host coordination channel is enabled in production.
   public-key: ""
-
-backups:
-  enabled: true
-  allow-host-schedule: true

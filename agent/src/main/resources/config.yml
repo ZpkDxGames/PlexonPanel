@@ -18,9 +18,6 @@ gateway:
 
 telemetry:
   enabled: true
-  # Server health is captured on Paper's main thread, then serialized off-thread.
-  # Values as low as 5 ticks (250 ms) are supported for lightweight TPS/MSPT
-  # snapshots. The conservative public default remains 40 ticks.
   server-interval-ticks: 40
   player-snapshot-interval-seconds: 30
   system-interval-seconds: 5
@@ -31,9 +28,6 @@ telemetry:
   include-player-location: false
   include-player-address: false
 
-# Persistent player presence is personal-data collection and is disabled by default.
-# When disabled, authorized devices can still receive the current online roster and
-# realtime join/leave deltas, but no presence journal is written.
 player-history:
   enabled: false
   retention-days: 30
@@ -71,7 +65,6 @@ remote-actions:
   console:
     enabled: false
     mode: ALLOWLIST_WITH_CONFIRMATION
-    # A command must match an allow rule and must not match a deny rule.
     allow:
       - "^(tps|mspt)(\\s.*)?$"
       - "^paper version$"
@@ -91,18 +84,17 @@ remote-actions:
     heal: false
     feed: false
     kill: false
-    op: false # Also deop; requires Owner.
+    op: false
   plugin-reload-commands: {}
 
 audit:
-  # Security auditing remains mandatory, regardless of the legacy enabled switch.
   retention-days: 30
 
 access:
   default-pair-role: Observer
-  device-credential-days: 30 # 1–30; codes last five minutes and are single use.
+  device-credential-days: 30
   allow-dashboard-revoke: false
-  roles: {} # Custom role: Name: {scopes: [overview.view, telemetry.view]}
+  roles: {}
 
 files:
   enabled: false
@@ -122,8 +114,4 @@ files:
     upload: false
 
 host:
-  public-key: "" # Independent host public key; never a private key.
-
-backups:
-  enabled: false # Authorize Paper save/flush leases for the optional host.
-  allow-host-schedule: false
+  public-key: "" # Host identity remains for control-plane trust; backups are Host-only.

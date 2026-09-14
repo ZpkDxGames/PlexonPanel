@@ -18,7 +18,36 @@ public record HostConfig(
     String serviceName,
     Map<String, Boolean> capabilities,
     BackupConfig backups,
-    ConsoleConfig console) {
+    ConsoleConfig console,
+    CommandChannelConfig commandChannel) {
+
+  public HostConfig(
+      String serverId,
+      String serverName,
+      String relayUrl,
+      String relayPublicKey,
+      String serverRoot,
+      String dataDirectory,
+      String accessRegistry,
+      String serviceName,
+      Map<String, Boolean> capabilities,
+      BackupConfig backups,
+      ConsoleConfig console) {
+    this(
+        serverId,
+        serverName,
+        relayUrl,
+        relayPublicKey,
+        serverRoot,
+        dataDirectory,
+        accessRegistry,
+        serviceName,
+        capabilities,
+        backups,
+        console,
+        CommandChannelConfig.defaults());
+  }
+
   public record BackupConfig(
       boolean enabled,
       String directory,
@@ -85,6 +114,18 @@ public record HostConfig(
     }
   }
 
+  public record CommandChannelConfig(
+      boolean enabled,
+      String host,
+      int port,
+      String secretFile,
+      int commandTimeoutMillis,
+      int readinessTimeoutSeconds) {
+    static CommandChannelConfig defaults() {
+      return new CommandChannelConfig(false, "127.0.0.1", 25575, "", 5000, 180);
+    }
+  }
+
   public static List<String> defaultLiveSnapshotExcludes() {
     return List.of("logs", "crash-reports", "cache", ".cache", "tmp", "plugins/spark/tmp");
   }
@@ -103,24 +144,13 @@ public record HostConfig(
             "serviceName",
             "capabilities",
             "backups",
-            "console")
+            "console",
+            "commandChannel")
         .containsAll(raw.keySet()))
       throw new IllegalArgumentException("Unknown host configuration key");
     HostConfig c = new Gson().fromJson(raw, HostConfig.class);
-    if (c.console == null)
-      c =
-          new HostConfig(
-              c.serverId,
-              c.serverName,
-              c.relayUrl,
-              c.relayPublicKey,
-              c.serverRoot,
-              c.dataDirectory,
-              c.accessRegistry,
-              c.serviceName,
-              c.capabilities,
-              c.backups,
-              ConsoleConfig.defaults());
+    if (c.console == null) c = copy(c, ConsoleConfig.defaults(), c.commandChannel);
+    if (c.commandChannel == null) c = copy(c, c.console, CommandChannelConfig.defaults());
     if (c.backups != null && c.backups.liveSnapshotExcludes == null) {
       BackupConfig b = c.backups;
       c =
@@ -146,8 +176,31 @@ public record HostConfig(
                   b.rcloneRemote,
                   b.rcloneConfig,
                   defaultLiveSnapshotExcludes()),
-              c.console);
+              c.console,
+              c.commandChannel);
     }
+    validate(c);
+    return c;
+  }
+
+  private static HostConfig copy(
+      HostConfig c, ConsoleConfig console, CommandChannelConfig commandChannel) {
+    return new HostConfig(
+        c.serverId,
+        c.serverName,
+        c.relayUrl,
+        c.relayPublicKey,
+        c.serverRoot,
+        c.dataDirectory,
+        c.accessRegistry,
+        c.serviceName,
+        c.capabilities,
+        c.backups,
+        console,
+        commandChannel);
+  }
+
+  private static void validate(HostConfig c) {
     UUID.fromString(c.serverId);
     if (c.serverName == null || c.serverName.length() > 64 || c.serverName.isBlank())
       throw new IllegalArgumentException("Invalid server label");
@@ -182,7 +235,8 @@ public record HostConfig(
     for (String value : List.of(c.serverRoot, c.dataDirectory, c.accessRegistry))
       if (!Path.of(value).isAbsolute())
         throw new IllegalArgumentException("Host paths must be absolute");
-    var b = c.backups;
+
+    BackupConfig b = c.backups;
     if (b == null
         || b.directory == null
         || !Path.of(b.directory).isAbsolute()
@@ -216,7 +270,21 @@ public record HostConfig(
         throw new IllegalArgumentException("Invalid locally configured rclone provider");
     }
     validateConsole(c.console);
-    return c;
+    validateCommandChannel(c.commandChannel);
+  }
+
+  private static void validateCommandChannel(CommandChannelConfig value) {
+    if (value == null) throw new IllegalArgumentException("Missing command channel configuration");
+    if (!Set.of("127.0.0.1", "localhost", "::1", "[::1]").contains(value.host))
+      throw new IllegalArgumentException("Maintenance RCON must be bound to loopback");
+    if (value.port < 1 || value.port > 65535
+        || value.commandTimeoutMillis < 500 || value.commandTimeoutMillis > 30000
+        || value.readinessTimeoutSeconds < 30 || value.readinessTimeoutSeconds > 1800)
+      throw new IllegalArgumentException("Invalid maintenance command channel limits");
+    if (value.enabled) {
+      if (value.secretFile == null || value.secretFile.isBlank() || !Path.of(value.secretFile).isAbsolute())
+        throw new IllegalArgumentException("Enabled maintenance command channel requires an absolute secret file");
+    }
   }
 
   private static boolean validSnapshotExclusion(String value) {
@@ -278,6 +346,8 @@ public record HostConfig(
           Boolean.TRUE.equals(result.get(s))
               && backups.enabled
               && (!s.equals("backup.restore") || backups.restoreEnabled));
+    // The manual maintenance job requires the fixed Host-local command channel. Read-only backup
+    // inventory remains available without it, but create/restart operations fail closed at runtime.
     for (String s : List.of("console.view.errors", "console.view.full"))
       result.put(s, Boolean.TRUE.equals(result.get(s)) && console.enabled);
     result.put("console.execute.allowed", false);
