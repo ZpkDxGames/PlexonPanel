@@ -50,8 +50,6 @@ jobs:
           source_ref=origin/agent/step6-host-authorization-decoupling
           base_ref=$(git merge-base origin/main "$source_ref")
           paths=(
-            agent/src/main/java/io/github/zpkdxgames/plexonpanel/AgentRuntime.java
-            docs/HOST_AGENT.md
             docs/HOST_AUTHORIZATION_MIRROR.md
             host-agent/src/main/java/io/github/zpkdxgames/plexonpanel/host/HostAuthorizationMirror.java
             host-agent/src/main/java/io/github/zpkdxgames/plexonpanel/host/HostConfig.java
@@ -74,8 +72,6 @@ jobs:
         run: |
           set -euo pipefail
           paths=(
-            agent/src/main/java/io/github/zpkdxgames/plexonpanel/AgentRuntime.java
-            docs/HOST_AGENT.md
             docs/HOST_AUTHORIZATION_MIRROR.md
             host-agent/src/main/java/io/github/zpkdxgames/plexonpanel/host/HostAuthorizationMirror.java
             host-agent/src/main/java/io/github/zpkdxgames/plexonpanel/host/HostConfig.java
