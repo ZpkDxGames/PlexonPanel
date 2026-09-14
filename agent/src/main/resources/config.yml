@@ -118,8 +118,4 @@ files:
     upload: false
 
 host:
-  public-key: "" # Independent host public key; never a private key.
-
-backups:
-  enabled: false # Authorize Paper save/flush leases for the optional host.
-  allow-host-schedule: false
+  public-key: "" # Host identity remains for control-plane trust; backups are Host-only.

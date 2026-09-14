@@ -25,8 +25,6 @@ public final class AgentRuntime implements AutoCloseable {
   private final ControlEngine actions;
   private final ControlPolicy policy;
   private final DeviceRegistry devices;
-  private final io.github.zpkdxgames.plexonpanel.backup.BackupCoordinator backupCoordinator;
-  private final io.github.zpkdxgames.plexonpanel.backup.MaintenanceCoordinator maintenanceCoordinator;
   private final AtomicBoolean started = new AtomicBoolean();
   private final AtomicBoolean closed = new AtomicBoolean();
 
@@ -67,17 +65,11 @@ public final class AgentRuntime implements AutoCloseable {
             gateway,
             gateway::isAuthenticated,
             identity.serverId().toString());
-    backupCoordinator =
-        new io.github.zpkdxgames.plexonpanel.backup.BackupCoordinator(
-            plugin, devices, policy, gateway);
-    maintenanceCoordinator =
-        new io.github.zpkdxgames.plexonpanel.backup.MaintenanceCoordinator(
-            plugin, devices, policy, gateway);
+    // Backup and maintenance coordination is Host-owned. Paper only services its normal action
+    // surface plus the Step 6 request to republish the authoritative access registry.
     gateway.setInboundHandler(
         message -> {
           switch (message.envelope().type()) {
-            case "backup.coordination" -> backupCoordinator.accept(message);
-            case "maintenance.coordination" -> maintenanceCoordinator.accept(message);
             case "access.authority.request" -> {
               try {
                 actions.syncAccess();
@@ -134,7 +126,6 @@ public final class AgentRuntime implements AutoCloseable {
   @Override
   public void close() {
     if (!closed.compareAndSet(false, true)) return;
-    backupCoordinator.close();
     actions.close();
     telemetry.close();
     presence.close();
