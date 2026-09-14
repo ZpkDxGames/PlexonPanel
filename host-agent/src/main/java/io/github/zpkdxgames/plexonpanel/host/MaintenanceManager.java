@@ -12,10 +12,8 @@ import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.locks.ReentrantLock;
-import java.util.function.BooleanSupplier;
-import java.util.function.LongSupplier;
 
-/** Host-authoritative calendar scheduler and destructive-operation orchestrator. */
+/** Host-authoritative restart scheduler and manual-only cold full-backup orchestrator. */
 public final class MaintenanceManager implements AutoCloseable {
   private final HostConfig config;
   private final Path settingsPath;
@@ -31,36 +29,14 @@ public final class MaintenanceManager implements AutoCloseable {
   private final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
   private final ThreadPoolExecutor worker =
       new ThreadPoolExecutor(
-          1, 1, 0L, TimeUnit.MILLISECONDS, new ArrayBlockingQueue<>(2), new ThreadPoolExecutor.AbortPolicy());
+          1,
+          1,
+          0L,
+          TimeUnit.MILLISECONDS,
+          new ArrayBlockingQueue<>(2),
+          new ThreadPoolExecutor.AbortPolicy());
   private final AtomicBoolean closed = new AtomicBoolean();
   private volatile MaintenanceSettings settings;
-
-  /**
-   * Compatibility constructor for current HostMain wiring. Paper coordination parameters are
-   * deliberately ignored for maintenance command transport; the Host-local RCON channel is
-   * authoritative for warning, final-save and readiness commands.
-   */
-  public MaintenanceManager(
-      HostConfig config,
-      SystemdService service,
-      PaperMaintenanceLink ignoredPaperLink,
-      BooleanSupplier ignoredPaperConnected,
-      LongSupplier ignoredPaperRevision,
-      ReentrantLock operationLock,
-      LocalAudit audit,
-      MessageSink events,
-      FullRestorePointManager fullBackups)
-      throws IOException {
-    this(
-        config,
-        service,
-        new RconMinecraftCommandChannel(config.commandChannel()),
-        operationLock,
-        audit,
-        events,
-        fullBackups,
-        Clock.systemUTC());
-  }
 
   public MaintenanceManager(
       HostConfig config,
@@ -71,7 +47,15 @@ public final class MaintenanceManager implements AutoCloseable {
       MessageSink events,
       FullRestorePointManager fullBackups)
       throws IOException {
-    this(config, service, commandChannel, operationLock, audit, events, fullBackups, Clock.systemUTC());
+    this(
+        config,
+        service,
+        commandChannel,
+        operationLock,
+        audit,
+        events,
+        fullBackups,
+        Clock.systemUTC());
   }
 
   MaintenanceManager(
@@ -103,6 +87,24 @@ public final class MaintenanceManager implements AutoCloseable {
   public void start() {
     try {
       MaintenanceStateStore.Job active = state.active();
+      if (active != null
+          && "FULL_RESTORE_POINT".equals(active.kind())
+          && active.automatic()
+          && !MaintenanceStateStore.terminal(active)) {
+        state.finish(
+            active,
+            "FAILED",
+            "AUTOMATIC_BACKUP_DISABLED",
+            "Automatic full backups are retired; start a new backup manually from the dashboard.");
+        publish(
+            "maintenance.failed",
+            Map.of(
+                "jobId", active.jobId(),
+                "kind", active.kind(),
+                "errorCode", "AUTOMATIC_BACKUP_DISABLED"));
+        active = null;
+      }
+
       boolean resumedCountdown = false;
       if (active != null && "COUNTDOWN".equals(active.phase())) {
         try {
@@ -133,8 +135,7 @@ public final class MaintenanceManager implements AutoCloseable {
     } catch (RejectedExecutionException busy) {
       throw new IllegalStateException("MAINTENANCE_COUNTDOWN_RECOVERY_BUSY", busy);
     }
-    // Legacy scheduled maintenance remains temporarily for migration compatibility. Step 5 removes
-    // recurring full-backup coordination; manual jobs already use the Host-owned durable state below.
+    // Only restart scheduling remains. Full backups are explicit Host jobs initiated by a user.
     scheduler.scheduleWithFixedDelay(this::tickSafely, 2, 15, TimeUnit.SECONDS);
   }
 
@@ -153,8 +154,10 @@ public final class MaintenanceManager implements AutoCloseable {
         false,
         "",
         "",
-        Map.of("timezone", next.timezone()));
-    publish("maintenance.settings.updated", Map.of("timezone", next.timezone()));
+        Map.of("timezone", next.timezone(), "fullBackupMode", "MANUAL_ONLY"));
+    publish(
+        "maintenance.settings.updated",
+        Map.of("timezone", next.timezone(), "fullBackupMode", "MANUAL_ONLY"));
     return next;
   }
 
@@ -163,13 +166,11 @@ public final class MaintenanceManager implements AutoCloseable {
     ZoneId zone = ZoneId.of(current.timezone());
     Instant now = timeSource.instant();
     Instant restart = MaintenanceSchedule.next(current.restart().schedule(), zone, now);
-    Instant full = MaintenanceSchedule.next(current.fullRestorePoint().schedule(), zone, now);
     MaintenanceStateStore.Job active = state.active();
     Map<String, Object> result = new LinkedHashMap<>();
     result.put("timezone", current.timezone());
     result.put("nextRestart", restart == null ? "" : restart.toString());
-    result.put("nextFullRestorePoint", full == null ? "" : full.toString());
-    result.put("fullBackupScheduleDeprecated", true);
+    result.put("fullBackupMode", "MANUAL_ONLY");
     result.put("jobStateContractVersion", 2);
     result.put("currentOperation", active == null ? Map.of() : active);
     result.put("provider", fullBackups.providerStatus());
@@ -185,9 +186,9 @@ public final class MaintenanceManager implements AutoCloseable {
     return queue("RESTART", null, device, false, skipCountdown);
   }
 
-  public String fullRestorePointNow(DeviceRegistry.Device device, boolean skipCountdown) throws Exception {
-    // Manual full backups always execute the Host-owned warning schedule. Keep the legacy argument
-    // for caller compatibility, but never allow it to bypass the mandatory countdown contract.
+  /** Manual full backups always use the mandatory Host-owned countdown while Minecraft is online. */
+  public String fullRestorePointNow(DeviceRegistry.Device device, boolean ignoredSkipCountdown)
+      throws Exception {
     return queue("FULL_RESTORE_POINT", null, device, false, false);
   }
 
@@ -199,6 +200,12 @@ public final class MaintenanceManager implements AutoCloseable {
       boolean skipCountdown)
       throws Exception {
     if (closed.get()) throw new IllegalStateException("HOST_OFFLINE");
+    if ("FULL_RESTORE_POINT".equals(kind) && automatic)
+      throw new OperationFailure(
+          "AUTOMATIC_BACKUP_DISABLED",
+          "QUEUED",
+          "Full backups are manual-only and cannot be started by a scheduler.",
+          false);
 
     MaintenanceStateStore.Job recovery = state.recoveryRequired();
     if (recovery != null) throw conflict("RECOVERY_REQUIRED", recovery, false);
@@ -262,7 +269,7 @@ public final class MaintenanceManager implements AutoCloseable {
     try {
       tick();
     } catch (Exception error) {
-      System.err.println("PlexonPanel Host maintenance scheduler: " + error.getClass().getSimpleName());
+      System.err.println("PlexonPanel Host restart scheduler: " + error.getClass().getSimpleName());
     }
   }
 
@@ -271,18 +278,7 @@ public final class MaintenanceManager implements AutoCloseable {
     MaintenanceSettings current = settings;
     ZoneId zone = ZoneId.of(current.timezone());
     Instant now = timeSource.instant(), windowStart = now.minus(Duration.ofMinutes(10));
-    Due full = due("full-restore-point", current.fullRestorePoint().schedule(), zone, windowStart, now);
     Due restart = due("restart", current.restart().schedule(), zone, windowStart, now);
-    if (full != null && restart != null && full.occurrence.equals(restart.occurrence)) {
-      if (!state.claim(full.scheduleId, full.occurrence)) return;
-      state.claim(restart.scheduleId, restart.occurrence);
-      queue("FULL_RESTORE_POINT", full.occurrence, null, true, false);
-      return;
-    }
-    if (full != null && state.claim(full.scheduleId, full.occurrence)) {
-      queue("FULL_RESTORE_POINT", full.occurrence, null, true, false);
-      return;
-    }
     if (restart != null && state.claim(restart.scheduleId, restart.occurrence))
       queue("RESTART", restart.occurrence, null, true, false);
   }
@@ -382,8 +378,17 @@ public final class MaintenanceManager implements AutoCloseable {
       waitStarted(settings.restart().startupTimeoutSeconds());
       job = transition(job, "VERIFYING_STARTUP", null, 100, true, null, null, false, Map.of());
       state.finish(job, "SUCCESS", "");
-      publish("maintenance.completed", Map.of("jobId", job.jobId(), "kind", job.kind(), "result", "SUCCESS"));
-      audit("maintenance.restart", "SUCCESS", actor(device, automatic), automatic, job.jobId(), "", Map.of());
+      publish(
+          "maintenance.completed",
+          Map.of("jobId", job.jobId(), "kind", job.kind(), "result", "SUCCESS"));
+      audit(
+          "maintenance.restart",
+          "SUCCESS",
+          actor(device, automatic),
+          automatic,
+          job.jobId(),
+          "",
+          Map.of());
     } catch (Exception error) {
       if (closed.get() && error instanceof InterruptedException && "COUNTDOWN".equals(job.phase())) {
         Thread.currentThread().interrupt();
@@ -407,6 +412,7 @@ public final class MaintenanceManager implements AutoCloseable {
     boolean locked = false, stoppedByUs = false;
     AtomicBoolean stopBoundaryEntered = new AtomicBoolean();
     try {
+      if (automatic) throw new IOException("AUTOMATIC_BACKUP_DISABLED");
       if (!operationLock.tryLock()) throw new SecurityException("BUSY");
       locked = true;
       if (fullBackups.recoveryRequired()) throw new IllegalStateException("RESTORE_RECOVERY_REQUIRED");
@@ -765,7 +771,14 @@ public final class MaintenanceManager implements AutoCloseable {
     publish(
         outcome.equals("RECOVERY_REQUIRED") ? "maintenance.recovery.required" : "maintenance.failed",
         Map.of("jobId", job.jobId(), "kind", job.kind(), "errorCode", code));
-    audit(action, outcome, actor(device, automatic), automatic, job.jobId(), job.backupId(), Map.of("errorCode", code));
+    audit(
+        action,
+        outcome,
+        actor(device, automatic),
+        automatic,
+        job.jobId(),
+        job.backupId(),
+        Map.of("errorCode", code));
   }
 
   private static OperationFailure conflict(

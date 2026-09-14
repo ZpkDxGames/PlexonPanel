@@ -127,10 +127,7 @@ files:
     upload: true
 
 host:
-  # Set this to the separately generated Host companion public key before the
-  # Paper/Host coordination channel is enabled in production.
-  public-key: ""
+  public-key: "" # Independent Host public key; never a private key.
 
-backups:
-  enabled: true
-  allow-host-schedule: true
+# Backup/maintenance authority is intentionally absent from Paper even in this full
+# capability preset. Manual cold backups are owned by the Linux Host Companion.

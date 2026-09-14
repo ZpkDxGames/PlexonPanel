@@ -39,10 +39,11 @@ class MaintenanceScheduleTest {
   }
 
   @Test
-  void migratedDefaultsDoNotEnableDestructiveSchedules() {
+  void migratedDefaultsKeepRestartDisabledAndFullBackupManualOnly() {
     var settings = MaintenanceSettings.migratedDefaults();
     assertFalse(settings.restart().schedule().enabled());
-    assertFalse(settings.fullRestorePoint().schedule().enabled());
+    assertEquals("SINGLE_CURRENT", settings.fullRestorePoint().retentionMode());
+    assertEquals("PlexonCraft-Latest.zip", settings.fullRestorePoint().canonicalFilename());
     assertEquals("America/Sao_Paulo", settings.timezone());
   }
 

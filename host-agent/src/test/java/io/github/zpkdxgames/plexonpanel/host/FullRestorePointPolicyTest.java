@@ -106,7 +106,6 @@ class FullRestorePointPolicyTest {
     var base = MaintenanceSettings.migratedDefaults().fullRestorePoint();
     var tiny =
         new MaintenanceSettings.FullRestorePoint(
-            base.schedule(),
             base.retentionMode(),
             base.retentionCount(),
             base.restartAfter(),

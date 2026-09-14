@@ -10,9 +10,9 @@ import java.util.*;
 /**
  * Host-owned, non-secret maintenance configuration edited through the control plane.
  *
- * <p>Live snapshots intentionally remain governed only by HostConfig.backups.intervalMinutes in
- * protocol 3. The former liveSnapshot calendar field was never executed and is deliberately not
- * represented here; Gson safely ignores that legacy JSON member when loading older settings.
+ * <p>Full backups are manual-only. Legacy {@code fullRestorePoint.schedule} and {@code liveSnapshot}
+ * JSON members are intentionally absent from this model; Gson ignores those members when loading an
+ * older settings file, so they cannot regain runtime authority after an upgrade.
  */
 public record MaintenanceSettings(
     int schemaVersion, String timezone, Restart restart, FullRestorePoint fullRestorePoint) {
@@ -35,7 +35,6 @@ public record MaintenanceSettings(
   }
 
   public record FullRestorePoint(
-      Schedule schedule,
       String retentionMode,
       int retentionCount,
       boolean restartAfter,
@@ -50,15 +49,12 @@ public record MaintenanceSettings(
   }
 
   public static MaintenanceSettings migratedDefaults() {
-    Schedule disabledDaily = new Schedule(false, "DAILY", List.of(), "04:00");
-    Schedule disabledWeekly =
-        new Schedule(false, "WEEKLY", List.of(DayOfWeek.SUNDAY.name()), "04:00");
+    Schedule disabledRestart = new Schedule(false, "DAILY", List.of(), "04:00");
     return new MaintenanceSettings(
         1,
         "America/Sao_Paulo",
-        new Restart(disabledDaily, List.of(900, 300, 60, 30, 10), 180, 180),
+        new Restart(disabledRestart, List.of(900, 300, 60, 30, 10), 180, 180),
         new FullRestorePoint(
-            disabledWeekly,
             "SINGLE_CURRENT",
             1,
             true,
@@ -99,7 +95,6 @@ public record MaintenanceSettings(
     if (settings.restart == null || settings.fullRestorePoint == null)
       throw new IllegalArgumentException("Incomplete maintenance settings");
     validateSchedule(settings.restart.schedule);
-    validateSchedule(settings.fullRestorePoint.schedule);
     if (settings.restart.warningSeconds.size() > 16
         || settings.restart.warningSeconds.stream().anyMatch(v -> v == null || v < 0 || v > 86_400)
         || settings.restart.stopTimeoutSeconds < 30
@@ -132,8 +127,7 @@ public record MaintenanceSettings(
     if (schedule == null || !Set.of("DAILY", "WEEKLY", "SELECTED_WEEKDAYS").contains(schedule.type))
       throw new IllegalArgumentException("Invalid schedule type");
     LocalTime.parse(schedule.time);
-    if (schedule.weekdays.size() > 7)
-      throw new IllegalArgumentException("Too many weekdays");
+    if (schedule.weekdays.size() > 7) throw new IllegalArgumentException("Too many weekdays");
     for (String value : schedule.weekdays) DayOfWeek.valueOf(value);
     if ((schedule.type.equals("WEEKLY") || schedule.type.equals("SELECTED_WEEKDAYS"))
         && schedule.weekdays.isEmpty())

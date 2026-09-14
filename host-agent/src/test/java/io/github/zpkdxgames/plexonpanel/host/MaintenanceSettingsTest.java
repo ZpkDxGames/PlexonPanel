@@ -2,6 +2,7 @@ package io.github.zpkdxgames.plexonpanel.host;
 
 import static org.junit.jupiter.api.Assertions.*;
 
+import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import java.nio.file.*;
 import java.util.List;
@@ -12,12 +13,11 @@ class MaintenanceSettingsTest {
   @TempDir Path temporary;
 
   @Test
-  void missingSettingsUseSafeDisabledMigrationDefaults() throws Exception {
+  void missingSettingsUseSafeManualOnlyMigrationDefaults() throws Exception {
     var settings = MaintenanceSettings.load(temporary.resolve("maintenance.json"));
     assertEquals(1, settings.schemaVersion());
     assertEquals("America/Sao_Paulo", settings.timezone());
     assertFalse(settings.restart().schedule().enabled());
-    assertFalse(settings.fullRestorePoint().schedule().enabled());
     assertTrue(settings.fullRestorePoint().restartAfter());
     assertEquals("SINGLE_CURRENT", settings.fullRestorePoint().retentionMode());
   }
@@ -36,7 +36,6 @@ class MaintenanceSettingsTest {
                 120,
                 240),
             new MaintenanceSettings.FullRestorePoint(
-                new MaintenanceSettings.Schedule(true, "WEEKLY", List.of("SUNDAY"), "05:00"),
                 "ROTATING",
                 4,
                 true,
@@ -51,11 +50,10 @@ class MaintenanceSettingsTest {
     var loaded = MaintenanceSettings.load(path);
     assertEquals(configured, loaded);
     assertEquals("Europe/Berlin", loaded.timezone());
-    assertTrue(loaded.fullRestorePoint().schedule().enabled());
   }
 
   @Test
-  void legacyLiveSnapshotMemberIsIgnoredRatherThanAdvertisedAsFunctional() throws Exception {
+  void legacyBackupSchedulesAreIgnoredAndNotReserialized() throws Exception {
     Path path = temporary.resolve("maintenance.json");
     Files.writeString(
         path,
@@ -70,7 +68,7 @@ class MaintenanceSettingsTest {
             "startupTimeoutSeconds": 180
           },
           "fullRestorePoint": {
-            "schedule": {"enabled": false, "type": "WEEKLY", "weekdays": ["SUNDAY"], "time": "04:00"},
+            "schedule": {"enabled": true, "type": "WEEKLY", "weekdays": ["SUNDAY"], "time": "04:00"},
             "retentionMode": "SINGLE_CURRENT",
             "retentionCount": 1,
             "restartAfter": true,
@@ -85,13 +83,20 @@ class MaintenanceSettingsTest {
           }
         }
         """);
+
     var loaded = MaintenanceSettings.load(path);
     assertNotNull(loaded);
     assertFalse(loaded.restart().schedule().enabled());
+    assertEquals("SINGLE_CURRENT", loaded.fullRestorePoint().retentionMode());
+
+    loaded.save(path);
+    JsonObject saved = JsonParser.parseString(Files.readString(path)).getAsJsonObject();
+    assertFalse(saved.has("liveSnapshot"));
+    assertFalse(saved.getAsJsonObject("fullRestorePoint").has("schedule"));
   }
 
   @Test
-  void invalidTimezoneScheduleAndExclusionFailClosed() {
+  void invalidTimezoneAndExclusionFailClosed() {
     var base = MaintenanceSettings.migratedDefaults();
     assertThrows(
         RuntimeException.class,
@@ -100,30 +105,12 @@ class MaintenanceSettingsTest {
                 JsonParser.parseString(
                     "{\"schemaVersion\":1,\"timezone\":\"Not/A_Zone\",\"restart\":{},\"fullRestorePoint\":{}}")));
 
-    var invalidWeekly =
-        new MaintenanceSettings(
-            1,
-            base.timezone(),
-            base.restart(),
-            new MaintenanceSettings.FullRestorePoint(
-                new MaintenanceSettings.Schedule(true, "WEEKLY", List.of(), "04:00"),
-                "SINGLE_CURRENT",
-                1,
-                true,
-                "PlexonCraft-Latest.zip",
-                1800,
-                "SIZE_AND_HASH_WHEN_AVAILABLE",
-                1024L * 1024 * 1024,
-                List.of("logs")));
-    assertThrows(IllegalArgumentException.class, () -> MaintenanceSettings.validate(invalidWeekly));
-
     var traversalExclude =
         new MaintenanceSettings(
             1,
             base.timezone(),
             base.restart(),
             new MaintenanceSettings.FullRestorePoint(
-                base.fullRestorePoint().schedule(),
                 "SINGLE_CURRENT",
                 1,
                 true,

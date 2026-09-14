@@ -14,28 +14,32 @@ public final class BackupTransfers implements AutoCloseable {
   private final Map<String, Transfer> transfers = new HashMap<>();
 
   public synchronized Map<String, Object> start(
-      Path archive, BackupManager.Metadata metadata, DeviceRegistry.Device device)
+      Path archive, long archiveBytes, String sha256, DeviceRegistry.Device device)
       throws IOException {
     clean();
     if (transfers.size() >= 4
         || transfers.values().stream().anyMatch(t -> t.device.equals(device.deviceId())))
       throw new SecurityException("BUSY");
-    if (metadata.bytes() > 64 * 1024 * 1024)
+    if (archiveBytes > 64 * 1024 * 1024)
       throw new IOException(
           "Browser backup downloads are limited to 64 MiB; use the local/off-site archive for"
               + " larger worlds");
     var channel = FileChannel.open(archive, StandardOpenOption.READ, LinkOption.NOFOLLOW_LINKS);
+    if (channel.size() != archiveBytes) {
+      channel.close();
+      throw new IOException("Archive metadata does not match local file");
+    }
     String id = UUID.randomUUID().toString();
     transfers.put(
         id,
         new Transfer(
             device.deviceId(),
             channel,
-            metadata.sha256(),
-            metadata.bytes(),
+            sha256,
+            archiveBytes,
             0,
             System.currentTimeMillis() + 60000));
-    return Map.of("transferId", id, "bytes", metadata.bytes(), "sha256", metadata.sha256());
+    return Map.of("transferId", id, "bytes", archiveBytes, "sha256", sha256);
   }
 
   public synchronized Map<String, Object> chunk(String id, int sequence, String device)

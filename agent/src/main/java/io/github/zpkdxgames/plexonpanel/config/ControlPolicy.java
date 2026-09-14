@@ -68,8 +68,9 @@ public record ControlPolicy(
     for (String scope :
         List.of("audit.view", "audit.view.self", "devices.view", "settings.view", "server.status"))
       c.put(scope, true);
-    boolean backupCoordination = config.getBoolean("backups.enabled", false);
-    c.put("backup.create", remote && backupCoordination);
+    // Backup/provider/maintenance/service lifecycle authority belongs to the Linux Host. Legacy
+    // Paper backup keys are ignored and cannot re-enable backup.create on the plugin.
+    c.put("backup.create", false);
     c.put("devices.revoke", remote && config.getBoolean("access.allow-dashboard-revoke", false));
     Map<String, Set<String>> roles = new TreeMap<>(String.CASE_INSENSITIVE_ORDER);
     roles.putAll(Scopes.ROLES);
