@@ -18,7 +18,8 @@ public record HostConfig(
     String serviceName,
     Map<String, Boolean> capabilities,
     BackupConfig backups,
-    ConsoleConfig console) {
+    ConsoleConfig console,
+    MaintenanceCommandConfig maintenanceCommand) {
   public record BackupConfig(
       boolean enabled,
       String directory,
@@ -85,6 +86,24 @@ public record HostConfig(
     }
   }
 
+  public record MaintenanceCommandConfig(
+      boolean enabled,
+      String host,
+      int port,
+      String secretFile,
+      int commandTimeoutSeconds,
+      int readinessTimeoutSeconds) {
+    static MaintenanceCommandConfig defaults() {
+      return new MaintenanceCommandConfig(
+          false,
+          "127.0.0.1",
+          25575,
+          "/etc/plexonpanel-host/rcon.password",
+          5,
+          180);
+    }
+  }
+
   public static List<String> defaultLiveSnapshotExcludes() {
     return List.of("logs", "crash-reports", "cache", ".cache", "tmp", "plugins/spark/tmp");
   }
@@ -103,51 +122,44 @@ public record HostConfig(
             "serviceName",
             "capabilities",
             "backups",
-            "console")
+            "console",
+            "maintenanceCommand")
         .containsAll(raw.keySet()))
       throw new IllegalArgumentException("Unknown host configuration key");
-    HostConfig c = new Gson().fromJson(raw, HostConfig.class);
-    if (c.console == null)
-      c =
-          new HostConfig(
-              c.serverId,
-              c.serverName,
-              c.relayUrl,
-              c.relayPublicKey,
-              c.serverRoot,
-              c.dataDirectory,
-              c.accessRegistry,
-              c.serviceName,
-              c.capabilities,
-              c.backups,
-              ConsoleConfig.defaults());
-    if (c.backups != null && c.backups.liveSnapshotExcludes == null) {
-      BackupConfig b = c.backups;
-      c =
-          new HostConfig(
-              c.serverId,
-              c.serverName,
-              c.relayUrl,
-              c.relayPublicKey,
-              c.serverRoot,
-              c.dataDirectory,
-              c.accessRegistry,
-              c.serviceName,
-              c.capabilities,
-              new BackupConfig(
-                  b.enabled,
-                  b.directory,
-                  b.include,
-                  b.retentionCount,
-                  b.intervalMinutes,
-                  b.maximumBytes,
-                  b.restoreEnabled,
-                  b.rcloneExecutable,
-                  b.rcloneRemote,
-                  b.rcloneConfig,
-                  defaultLiveSnapshotExcludes()),
-              c.console);
+    HostConfig parsed = new Gson().fromJson(raw, HostConfig.class);
+    BackupConfig backups = parsed.backups;
+    if (backups != null && backups.liveSnapshotExcludes == null) {
+      BackupConfig b = backups;
+      backups =
+          new BackupConfig(
+              b.enabled,
+              b.directory,
+              b.include,
+              b.retentionCount,
+              b.intervalMinutes,
+              b.maximumBytes,
+              b.restoreEnabled,
+              b.rcloneExecutable,
+              b.rcloneRemote,
+              b.rcloneConfig,
+              defaultLiveSnapshotExcludes());
     }
+    HostConfig c =
+        new HostConfig(
+            parsed.serverId,
+            parsed.serverName,
+            parsed.relayUrl,
+            parsed.relayPublicKey,
+            parsed.serverRoot,
+            parsed.dataDirectory,
+            parsed.accessRegistry,
+            parsed.serviceName,
+            parsed.capabilities,
+            backups,
+            parsed.console == null ? ConsoleConfig.defaults() : parsed.console,
+            parsed.maintenanceCommand == null
+                ? MaintenanceCommandConfig.defaults()
+                : parsed.maintenanceCommand);
     UUID.fromString(c.serverId);
     if (c.serverName == null || c.serverName.length() > 64 || c.serverName.isBlank())
       throw new IllegalArgumentException("Invalid server label");
@@ -216,6 +228,7 @@ public record HostConfig(
         throw new IllegalArgumentException("Invalid locally configured rclone provider");
     }
     validateConsole(c.console);
+    validateMaintenanceCommand(c.maintenanceCommand);
     return c;
   }
 
@@ -253,6 +266,22 @@ public record HostConfig(
     if (console.redactPatterns == null || console.redactPatterns.size() > 32)
       throw new IllegalArgumentException("Invalid console redaction patterns");
     new ConsoleRedactor(console.redactPatterns);
+  }
+
+  private static void validateMaintenanceCommand(MaintenanceCommandConfig command) {
+    if (command == null)
+      throw new IllegalArgumentException("Missing maintenance command configuration");
+    String host = command.host == null ? "" : command.host.toLowerCase(Locale.ROOT);
+    if (!Set.of("127.0.0.1", "localhost", "::1", "[::1]").contains(host))
+      throw new IllegalArgumentException("Maintenance command channel must use loopback RCON");
+    if (command.port < 1 || command.port > 65535)
+      throw new IllegalArgumentException("Invalid maintenance command port");
+    if (command.secretFile == null || !Path.of(command.secretFile).isAbsolute())
+      throw new IllegalArgumentException("Maintenance command secret path must be absolute");
+    if (command.commandTimeoutSeconds < 1 || command.commandTimeoutSeconds > 30)
+      throw new IllegalArgumentException("Invalid maintenance command timeout");
+    if (command.readinessTimeoutSeconds < 5 || command.readinessTimeoutSeconds > 1800)
+      throw new IllegalArgumentException("Invalid maintenance readiness timeout");
   }
 
   private static boolean isLoopbackWebSocket(URI uri) {
