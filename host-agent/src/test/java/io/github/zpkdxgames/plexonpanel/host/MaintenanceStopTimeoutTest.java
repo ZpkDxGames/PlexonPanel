@@ -24,7 +24,7 @@ class MaintenanceStopTimeoutTest {
     MinecraftCommandChannel commands = disabledCommands();
     ReentrantLock lock = new ReentrantLock();
     FullRestorePointManager fullBackups =
-        new FullRestorePointManager(config, service, commands, lock, ignored -> {});
+        new FullRestorePointManager(config, service, () -> false, lock, ignored -> {});
     LocalAudit audit = new LocalAudit(data.resolve("audit"), 30);
     MaintenanceManager maintenance =
         new MaintenanceManager(
