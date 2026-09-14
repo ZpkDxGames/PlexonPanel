@@ -49,14 +49,10 @@ player-history:
   maximum-page-size: 100
   shutdown-flush-seconds: 5
 
+# Server-console capture/history is intentionally absent from Paper even in the full
+# control preset. The Host Companion owns journald capture/replay/history. Paper keeps
+# only these redaction rules for sanitizing results from Paper-owned console.execute.
 console:
-  stream-enabled: true
-  errors-enabled: true
-  poll-interval-millis: 250
-  batch-interval-millis: 300
-  batch-size: 100
-  ring-buffer-lines: 1000
-  maximum-line-bytes: 16384
   redact-patterns:
     - "(?i)(password|passwd|secret|token|api[-_ ]?key)\\s*[=:]\\s*\\S+"
     - "(?i)(authorization:\\s*bearer)\\s+\\S+"
@@ -75,8 +71,8 @@ remote-actions:
   console:
     enabled: true
     mode: ALLOWLIST_WITH_CONFIRMATION
-    # Keep this explicit. Full capability means the path is available under
-    # local policy; it does not mean every arbitrary Minecraft command is safe.
+    # Keep this explicit. Full capability means the command path is available under
+    # local policy; it does not give Paper read authority over server-console history.
     allow:
       - "^(tps|mspt)(\\s.*)?$"
       - "^paper version$"
