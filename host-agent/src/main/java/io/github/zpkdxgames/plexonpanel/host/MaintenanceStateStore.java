@@ -7,7 +7,7 @@ import java.nio.file.*;
 import java.time.Instant;
 import java.util.*;
 
-/** Durable scheduler claims and destructive-job state. */
+/** Durable restart claims and destructive-job state. */
 public final class MaintenanceStateStore {
   public record Job(
       String jobId,
@@ -86,11 +86,17 @@ public final class MaintenanceStateStore {
 
   public synchronized Job finish(Job job, String result, String errorCode) throws IOException {
     String now = Instant.now().toString();
+    String phase =
+        switch (result) {
+          case "SUCCESS", "SKIPPED" -> "COMPLETE";
+          case "DEGRADED" -> "DEGRADED";
+          default -> "FAILED";
+        };
     Job finished =
         new Job(
             job.jobId,
             job.kind,
-            "SUCCESS".equals(result) ? "COMPLETE" : "FAILED",
+            phase,
             job.scheduledOccurrence,
             job.startedAt,
             now,
@@ -150,7 +156,7 @@ public final class MaintenanceStateStore {
   }
 
   private static boolean terminal(Job job) {
-    return Set.of("COMPLETE", "FAILED").contains(job.phase);
+    return Set.of("COMPLETE", "DEGRADED", "FAILED").contains(job.phase);
   }
 
   private void rotateHistory() throws IOException {
