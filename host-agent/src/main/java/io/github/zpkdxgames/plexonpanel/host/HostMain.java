@@ -257,8 +257,9 @@ public final class HostMain {
                   return Map.of("jobId", maintenance.restartNow(device, skip), "state", "QUEUED");
                 }
                 case "maintenance.full-backup.create" -> {
-                  boolean skip = p.has("skipCountdown") && p.get("skipCountdown").getAsBoolean();
-                  return Map.of("jobId", maintenance.fullRestorePointNow(device, skip), "state", "QUEUED");
+                  // The full-backup warning schedule is a Host safety invariant. Browser input may
+                  // not bypass the mandatory 30m/15m/1m/30s/15s/5s countdown.
+                  return Map.of("jobId", maintenance.fullRestorePointNow(device, false), "state", "QUEUED");
                 }
                 case "provider.status" -> {
                   var result = new LinkedHashMap<>(fullBackups.providerStatus());
