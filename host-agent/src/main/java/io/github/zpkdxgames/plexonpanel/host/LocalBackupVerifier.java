@@ -25,6 +25,13 @@ final class LocalBackupVerifier {
     if (expectedSha256 == null || expectedSha256.isBlank() || !actualHash.equals(expectedSha256))
       throw new IOException("LOCAL_BACKUP_HASH_MISMATCH");
 
+    try (ZipFile central = new ZipFile(archive.toFile())) {
+      if (central.size() != expectedEntries)
+        throw new IOException("LOCAL_BACKUP_ENTRY_COUNT_MISMATCH");
+    } catch (ZipException malformed) {
+      throw new IOException("LOCAL_BACKUP_STRUCTURE_INVALID", malformed);
+    }
+
     Set<String> names = new HashSet<>();
     long expanded = 0L;
     int entries = 0;
