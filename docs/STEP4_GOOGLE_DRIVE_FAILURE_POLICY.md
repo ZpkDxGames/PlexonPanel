@@ -61,6 +61,8 @@ Expected provider-related states include `RCLONE_UNAVAILABLE`, `RCLONE_CONFIG_IN
 
 Maintenance/provider events remain sanitized. Backup archive progress continues through the existing Host event channel; Step 4 additionally exposes `PREFLIGHT`, `PREFLIGHT_COMPLETE`, off-site verification state, degraded completion, retry availability, and the degraded safety-restart decision without forwarding raw rclone output.
 
+Remote transfer observability uses a separate `UPLOADING_REMOTE` event. It never treats local archive bytes as already uploaded: the event starts at `bytesUploaded = 0` with the verified ZIP size as `totalBytes`, and advances to that ZIP size only after the remote upload/promotion phase has returned verified. `progress` is therefore emitted only as a reliable coarse 0-to-100% milestone rather than fabricated streaming precision. The event exposes only the fixed provider label `RCLONE` and a sanitized provider state such as `UPLOADING` or `VERIFIED_REMOTE`; rclone stdout/stderr, tokens, credentials, arbitrary remote arguments, and provider secrets are not forwarded. Retry Upload uses the same progress contract.
+
 ## Migration and operations
 
 Before enabling manual full backups in production:
@@ -77,4 +79,4 @@ Do not grant root execution, unrestricted sudo, recursive ownership changes, or 
 
 ## Step 4 certification
 
-The automated suite covers durable degraded state, bounded upload timeout, provider failure without credential/output leakage, interrupted upload, transient retry success, retry after an earlier provider outage, promotion rollback, and local disk-headroom calculations. Production certification still requires an actual Host/rclone/Google Drive run to prove provider authentication, real upload behavior, canonical verification, retry while Minecraft is online, and restart behavior under a simulated Drive outage.
+The automated suite covers durable degraded state, bounded upload timeout, provider failure without credential/output leakage, interrupted upload, transient retry success, retry after an earlier provider outage, promotion rollback, local disk-headroom calculations, and sanitized truthful remote-progress semantics. Production certification still requires an actual Host/rclone/Google Drive run to prove provider authentication, real upload behavior, canonical verification, retry while Minecraft is online, and restart behavior under a simulated Drive outage.
