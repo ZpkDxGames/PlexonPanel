@@ -96,6 +96,54 @@ class MaintenanceSettingsTest {
   }
 
   @Test
+  void legacyRestartAfterFalseIsNormalizedToAutomaticRestart() throws Exception {
+    Path path = temporary.resolve("legacy-restart-after.json");
+    Files.writeString(
+        path,
+        """
+        {
+          "schemaVersion": 1,
+          "timezone": "America/Sao_Paulo",
+          "restart": {
+            "schedule": {"enabled": false, "type": "DAILY", "weekdays": [], "time": "04:00"},
+            "warningSeconds": [60, 10],
+            "stopTimeoutSeconds": 180,
+            "startupTimeoutSeconds": 180
+          },
+          "fullRestorePoint": {
+            "retentionMode": "SINGLE_CURRENT",
+            "retentionCount": 1,
+            "restartAfter": false,
+            "canonicalFilename": "PlexonCraft-Latest.zip",
+            "uploadTimeoutSeconds": 1800,
+            "verificationMode": "SIZE_AND_HASH_WHEN_AVAILABLE",
+            "maximumBytes": 1099511627776,
+            "excludes": ["logs"]
+          }
+        }
+        """);
+
+    var loaded = MaintenanceSettings.load(path);
+    assertTrue(loaded.fullRestorePoint().restartAfter());
+
+    var direct =
+        new MaintenanceSettings.FullRestorePoint(
+            "SINGLE_CURRENT",
+            1,
+            false,
+            "PlexonCraft-Latest.zip",
+            1800,
+            "SIZE_AND_HASH_WHEN_AVAILABLE",
+            1_099_511_627_776L,
+            List.of("logs"));
+    assertTrue(direct.restartAfter());
+
+    loaded.save(path);
+    JsonObject saved = JsonParser.parseString(Files.readString(path)).getAsJsonObject();
+    assertTrue(saved.getAsJsonObject("fullRestorePoint").get("restartAfter").getAsBoolean());
+  }
+
+  @Test
   void invalidTimezoneAndExclusionFailClosed() {
     var base = MaintenanceSettings.migratedDefaults();
     assertThrows(
