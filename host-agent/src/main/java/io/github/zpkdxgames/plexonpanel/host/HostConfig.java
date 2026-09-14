@@ -47,41 +47,46 @@ public record HostConfig(
         CommandChannelConfig.defaults());
   }
 
+  /** Host-local storage/provider configuration for manual full restore points only. */
   public record BackupConfig(
       boolean enabled,
       String directory,
-      List<String> include,
-      int retentionCount,
-      int intervalMinutes,
-      long maximumBytes,
       boolean restoreEnabled,
       String rcloneExecutable,
       String rcloneRemote,
-      String rcloneConfig,
-      List<String> liveSnapshotExcludes) {
+      String rcloneConfig) {
+    /**
+     * Source-compatibility constructor for tests/config helpers written before Step 5. Legacy live
+     * snapshot fields are deliberately ignored and cannot schedule or authorize a backup.
+     */
     public BackupConfig(
         boolean enabled,
         String directory,
-        List<String> include,
-        int retentionCount,
-        int intervalMinutes,
-        long maximumBytes,
+        List<String> ignoredInclude,
+        int ignoredRetentionCount,
+        int ignoredIntervalMinutes,
+        long ignoredMaximumBytes,
         boolean restoreEnabled,
         String rcloneExecutable,
         String rcloneRemote,
         String rcloneConfig) {
-      this(
-          enabled,
-          directory,
-          include,
-          retentionCount,
-          intervalMinutes,
-          maximumBytes,
-          restoreEnabled,
-          rcloneExecutable,
-          rcloneRemote,
-          rcloneConfig,
-          HostConfig.defaultLiveSnapshotExcludes());
+      this(enabled, directory, restoreEnabled, rcloneExecutable, rcloneRemote, rcloneConfig);
+    }
+
+    /** Compatibility for the former liveSnapshotExcludes record shape. */
+    public BackupConfig(
+        boolean enabled,
+        String directory,
+        List<String> ignoredInclude,
+        int ignoredRetentionCount,
+        int ignoredIntervalMinutes,
+        long ignoredMaximumBytes,
+        boolean restoreEnabled,
+        String rcloneExecutable,
+        String rcloneRemote,
+        String rcloneConfig,
+        List<String> ignoredLiveSnapshotExcludes) {
+      this(enabled, directory, restoreEnabled, rcloneExecutable, rcloneRemote, rcloneConfig);
     }
   }
 
@@ -126,10 +131,6 @@ public record HostConfig(
     }
   }
 
-  public static List<String> defaultLiveSnapshotExcludes() {
-    return List.of("logs", "crash-reports", "cache", ".cache", "tmp", "plugins/spark/tmp");
-  }
-
   public static HostConfig load(Path path) throws java.io.IOException {
     if (Files.size(path) > 65536) throw new java.io.IOException("Host config exceeds limit");
     JsonObject raw = JsonParser.parseString(Files.readString(path)).getAsJsonObject();
@@ -161,23 +162,10 @@ public record HostConfig(
               .containsAll(commandRaw.getAsJsonObject().keySet()))
         throw new IllegalArgumentException("Unknown Host maintenance command-channel key");
     }
+
+    // Gson ignores retired nested backup members from older host-config files. They are never
+    // copied back into the runtime record and therefore cannot re-enable legacy scheduling.
     HostConfig parsed = new Gson().fromJson(raw, HostConfig.class);
-    BackupConfig backups = parsed.backups;
-    if (backups != null && backups.liveSnapshotExcludes == null) {
-      backups =
-          new BackupConfig(
-              backups.enabled,
-              backups.directory,
-              backups.include,
-              backups.retentionCount,
-              backups.intervalMinutes,
-              backups.maximumBytes,
-              backups.restoreEnabled,
-              backups.rcloneExecutable,
-              backups.rcloneRemote,
-              backups.rcloneConfig,
-              defaultLiveSnapshotExcludes());
-    }
     HostConfig c =
         new HostConfig(
             parsed.serverId,
@@ -189,7 +177,7 @@ public record HostConfig(
             parsed.accessRegistry,
             parsed.serviceName,
             parsed.capabilities,
-            backups,
+            parsed.backups,
             parsed.console == null ? ConsoleConfig.defaults() : parsed.console,
             parsed.commandChannel == null ? CommandChannelConfig.defaults() : parsed.commandChannel);
     UUID.fromString(c.serverId);
@@ -226,31 +214,10 @@ public record HostConfig(
     for (String value : List.of(c.serverRoot, c.dataDirectory, c.accessRegistry))
       if (!Path.of(value).isAbsolute())
         throw new IllegalArgumentException("Host paths must be absolute");
-    var b = c.backups;
-    if (b == null
-        || b.directory == null
-        || !Path.of(b.directory).isAbsolute()
-        || b.include == null
-        || b.include.size() > 64
-        || b.retentionCount < 1
-        || b.retentionCount > 1000
-        || b.intervalMinutes < 0
-        || b.intervalMinutes > 525600
-        || b.maximumBytes < 1048576
-        || b.maximumBytes > 1099511627776L
-        || b.liveSnapshotExcludes == null
-        || b.liveSnapshotExcludes.size() > 32)
+
+    BackupConfig b = c.backups;
+    if (b == null || b.directory == null || !Path.of(b.directory).isAbsolute())
       throw new IllegalArgumentException("Invalid backup configuration");
-    if (b.include.stream()
-        .anyMatch(
-            s ->
-                !s.matches("[A-Za-z0-9][A-Za-z0-9_.-]{0,127}")
-                    || s.equals("..")
-                    || s.startsWith(".")))
-      throw new IllegalArgumentException(
-          "Backup includes must be named top-level files or directories");
-    if (b.liveSnapshotExcludes.stream().anyMatch(s -> !validSnapshotExclusion(s)))
-      throw new IllegalArgumentException("Invalid live snapshot exclusion");
     if (b.rcloneRemote != null && !b.rcloneRemote.isBlank()) {
       if (!"/usr/bin/rclone".equals(b.rcloneExecutable)
           || !b.rcloneRemote.matches("[A-Za-z0-9][A-Za-z0-9_-]{0,63}:[A-Za-z0-9_ /.-]{0,200}")
@@ -262,18 +229,6 @@ public record HostConfig(
     validateConsole(c.console);
     validateCommandChannel(c.commandChannel);
     return c;
-  }
-
-  private static boolean validSnapshotExclusion(String value) {
-    if (value == null || value.isBlank() || value.length() > 200 || value.indexOf('\\') >= 0)
-      return false;
-    if (value.startsWith("/") || value.endsWith("/") || value.contains("//")) return false;
-    for (String part : value.split("/"))
-      if (part.isBlank()
-          || part.equals(".")
-          || part.equals("..")
-          || !part.matches("[A-Za-z0-9._-]{1,64}")) return false;
-    return true;
   }
 
   private static void validateConsole(ConsoleConfig console) {
