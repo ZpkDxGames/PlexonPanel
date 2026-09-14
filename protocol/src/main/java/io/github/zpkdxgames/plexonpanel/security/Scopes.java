@@ -93,6 +93,8 @@ public final class Scopes {
     actions.put("files.download.chunk", "files.download");
     actions.put("files.transfer.cancel", "files.download");
     actions.put("console.execute", "console.execute.allowed");
+    actions.put("console.history", "console.view.full");
+    actions.put("console.history.errors", "console.view.errors");
     actions.put("chat.global.send", "chat.send");
     actions.put("player.deop", "player.op");
     actions.put("player.whitelist.add", "player.whitelist");
