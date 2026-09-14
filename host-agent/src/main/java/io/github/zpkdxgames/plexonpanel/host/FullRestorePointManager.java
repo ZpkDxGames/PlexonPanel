@@ -13,7 +13,7 @@ import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.*;
 import java.util.zip.*;
 
-/** Cold full-server restore points. Archive creation always requires stopped Paper. */
+/** Cold full-server restore points. Archive creation requires a Host-proven stopped server. */
 public final class FullRestorePointManager {
   public record Metadata(
       String backupId,
@@ -49,17 +49,37 @@ public final class FullRestorePointManager {
   private final HostConfig config;
   private final Path root, base, restorePoints, metadataDirectory, staging;
   private final SystemdService service;
-  private final BooleanSupplier paperConnected;
+  private final MinecraftCommandChannel commandChannel;
   private final ReentrantLock operationLock;
   private final RcloneBackupProvider provider;
   private final Consumer<Map<String, Object>> progress;
   private final Map<String, RestoreGrant> restoreGrants = new HashMap<>();
   private volatile long progressAt;
 
+  /**
+   * Compatibility constructor. The Paper connectivity supplier is deliberately ignored: cold
+   * backup and restore safety are now owned by systemd/process state plus the Host-local RCON
+   * signal.
+   */
   public FullRestorePointManager(
       HostConfig config,
       SystemdService service,
-      BooleanSupplier paperConnected,
+      BooleanSupplier ignoredPaperConnected,
+      ReentrantLock operationLock,
+      Consumer<Map<String, Object>> progress)
+      throws IOException {
+    this(
+        config,
+        service,
+        new RconMinecraftCommandChannel(config.commandChannel()),
+        operationLock,
+        progress);
+  }
+
+  FullRestorePointManager(
+      HostConfig config,
+      SystemdService service,
+      MinecraftCommandChannel commandChannel,
       ReentrantLock operationLock,
       Consumer<Map<String, Object>> progress)
       throws IOException {
@@ -70,7 +90,7 @@ public final class FullRestorePointManager {
     this.metadataDirectory = base.resolve("metadata");
     this.staging = base.resolve("staging");
     this.service = Objects.requireNonNull(service);
-    this.paperConnected = Objects.requireNonNull(paperConnected);
+    this.commandChannel = Objects.requireNonNull(commandChannel);
     this.operationLock = Objects.requireNonNull(operationLock);
     this.provider = new RcloneBackupProvider(config.backups());
     this.progress = Objects.requireNonNull(progress);
@@ -81,6 +101,7 @@ public final class FullRestorePointManager {
     Files.createDirectories(staging);
     for (Path path : List.of(base, restorePoints, metadataDirectory, staging))
       if (Files.isSymbolicLink(path)) throw new IOException("Backup storage may not be a symlink");
+    PartialBackupRecovery.clean(staging);
   }
 
   public List<Metadata> list() throws IOException {
@@ -146,8 +167,7 @@ public final class FullRestorePointManager {
       boolean uploadOffsite)
       throws Exception {
     UUID.fromString(jobId);
-    if (!service.stopped() || paperConnected.getAsBoolean())
-      throw new SecurityException("SERVER_MUST_BE_STOPPED");
+    requireColdStopped("SERVER_MUST_BE_STOPPED");
     long startedNanos = System.nanoTime();
     String backupId = UUID.randomUUID().toString(), startedAt = Instant.now().toString();
     Path partial = staging.resolve(backupId + ".partial"),
@@ -214,14 +234,18 @@ public final class FullRestorePointManager {
               }
             });
       }
+      requireColdStopped("SERVER_STATE_CHANGED_DURING_BACKUP");
       try (FileChannel channel = FileChannel.open(partial, StandardOpenOption.WRITE)) {
         channel.force(true);
       }
       Files.move(partial, finalArchive, StandardCopyOption.ATOMIC_MOVE);
       long archiveBytes = Files.size(finalArchive);
       if (archiveBytes > settings.maximumBytes()) throw new IOException("BACKUP_SIZE_LIMIT");
-      emit(jobId, backupId, "HASHING", archiveBytes, scan.bytes, entries[0]);
+      emit(jobId, backupId, "VERIFYING_LOCAL", archiveBytes, scan.bytes, entries[0]);
       String hash = BackupManager.fileHash(finalArchive);
+      LocalBackupVerifier.Result verified =
+          LocalBackupVerifier.verify(finalArchive, hash, entries[0], settings.maximumBytes());
+      if (verified.expandedBytes() != bytes[0]) throw new IOException("LOCAL_BACKUP_SIZE_MISMATCH");
       Metadata local =
           new Metadata(
               backupId,
@@ -238,12 +262,12 @@ public final class FullRestorePointManager {
               archiveBytes,
               bytes[0],
               entries[0],
-              hash,
+              verified.sha256(),
               true,
               false,
               provider.configured() ? "RCLONE" : "LOCAL",
               "",
-              "LOCAL_SHA256_VERIFIED",
+              "LOCAL_ARCHIVE_VERIFIED",
               initiatedBy,
               automatic,
               emergency,
@@ -308,8 +332,11 @@ public final class FullRestorePointManager {
 
   public Metadata verify(String backupId) throws IOException {
     Metadata value = metadata(backupId);
-    String actual = BackupManager.fileHash(archive(backupId));
-    if (!actual.equals(value.sha256)) throw new IOException("RESTORE_HASH_MISMATCH");
+    LocalBackupVerifier.Result verified =
+        LocalBackupVerifier.verify(
+            archive(backupId), value.sha256, value.entryCount, Math.max(1L, value.sourceBytes));
+    if (verified.expandedBytes() != value.sourceBytes)
+      throw new IOException("LOCAL_BACKUP_SIZE_MISMATCH");
     return value;
   }
 
@@ -352,13 +379,12 @@ public final class FullRestorePointManager {
     boolean stoppedByRestore = false;
     try {
       if (Files.exists(journal)) throw new IllegalStateException("RESTORE_RECOVERY_REQUIRED");
-      if (!service.stopped() || paperConnected.getAsBoolean()) {
+      if (!coldStopped()) {
         service.action("stop");
         stoppedByRestore = true;
         waitForStopped(180);
       }
-      if (!service.stopped() || paperConnected.getAsBoolean())
-        throw new IOException("SERVER_STOP_TIMEOUT");
+      requireColdStopped("SERVER_STOP_TIMEOUT");
       ensureLocalArchive(backupId);
       Metadata selected = verify(backupId);
       String emergencyJob = UUID.randomUUID().toString();
@@ -406,7 +432,7 @@ public final class FullRestorePointManager {
       String state = "stopped";
       if (startAfter) {
         service.action("start");
-        waitForPaper(180);
+        waitForReady(180);
         state = "running";
       }
       return Map.of(
@@ -418,7 +444,7 @@ public final class FullRestorePointManager {
       if (stoppedByRestore && !Files.exists(journal) && service.stopped()) {
         try {
           service.action("start");
-          waitForPaper(180);
+          waitForReady(180);
         } catch (Exception ignored) {
           // Preserve the restore failure; startup failure is visible from service status/audit.
         }
@@ -436,8 +462,7 @@ public final class FullRestorePointManager {
   public void recoverRestore() throws Exception {
     Path journal = metadataDirectory.resolve("restore-journal.json");
     if (!Files.exists(journal)) return;
-    if (!service.stopped() || paperConnected.getAsBoolean())
-      throw new IllegalStateException("Stop Paper before restore recovery");
+    requireColdStopped("SERVER_MUST_BE_STOPPED");
     JsonObject value = JsonParser.parseString(Files.readString(journal)).getAsJsonObject();
     String restoreId = value.get("restoreId").getAsString();
     UUID.fromString(restoreId);
@@ -493,8 +518,11 @@ public final class FullRestorePointManager {
     try {
       if (Files.size(downloaded) != value.archiveBytes)
         throw new IOException("REMOTE_VERIFY_FAILED");
-      String hash = BackupManager.fileHash(downloaded);
-      if (!hash.equals(value.sha256)) throw new IOException("RESTORE_HASH_MISMATCH");
+      LocalBackupVerifier.Result verified =
+          LocalBackupVerifier.verify(
+              downloaded, value.sha256, value.entryCount, Math.max(1L, value.sourceBytes));
+      if (verified.expandedBytes() != value.sourceBytes)
+        throw new IOException("REMOTE_VERIFY_FAILED");
       try (FileChannel channel = FileChannel.open(downloaded, StandardOpenOption.WRITE)) {
         channel.force(true);
       }
@@ -643,29 +671,40 @@ public final class FullRestorePointManager {
         value.restartPerformed, value.result, value.errorCode);
   }
 
+  private boolean coldStopped() throws Exception {
+    if (!service.stopped()) return false;
+    if (!commandChannel.enabled()) return true;
+    return !commandChannel.readinessProbe().success();
+  }
+
+  private void requireColdStopped(String errorCode) throws Exception {
+    if (!coldStopped()) throw new IOException(errorCode);
+  }
+
   private void waitForStopped(int seconds) throws Exception {
     long until = System.nanoTime() + TimeUnit.SECONDS.toNanos(seconds);
     while (System.nanoTime() < until) {
-      if (service.stopped() && !paperConnected.getAsBoolean()) return;
+      if (coldStopped()) return;
       Thread.sleep(250);
     }
     throw new IOException("SERVER_STOP_TIMEOUT");
   }
 
-  private void waitForPaper(int seconds) throws Exception {
+  private void waitForReady(int seconds) throws Exception {
     long until = System.nanoTime() + TimeUnit.SECONDS.toNanos(seconds);
     while (System.nanoTime() < until) {
       Map<String, Object> status = service.status();
-      if ("active".equals(status.get("state")) && paperConnected.getAsBoolean()) return;
-      Thread.sleep(250);
+      if ("active".equals(status.get("state"))) {
+        if (!commandChannel.enabled() || commandChannel.readinessProbe().success()) return;
+      }
+      Thread.sleep(1000);
     }
-    throw new IOException("PAPER_RECONNECT_TIMEOUT");
+    throw new IOException("SERVER_READINESS_TIMEOUT");
   }
 
   private void checkStopped() throws IOException {
     try {
-      if (!service.stopped() || paperConnected.getAsBoolean())
-        throw new IOException("SERVER_STATE_CHANGED_DURING_BACKUP");
+      if (!service.stopped()) throw new IOException("SERVER_STATE_CHANGED_DURING_BACKUP");
       if (Thread.currentThread().isInterrupted()) throw new IOException("BACKUP_CANCELLED");
     } catch (IOException e) {
       throw e;
