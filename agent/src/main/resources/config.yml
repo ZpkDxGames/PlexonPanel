@@ -120,6 +120,5 @@ files:
 host:
   public-key: "" # Independent host public key; never a private key.
 
-backups:
-  enabled: false # Authorize Paper save/flush leases for the optional host.
-  allow-host-schedule: false
+# Backup/maintenance authority is Host-only. Legacy Paper `backups.*` keys from older
+# installations are ignored and may be removed from plugins/PlexonPanel/config.yml.

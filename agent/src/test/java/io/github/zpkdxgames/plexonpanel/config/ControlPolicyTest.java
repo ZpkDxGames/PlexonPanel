@@ -69,7 +69,6 @@ class ControlPolicyTest {
             "files.delete",
             "files.download",
             "files.upload",
-            "backup.create",
             "server.status",
             "audit.view.self",
             "audit.view",
@@ -86,6 +85,7 @@ class ControlPolicyTest {
 
     assertFalse(policy.capabilities().get("console.view.errors"));
     assertFalse(policy.capabilities().get("console.view.full"));
+    assertFalse(policy.capabilities().get("backup.create"));
     assertTrue(policy.capabilities().get("console.execute.allowed"));
     assertEquals("plexonpanel reload", policy.pluginReloads().get("PlexonPanel"));
   }
@@ -98,8 +98,6 @@ class ControlPolicyTest {
     Files.createDirectories(serverRoot);
     config.set("files.roots.server.path", serverRoot.toString());
 
-    // Old installations may still contain these keys after upgrading. They must be ignored rather
-    // than silently restoring Paper-side console capture/history authority.
     config.set("console.stream-enabled", true);
     config.set("console.errors-enabled", true);
     config.set("console.poll-interval-millis", -1);
@@ -116,6 +114,21 @@ class ControlPolicyTest {
     assertFalse(policy.capabilities().get("console.view.full"));
     assertTrue(policy.capabilities().get("console.execute.allowed"));
     assertFalse(settings.console().redactPatterns().isEmpty());
+  }
+
+  @Test
+  void legacyPaperBackupKeysCannotRestoreBackupAuthority() throws Exception {
+    Path source = fixture("examples/config-full-control.yml", "agent/examples/config-full-control.yml");
+    YamlConfiguration config = YamlConfiguration.loadConfiguration(source.toFile());
+    Path serverRoot = temporary.resolve("server");
+    Files.createDirectories(serverRoot);
+    config.set("files.roots.server.path", serverRoot.toString());
+    config.set("backups.enabled", true);
+    config.set("backups.allow-host-schedule", true);
+
+    ControlPolicy policy =
+        ControlPolicy.load(config, PanelSettings.load(config), temporary.resolve("panel-data-backup"));
+    assertFalse(policy.capabilities().get("backup.create"));
   }
 
   @Test
@@ -136,9 +149,7 @@ class ControlPolicyTest {
   @Test
   void conservativePublicDefaultsRemainConservative() throws Exception {
     ControlPolicy policy =
-        load(
-            fixture(
-                "src/main/resources/config.yml", "agent/src/main/resources/config.yml"));
+        load(fixture("src/main/resources/config.yml", "agent/src/main/resources/config.yml"));
 
     for (String scope :
         List.of(
