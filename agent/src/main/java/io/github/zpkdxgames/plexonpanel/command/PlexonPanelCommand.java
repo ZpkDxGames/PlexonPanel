@@ -116,7 +116,7 @@ public final class PlexonPanelCommand implements CommandExecutor, TabCompleter {
     sendRow(sender, "Fingerprint", plugin.identity().fingerprint());
     if (runtime != null) {
       sendRow(sender, "Telemetry", enabled(runtime.settings().telemetry().enabled()));
-      sendRow(sender, "Console stream", enabled(runtime.settings().console().streamEnabled()));
+      sendRow(sender, "Console authority", "Host Companion");
       sendRow(sender, "Chat stream", enabled(runtime.settings().chat().streamEnabled()));
       sendRow(sender, "Remote actions", enabled(runtime.settings().remoteActions().enabled()));
     }
@@ -335,8 +335,7 @@ public final class PlexonPanelCommand implements CommandExecutor, TabCompleter {
       sendRow(sender, "Last accepted relay message", gateway.lastAcceptedRelayMessageType());
     if (!gateway.lastProtocolRejectionCode().isBlank())
       sendRow(sender, "Last protocol rejection", gateway.lastProtocolRejectionCode());
-    sendRow(
-        sender, "Recent console lines", Integer.toString(runtime.console().recentLines().size()));
+    sendRow(sender, "Console history", "Host Companion / systemd-journald");
     if (!gateway.lastError().isBlank()) {
       sendRow(sender, "Last error", gateway.lastError());
     }
