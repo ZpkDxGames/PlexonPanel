@@ -1,37 +1,67 @@
-# Backups & Maintenance
+# Backups & Maintenance — Host-authoritative manual full backups
 
-PlexonPanel keeps backup and maintenance authority in the Linux Host Companion. The browser is a control surface and the Paper plugin only coordinates player warnings and safe world persistence; neither receives systemd authority, the rclone credential file, Google OAuth tokens, or unrestricted host filesystem access.
+PlexonPanel backup authority lives in the always-on Linux Host Companion. The browser is an authenticated control surface, the relay is transport/routing, and the Paper plugin provides Paper-specific runtime data/actions. Paper is not required for the backup critical path.
 
-## Backup classes
+Automatic backups and live snapshots are retired product behavior.
 
-### Live Snapshot
+> Automatic backups are retired. Full backup creation is manually initiated through **Fully Backup Now** and executed by the always-on Host Companion.
 
-Live snapshots preserve the existing non-disruptive backup path. Paper remains online, creates a renewable save lease, runs `save-all flush`, temporarily coordinates autosave, and the Host archives the configured live-snapshot include set. Active database formats remain excluded because third-party plugin writes cannot be frozen safely while Paper is running.
+## Final workflow
 
-Use live snapshots for lightweight recovery points. The legacy `backups.intervalMinutes` scheduler remains supported for migrated installations, although new maintenance scheduling is calendar-aware and stored separately.
+A normal **Fully Backup Now** operation is:
 
-### Full Restore Point
+1. Dashboard requests Host `backup.preflight` and displays the authoritative result.
+2. Operator explicitly confirms **Fully Backup Now**.
+3. Host creates a durable manual `FULL_RESTORE_POINT` job.
+4. If Minecraft is online, Host begins the mandatory 30-minute countdown and sends warnings at 30m / 15m / 1m / 30s / 15s / 5s through the Host-local command channel/RCON.
+5. Host requires an affirmative `save-all flush` result.
+6. Host stops the configured Minecraft systemd service.
+7. Host independently proves the service is stopped before archive work begins.
+8. Host creates the cold full-server restore point through `.partial` staging.
+9. Host verifies the local archive and persists SHA-256/metadata.
+10. Host uploads through configured Google Drive/rclone staging/promotion.
+11. Host verifies the promoted remote copy.
+12. If this workflow stopped Minecraft, Host starts it unconditionally and verifies readiness.
+13. The durable job becomes `COMPLETED`, `DEGRADED`, `FAILED`, or `RECOVERY_REQUIRED` as appropriate.
 
-A full restore point is a cold disaster-recovery archive of the configured Minecraft server root. The Host gracefully stops the configured systemd service, waits for Paper to disconnect, then archives worlds, player data, plugin JARs/configuration, plugin databases (`.db`, `.sqlite`, `.sqlite3`, `.mv.db`), permissions/economy state, datapacks and the other persistent files required to reconstruct PlexonCraft.
+Browser refresh/disconnect never cancels the Host job. `maintenance.status` exposes the durable current operation. During `COUNTDOWN`, it also exposes the durable countdown deadline and remaining seconds; the browser must not create its own authoritative countdown.
 
-Full restore points use a dedicated inclusion policy. They do **not** reuse the live-snapshot database exclusions. Configured exclusions such as `logs`, `crash-reports`, cache folders and temporary data are skipped. The Host backup directory is outside `serverRoot`, and Host/rclone secrets are never part of the archive.
+## Manual-only policy
 
-Archive creation is crash-safe:
+The Host scheduler retains restart-only scheduling. It does not schedule full backups.
 
-1. pre-scan the stopped server tree and verify size/disk headroom;
-2. write a unique staging `.partial` archive;
-3. bound input bytes, output size and entry count;
-4. reject symlinks/traversal;
-5. force the archive to disk;
-6. atomically promote it to `restore-points/<backupId>.zip`;
-7. calculate SHA-256;
-8. atomically write metadata.
+Legacy full-backup schedule and `restartAfter` fields can remain serialized for rolling-upgrade compatibility, but:
 
-A `.partial` file is never considered a restore point.
+- automatic full-backup execution is rejected;
+- Dashboard writes keep the legacy full-backup schedule disabled;
+- legacy `restartAfter: false` is normalized to `true`;
+- the manual full-backup orchestration path restarts Minecraft whenever that operation stopped it, regardless of serialized `restartAfter`.
 
-## Local layout
+No live-snapshot action, Paper backup lease/coordinator, or recurring backup scheduler belongs in the supported product path.
 
-The recommended Host-owned layout is:
+## Preflight
+
+`backup.preflight` runs on the Host and fails closed before a backup countdown begins. It verifies, among other Host-owned requirements:
+
+- Google Drive/rclone is configured according to policy;
+- `/usr/bin/rclone` exists, is executable and is not a symlink;
+- the configured rclone config is absolute, readable and not a symlink;
+- backup/staging directories exist, are writable and are not symlinks;
+- the source tree can be scanned safely;
+- source symlinks/traversal are rejected;
+- source size stays within configured limits;
+- local free space is sufficient;
+- the configured provider passes a bounded connectivity test.
+
+The Host action additionally reports safe operational facts such as Host authentication, destructive-operation busy state, recovery state, backup-root writability and command-channel configuration. Service/RCON readiness is also Host-owned runtime state; Paper connectivity is not a precondition.
+
+Never expose rclone/RCON secrets through the Dashboard or relay.
+
+## Cold archive safety
+
+Full restore points are created only when the Host has proven Minecraft stopped. The backup directory must remain outside the Minecraft server root.
+
+Recommended layout:
 
 ```text
 /var/lib/plexonpanel-host/backups/
@@ -40,40 +70,24 @@ The recommended Host-owned layout is:
 └── staging/
 ```
 
-Existing live-snapshot storage remains compatible. Never place the backup destination inside `/opt/plexoncraft/server`.
+Archive creation is crash-safe:
 
-The dashboard intentionally keeps its historical 64 MiB browser download cap. Large full restore points stay on the Host and/or off-site provider instead of moving through dashboard JSON/chunk transport.
+1. pre-scan and validate size/disk headroom;
+2. write a unique `.partial` staging archive;
+3. bound input/output/entry counts;
+4. reject symlinks and traversal;
+5. force the archive to disk;
+6. atomically promote to `restore-points/<backupId>.zip`;
+7. calculate SHA-256;
+8. atomically persist metadata.
 
-## Calendar-aware maintenance
+A `.partial` file is never a valid restore point.
 
-Authoritative schedule configuration is stored by the Host at:
-
-```text
-/var/lib/plexonpanel-host/maintenance-settings.json
-```
-
-The dashboard edits this file through validated Host actions; it is not browser-local. New/migrated installations create the file with destructive schedules disabled until explicitly enabled.
-
-Recommended PlexonCraft defaults are:
-
-```text
-timezone: America/Sao_Paulo
-restart: daily 04:00
-full restore point: Sunday 04:00
-warnings: 900, 300, 60, 30, 10 seconds
-remote retention: SINGLE_CURRENT
-restart after full backup: true
-```
-
-The Host uses Java `ZoneId`/`ZonedDateTime` calendar calculations rather than a repeating 10080-minute delay. Each scheduled occurrence is durably claimed with `scheduleId + scheduledOccurrenceInstant`, preventing duplicate execution when the Host restarts near a schedule boundary.
-
-When the Sunday full restore point and the daily restart are due at the same instant, they collapse into one serialized maintenance operation: warning → Paper flush → graceful stop → cold archive → SHA-256 → optional off-site promotion → start → authenticated Paper reconnect.
-
-All destructive actions share one Host-level operation lock. A conflicting request returns `BUSY`; the dashboard should display the active operation instead of retrying it.
+Host/rclone secrets and Host data are excluded from the server archive.
 
 ## Google Drive through rclone
 
-PlexonPanel uses rclone rather than implementing a browser/Paper OAuth client. Install rclone at `/usr/bin/rclone` and create a protected Host-local configuration, for example:
+Install rclone on the Host and keep its configuration protected under the `plexonpanel-host` account. Example:
 
 ```sh
 sudo install -d -m 0750 -o plexonpanel-host -g plexonpanel-host /etc/plexonpanel-host
@@ -82,7 +96,7 @@ sudo chmod 0600 /etc/plexonpanel-host/rclone.conf
 sudo chown plexonpanel-host:plexonpanel-host /etc/plexonpanel-host/rclone.conf
 ```
 
-Create a Google Drive remote named `gdrive`, then set the Host backup provider fields:
+Example Host provider fields:
 
 ```json
 {
@@ -92,49 +106,71 @@ Create a Google Drive remote named `gdrive`, then set the Host backup provider f
 }
 ```
 
-PlexonPanel invokes rclone with fixed argument arrays through `ProcessBuilder`: no shell interpolation, browser-supplied executable, arbitrary flags, or credential output is allowed. Provider health checks are bounded/read-only and the dashboard receives only provider state/remote label, never the credential file or OAuth token.
+PlexonPanel invokes rclone through fixed `ProcessBuilder` argument arrays. No browser-supplied executable, arbitrary flags, shell interpolation, credentials, or token output are allowed.
 
-### Single-current weekly promotion
+### Safe promotion
 
-The default `SINGLE_CURRENT` policy keeps one canonical disaster-recovery point without overwriting the only known-good object first:
+For `SINGLE_CURRENT`, the Host uploads a unique staging object, verifies it, promotes it to the canonical object and verifies the promoted result before cleanup. The previous known-good remote copy remains protected until the replacement is verified.
+
+A bounded provider failure after local verification does not invalidate the local backup. The Host restores Minecraft availability and records a degraded/retryable result.
+
+`backup.full.retry-upload` reuses the existing verified local archive. It does not perform another Minecraft shutdown.
+
+## Durable job states
+
+The Host persists destructive job state under its data directory. The public job contract includes job ID, kind, requester, phase and phase timestamp, start/update/completion timestamps, result/error fields, backup ID, progress percent, local/remote verification flags and restart-recovery state.
+
+The manual full-backup path can expose these phases:
 
 ```text
-gdrive:PlexonCraft/
-├── PlexonCraft-Latest.zip
-├── PlexonCraft-Latest.json
-└── staging/
+QUEUED
+PREFLIGHT
+COUNTDOWN
+FINAL_SAVE
+STOPPING_SERVER
+WAITING_FOR_STOP
+ARCHIVING
+VERIFYING_LOCAL
+VERIFYING_REMOTE
+STARTING_SERVER
+VERIFYING_STARTUP
+COMPLETED
+DEGRADED
+FAILED
+RECOVERY_REQUIRED
 ```
 
-The Host uploads a unique staging archive, verifies remote size, uploads metadata, preserves the previous canonical objects in recovery staging, promotes the new archive/metadata, verifies the promoted archive, then removes temporary objects. If upload or promotion fails, the prior canonical restore point remains available and the local archive is retained for `Retry upload`.
+Live archive/upload byte progress is emitted separately with the same durable `jobId`; consumers must match job IDs and must not use stale progress from an earlier operation. Upload progress can report `UPLOADING_REMOTE` while the durable maintenance job remains inside its archive/provider execution segment.
 
-A Google Drive outage does not intentionally leave PlexonCraft offline. The weekly maintenance job records the off-site failure, preserves the prior remote restore point, and brings the server back online unless a separate restore-recovery condition requires it to remain stopped.
+## Failure policy
+
+### Before shutdown
+
+If provider/storage preflight, command channel, final save, or another pre-destructive requirement fails, the job fails before the stop boundary and Minecraft remains online.
+
+### After shutdown / ambiguous destructive state
+
+If failure occurs after the Host may have stopped Minecraft, or a Host restart interrupts an ambiguous destructive phase, the durable job becomes `RECOVERY_REQUIRED`. Another destructive maintenance operation is blocked until recovery is reconciled.
+
+The Host attempts bounded availability recovery after an in-process failure, but it does not silently clear durable recovery state when safety is ambiguous.
+
+### Degraded remote failure
+
+If the local archive is verified but remote upload/verification fails:
+
+- preserve the valid local restore point;
+- preserve the previous known-good remote object;
+- restore Minecraft online when this workflow stopped it;
+- mark the operation degraded/retryable;
+- expose Retry Upload without another shutdown.
 
 ## Restore
 
-Restore remains Owner-only and requires `backup.restore` plus local `backups.enabled`/`restoreEnabled` gates. The dashboard first obtains a one-minute device/archive-bound restore grant and requires typing the configured server name.
+Restore is a separate Owner/elevated destructive workflow. The Host verifies the selected restore point, creates an emergency pre-restore backup, stages extraction with traversal/symlink/expansion protections, maintains a rollback journal and optionally starts/verifies Minecraft after replacement.
 
-For a full restore point the Host then:
+Do not merge restore semantics into **Fully Backup Now** and do not delete recovery journals to bypass safety.
 
-1. gracefully stops the systemd service if it is running and verifies Paper disconnect;
-2. if the local ZIP was deleted but verified off-site metadata remains, downloads the configured remote object to Host staging, verifies size and SHA-256, then promotes it back to the local restore candidate;
-3. verifies the selected archive SHA-256;
-4. creates an emergency cold pre-restore backup;
-5. creates a restore journal;
-6. extracts into Host staging with ZIP-slip, traversal, control-character, duplicate-entry, symlink and expansion-limit protection;
-7. atomically replaces top-level targets where supported;
-8. rolls back from the journal on failure;
-9. removes the journal only after a complete restore/rollback;
-10. optionally starts the service and requires systemd active plus authenticated Paper reconnect before returning a running result.
-
-Remote data is never streamed directly into live server paths.
-
-Emergency pre-restore archives cannot be deleted from the dashboard.
-
-## Crash recovery
-
-The Host persists scheduled occurrence claims and destructive job state under its data directory. An unfinished destructive job or restore journal fails closed and is surfaced as recovery-required instead of being assumed successful.
-
-For an interrupted restore, keep Paper stopped, inspect Host logs/storage permissions, then run the matched Host JAR:
+For interrupted restore recovery, keep Minecraft stopped and run the matched Host artifact:
 
 ```sh
 sudo -u plexonpanel-host /usr/bin/java \
@@ -143,67 +179,34 @@ sudo -u plexonpanel-host /usr/bin/java \
   --recover-restore
 ```
 
-Recovery restores journaled originals and removes newly introduced targets. Do not delete a restore journal simply to bypass recovery.
-
 ## Host permissions
 
-Run `plexonpanel-host` as a dedicated non-root account. It needs exactly enough access to:
+Run `plexonpanel-host` as a dedicated non-root identity. Grant only the access required to:
 
 - read the configured Minecraft server root;
-- write its Host data/backup directory;
-- read `/etc/plexonpanel-host/rclone.conf`;
-- read the PlexonPanel device registry/state it already uses;
-- invoke only the configured PlexonCraft systemd unit.
+- write the Host data/backup directory;
+- read protected rclone configuration;
+- read/write its durable authorization mirror/state as configured;
+- read the configured journald unit for console authority;
+- control only the configured Minecraft systemd unit;
+- reach the configured local RCON/command channel.
 
-Do not grant unrestricted root shell access. If sudo/polkit is used for systemd, constrain it to the exact configured service.
+Do not recursively `chown` the server to the Host, use `chmod 777`, or run the Host as root.
 
-A typical data-directory ownership setup is:
+## Production verification
 
-```sh
-sudo install -d -m 0750 -o plexonpanel-host -g plexonpanel-host \
-  /var/lib/plexonpanel-host \
-  /var/lib/plexonpanel-host/backups
-```
+Repository tests/CI are not production certification. Before claiming the Step 8 release certified, record exact deployed backend/dashboard SHAs and artifact hashes, then execute the real Host/systemd/RCON/rclone gates on the production VPS, including:
 
-The Minecraft tree must remain readable to the Host during cold backup and writable only where existing restore policy explicitly permits replacement.
+- Host remains connected and authorized while Minecraft/Paper is stopped;
+- warning boundaries are delivered by Host RCON;
+- failed/blank final save prevents shutdown;
+- stop proof reaches inactive + MainPID zero/not alive;
+- cold archive and SHA/metadata verify;
+- Google Drive staging/promotion/final verification succeeds;
+- Minecraft automatically returns online;
+- Dashboard reconnect reconstructs the active job;
+- controlled remote failure produces degraded/retryable state;
+- Retry Upload succeeds without a second shutdown;
+- journald console history remains available while Paper is offline.
 
-## Dashboard capabilities
-
-Host capability configuration controls what the dashboard can expose. The maintenance release adds:
-
-```text
-maintenance.view
-maintenance.configure
-maintenance.restart
-maintenance.run
-provider.view
-provider.test
-```
-
-Backup scopes remain:
-
-```text
-backup.view
-backup.create
-backup.download
-backup.delete
-backup.restore
-```
-
-`maintenance.configure` and restore operations should remain Owner/elevated-only. Paper deliberately does not advertise Host-only maintenance/provider scopes.
-
-## Operational validation
-
-Before enabling automatic weekly downtime on production PlexonCraft:
-
-1. test `provider.test` from the dashboard;
-2. create a manual live snapshot;
-3. create a manual full restore point in a maintenance window;
-4. prove the ZIP contains the expected plugin database files and excludes Host/rclone secrets;
-5. verify the SHA-256 and remote canonical object;
-6. simulate an unavailable remote and verify PlexonCraft returns online while the old remote point survives;
-7. test `Retry upload`;
-8. perform a restore on a disposable/copy environment and prove emergency backup, rollback journal and Paper reconnect behavior;
-9. only then enable the recurring schedule.
-
-Source/CI success is not a substitute for these live-host recovery tests.
+If a runtime gate is not executed, record it as `NOT_EXECUTED`; never infer production success from source or CI alone.
