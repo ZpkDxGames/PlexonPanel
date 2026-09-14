@@ -66,8 +66,8 @@ public record ControlPolicy(
     for (String scope :
         List.of("audit.view", "audit.view.self", "devices.view", "settings.view", "server.status"))
       c.put(scope, true);
-    boolean backupCoordination = config.getBoolean("backups.enabled", false);
-    c.put("backup.create", remote && backupCoordination);
+    // Backup, provider, maintenance and lifecycle scopes are Host-only. Paper deliberately keeps
+    // them false even when legacy backup keys remain in an upgraded config.yml.
     c.put("devices.revoke", remote && config.getBoolean("access.allow-dashboard-revoke", false));
     Map<String, Set<String>> roles = new TreeMap<>(String.CASE_INSENSITIVE_ORDER);
     roles.putAll(Scopes.ROLES);
