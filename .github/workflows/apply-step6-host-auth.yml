@@ -63,6 +63,40 @@ jobs:
       - name: Apply Step 6 source transformation
         run: python3 scripts/apply-step6-host-auth.py
 
+      - name: Align Host device-authority tests
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path("host-agent/src/test/java/io/github/zpkdxgames/plexonpanel/host/HostConfigTest.java")
+          text = p.read_text()
+          old = '''        "devices.view",
+                  "devices.revoke",
+          '''
+          if old not in text:
+              raise SystemExit("HostConfigTest device capability anchor not found")
+          text = text.replace(old, "", 1)
+          anchor = '''  @Test
+            void hostStillRejectsPaperOnlyScopes() throws Exception {
+          '''
+          replacement = '''  @Test
+            void hostDeviceManagementRemainsPaperAuthoritative() throws Exception {
+              JsonObject c = config();
+              c.getAsJsonObject("capabilities").addProperty("devices.view", true);
+              c.getAsJsonObject("capabilities").addProperty("devices.revoke", true);
+              Map<String, Boolean> capabilities = load(c).effectiveCapabilities();
+              assertFalse(capabilities.get("devices.view"));
+              assertFalse(capabilities.get("devices.revoke"));
+            }
+
+            @Test
+            void hostStillRejectsPaperOnlyScopes() throws Exception {
+          '''
+          if anchor not in text:
+              raise SystemExit("HostConfigTest insertion anchor not found")
+          p.write_text(text.replace(anchor, replacement, 1))
+          PY
+
       - name: Test and build backend pair
         id: validate
         shell: bash
