@@ -32,6 +32,7 @@ WATCH_MASK = IN_ATTRIB | IN_CLOSE_WRITE | IN_MOVED_TO | IN_CREATE | IN_DELETE_SE
 EVENT = struct.Struct("iIII")
 MAX_WATCHES = 200_000
 MAX_EVENT_BYTES = 1 << 20
+PANEL_ACCESS_RELATIVE = Path("plugins") / "PlexonPanel" / "access"
 
 libc = ctypes.CDLL("libc.so.6", use_errno=True)
 libc.inotify_init1.argtypes = [ctypes.c_int]
@@ -96,6 +97,17 @@ def contained(root: Path, candidate: Path) -> bool:
         return False
 
 
+def panel_access_path(root: Path, path: Path) -> bool:
+    """Return true for PlexonPanel's Host/Paper shared writable registry subtree.
+
+    That path has its own group/ACL contract and must never receive the bridge's read-only named
+    user ACL, because a named user ACL overrides the host user's writable group membership.
+    """
+    access_root = root / PANEL_ACCESS_RELATIVE
+    absolute = path.absolute()
+    return absolute == access_root or access_root in absolute.parents
+
+
 def lstat_safe(path: Path):
     try:
         return path.lstat()
@@ -133,6 +145,8 @@ def repair(root: Path, path: Path, user: str, root_entry: bool = False) -> bool:
     resolved = Path(os.path.realpath(path))
     if not contained(root, resolved):
         return False
+    if panel_access_path(root, path):
+        return False
     if root_entry:
         # The service needs traverse only on the server root itself.
         subprocess.run(
@@ -153,6 +167,8 @@ def repair(root: Path, path: Path, user: str, root_entry: bool = False) -> bool:
 
 
 def scan_tree(root: Path, include_path: Path, user: str, add_watch) -> None:
+    if panel_access_path(root, include_path):
+        return
     st = lstat_safe(include_path)
     if st is None or stat.S_ISLNK(st.st_mode):
         return
@@ -166,6 +182,9 @@ def scan_tree(root: Path, include_path: Path, user: str, add_watch) -> None:
         return
     for current, dirs, files in os.walk(include_path, topdown=True, followlinks=False):
         current_path = Path(current)
+        if panel_access_path(root, current_path):
+            dirs[:] = []
+            continue
         if not contained(root, Path(os.path.realpath(current_path))):
             dirs[:] = []
             continue
@@ -175,7 +194,11 @@ def scan_tree(root: Path, include_path: Path, user: str, add_watch) -> None:
         for name in dirs:
             child = current_path / name
             st_child = lstat_safe(child)
-            if st_child is not None and not stat.S_ISLNK(st_child.st_mode):
+            if (
+                st_child is not None
+                and not stat.S_ISLNK(st_child.st_mode)
+                and not panel_access_path(root, child)
+            ):
                 safe_dirs.append(name)
         dirs[:] = safe_dirs
         for name in files:
