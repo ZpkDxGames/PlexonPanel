@@ -178,6 +178,8 @@ public record HostConfig(
               backups.rcloneConfig,
               defaultLiveSnapshotExcludes());
     }
+    String legacyAccessRegistry =
+        optionalLegacyAccessRegistry(parsed.accessRegistry, parsed.dataDirectory);
     HostConfig c =
         new HostConfig(
             parsed.serverId,
@@ -186,7 +188,7 @@ public record HostConfig(
             parsed.relayPublicKey,
             parsed.serverRoot,
             parsed.dataDirectory,
-            parsed.accessRegistry,
+            legacyAccessRegistry,
             parsed.serviceName,
             parsed.capabilities,
             backups,
@@ -262,6 +264,16 @@ public record HostConfig(
     validateConsole(c.console);
     validateCommandChannel(c.commandChannel);
     return c;
+  }
+
+  private static String optionalLegacyAccessRegistry(String configured, String dataDirectory) {
+    if (configured != null && !configured.isBlank()) return configured;
+    if (dataDirectory == null || dataDirectory.isBlank() || !Path.of(dataDirectory).isAbsolute())
+      return configured;
+    return Path.of(dataDirectory)
+        .resolve("access")
+        .resolve(".legacy-paper-registry-disabled")
+        .toString();
   }
 
   private static boolean validSnapshotExclusion(String value) {
