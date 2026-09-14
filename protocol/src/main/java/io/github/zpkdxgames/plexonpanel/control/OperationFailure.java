@@ -31,15 +31,6 @@ public final class OperationFailure extends RuntimeException {
       String phase,
       String message,
       boolean retryable,
-      Map<String, String> safeDetails) {
-    this(code, phase, message, retryable, null, safeDetails, null);
-  }
-
-  public OperationFailure(
-      String code,
-      String phase,
-      String message,
-      boolean retryable,
       String safeRelativePath) {
     this(code, phase, message, retryable, safeRelativePath, Map.of(), null);
   }
@@ -52,6 +43,15 @@ public final class OperationFailure extends RuntimeException {
       String safeRelativePath,
       Throwable cause) {
     this(code, phase, message, retryable, safeRelativePath, Map.of(), cause);
+  }
+
+  public static OperationFailure withSafeDetails(
+      String code,
+      String phase,
+      String message,
+      boolean retryable,
+      Map<String, String> safeDetails) {
+    return new OperationFailure(code, phase, message, retryable, null, safeDetails, null);
   }
 
   private OperationFailure(
