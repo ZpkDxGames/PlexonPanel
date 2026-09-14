@@ -1,6 +1,6 @@
 # Optional Linux host companion
 
-The host runs Java 25 as a dedicated non-root Linux user, with no inbound listener. It owns an independent Ed25519 identity and can operate only locally configured paths, executable and exact systemd unit. Version 3.0.1 adds an explicit [full-control Host example](../host-agent/examples/host-config-full-control.json) while preserving the conservative [public example](../host-agent/examples/host-config.json). Host still has no player, console, chat or plugin authority and never scans Paper player data.
+The host runs Java 25 as a dedicated non-root Linux user, with no inbound listener. It owns an independent Ed25519 identity and can operate only locally configured paths, executable and exact systemd unit. The Host Companion is also the sole authoritative source for PlexonPanel server-console capture, replay, and retained-history queries. Paper remains responsible for Paper/Bukkit-only runtime operations such as locally allowlisted console command execution, but it no longer tails `logs/latest.log` or provides fallback console history.
 
 ## Ubuntu 24.04 installation
 
@@ -11,7 +11,7 @@ Use a disposable server first. Adjust the example user, paths and `plexoncraft.s
 3. Install the JAR under root-owned `/opt/plexonpanel-host/`. Install root-owned `/etc/plexonpanel-host/host-config.json` mode 0640, readable by the private host group. The host user must not modify its JAR/config/unit/polkit rule.
 4. Create `/var/lib/plexonpanel-host` and `/var/backups/plexonpanel`, host-owned mode 0700. Backups must be outside the live root. Configure only needed top-level include names.
 5. Start Paper once to generate `plugins/PlexonPanel/access/devices.json`. Make **only the access directory** group-owned by `plexonpanel-access`, mode 2770 (setgid), and registry/lock files 0660. Parents need traversal rights. Never share private Paper keys or recursively loosen server permissions.
-6. Grant host OS read/write access only to paths needed by enabled features. The unit's writable mount allowlist does not grant ownership. Test denied paths. Agents do not need each other's private keys.
+6. Grant host OS read/write access only to paths needed by enabled features. The unit's writable mount allowlist does not grant ownership. Test denied paths. Agents do not need each other's private keys. For console access, grant the Host service identity only the journal-reading access required for the configured Minecraft systemd unit; PlexonPanel never accepts a browser-supplied unit name.
 7. Initialize as the host user:
 
 ```sh
@@ -25,7 +25,24 @@ Copy only its printed public key to Paper `host.public-key`; copy the existing P
 
 ## Full local Host capabilities
 
-The 3.0.1 full-control example enables telemetry, server status/start/stop/restart, all implemented file operations, the complete backup family, audit, devices and settings. Effective backup capability still requires `backups.enabled`; restore additionally requires `restoreEnabled`. HostConfig continues rejecting Paper-only scope families. File operations remain confined under `serverRoot`, and lifecycle actions remain bound to the validated exact systemd service name.
+The full-control example enables telemetry, server status/start/stop/restart, implemented file operations, backup operations, audit, devices, settings, and Host-owned console viewing when explicitly enabled. Effective backup capability still requires `backups.enabled`; restore additionally requires `restoreEnabled`. Effective console viewing requires Host `console.enabled` plus the corresponding `console.view.errors` or `console.view.full` capability. HostConfig continues rejecting Paper-only scope families. File operations remain confined under `serverRoot`, and lifecycle actions remain bound to the validated exact systemd service name.
+
+## Console authority and retained history
+
+The Host Companion is the single authoritative console source. Live capture follows the exact locally configured systemd unit through the locally validated `/usr/bin/journalctl` executable. The Host persists only the journal cursor/invocation metadata needed for bounded reconnect replay; it does not create an unlimited duplicate console database.
+
+The authenticated Host control plane exposes two retained-history actions:
+
+- `console.history` requires `console.view.full`;
+- `console.history.errors` requires `console.view.errors` and still restricts results to warning/error classifications server-side.
+
+History requests may contain only the typed fields `before`, `after`, `limit`, `invocationId`, and `levels`. Timestamps are ISO-8601 instants, `invocationId` is a validated 32-hex systemd invocation identifier, and severity values are drawn from the fixed console severity set. Unknown fields are rejected. The browser cannot provide a unit name, journal executable, output mode, or arbitrary `journalctl` flags.
+
+Each history response returns at most 100 lines. The Host additionally bounds the number of journal records scanned, raw bytes consumed, returned encoded console bytes, and query execution time. Console content passes through the same shared redaction/classification path as live Host console output before it can reach the relay. Entries from a different `_SYSTEMD_UNIT` are rejected defensively even though `journalctl` is already unit-pinned.
+
+**History is limited by systemd-journald retention on the VPS.** PlexonPanel must not describe this as unlimited history. If journald has rotated an entry away, PlexonPanel cannot recover it. A stopped Paper server does not remove retained journal history because the Host remains online and queries journald independently.
+
+Paper no longer owns server-console capture or retained replay. Legacy Paper `console.stream-enabled`, `console.errors-enabled`, polling, batching, and ring-buffer settings may remain parseable during migration but do not restore Paper console authority and must not be treated as a fallback. Paper still owns `console.execute` because execution must remain on the Bukkit/Paper command path; viewing and execution intentionally have separate authorities.
 
 ## Backups
 
