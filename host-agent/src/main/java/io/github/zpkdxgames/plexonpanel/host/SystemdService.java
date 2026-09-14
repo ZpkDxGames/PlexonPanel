@@ -5,6 +5,7 @@ import java.io.*;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
 import java.util.concurrent.*;
+import java.util.function.LongPredicate;
 
 public final class SystemdService {
   private final String service;
@@ -61,9 +62,26 @@ public final class SystemdService {
         true);
   }
 
+  /**
+   * A cold-backup-safe stop proof. The unit must be inactive/failed and systemd's MainPID must be
+   * zero or no longer alive. A stale but still-live PID fails closed.
+   */
   public boolean stopped() throws Exception {
-    String state = (String) status().get("state");
-    return state.equals("inactive") || state.equals("failed");
+    return stopped(status(), SystemdService::processAlive);
+  }
+
+  static boolean stopped(Map<String, Object> status, LongPredicate pidAlive) {
+    Objects.requireNonNull(status, "status");
+    Objects.requireNonNull(pidAlive, "pidAlive");
+    String state = String.valueOf(status.getOrDefault("state", "unknown"));
+    if (!state.equals("inactive") && !state.equals("failed")) return false;
+    Object rawPid = status.getOrDefault("pid", 0L);
+    long pid = rawPid instanceof Number number ? number.longValue() : 0L;
+    return pid <= 0 || !pidAlive.test(pid);
+  }
+
+  private static boolean processAlive(long pid) {
+    return ProcessHandle.of(pid).map(ProcessHandle::isAlive).orElse(false);
   }
 
   public void action(String action) throws Exception {
