@@ -45,14 +45,10 @@ player-history:
   maximum-page-size: 100
   shutdown-flush-seconds: 5
 
+# Paper no longer captures authoritative server-console output or history. The Host
+# Companion owns journald capture/replay/history. These patterns are retained only
+# to redact Paper-owned remote command results before they are returned.
 console:
-  stream-enabled: false
-  errors-enabled: true
-  poll-interval-millis: 250
-  batch-interval-millis: 300
-  batch-size: 100
-  ring-buffer-lines: 1000
-  maximum-line-bytes: 16384
   redact-patterns:
     - "(?i)(password|passwd|secret|token|api[-_ ]?key)\\s*[=:]\\s*\\S+"
     - "(?i)(authorization:\\s*bearer)\\s+\\S+"
