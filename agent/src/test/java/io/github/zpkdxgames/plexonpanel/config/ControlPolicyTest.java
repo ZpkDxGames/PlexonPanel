@@ -69,7 +69,6 @@ class ControlPolicyTest {
             "files.delete",
             "files.download",
             "files.upload",
-            "backup.create",
             "server.status",
             "audit.view.self",
             "audit.view",
@@ -84,10 +83,46 @@ class ControlPolicyTest {
         assertFalse(
             policy.capabilities().get(scope), () -> "Paper must not claim Host-only scope: " + scope);
 
-    assertFalse(policy.capabilities().get("console.view.errors"));
-    assertFalse(policy.capabilities().get("console.view.full"));
+    for (String scope :
+        List.of(
+            "backup.view",
+            "backup.create",
+            "backup.download",
+            "backup.delete",
+            "backup.restore",
+            "maintenance.view",
+            "maintenance.configure",
+            "maintenance.restart",
+            "maintenance.run",
+            "provider.view",
+            "provider.test",
+            "server.start",
+            "server.stop",
+            "server.restart",
+            "console.view.errors",
+            "console.view.full"))
+      assertFalse(policy.capabilities().get(scope), () -> "Host-only scope leaked to Paper: " + scope);
+
     assertTrue(policy.capabilities().get("console.execute.allowed"));
     assertEquals("plexonpanel reload", policy.pluginReloads().get("PlexonPanel"));
+  }
+
+  @Test
+  void legacyPaperBackupKeysCannotRestoreHostAuthority() throws Exception {
+    Path source = fixture("examples/config-full-control.yml", "agent/examples/config-full-control.yml");
+    YamlConfiguration config = YamlConfiguration.loadConfiguration(source.toFile());
+    Path serverRoot = temporary.resolve("server");
+    Files.createDirectories(serverRoot);
+    config.set("files.roots.server.path", serverRoot.toString());
+    config.set("backups.enabled", true);
+    config.set("backups.allow-host-schedule", true);
+
+    ControlPolicy policy =
+        ControlPolicy.load(config, PanelSettings.load(config), temporary.resolve("legacy-backups"));
+    assertFalse(policy.capabilities().get("backup.create"));
+    assertFalse(policy.capabilities().get("maintenance.run"));
+    assertFalse(policy.capabilities().get("provider.test"));
+    assertFalse(policy.capabilities().get("server.restart"));
   }
 
   @Test
@@ -97,9 +132,6 @@ class ControlPolicyTest {
     Path serverRoot = temporary.resolve("server");
     Files.createDirectories(serverRoot);
     config.set("files.roots.server.path", serverRoot.toString());
-
-    // Old installations may still contain these keys after upgrading. They must be ignored rather
-    // than silently restoring Paper-side console capture/history authority.
     config.set("console.stream-enabled", true);
     config.set("console.errors-enabled", true);
     config.set("console.poll-interval-millis", -1);
@@ -136,9 +168,7 @@ class ControlPolicyTest {
   @Test
   void conservativePublicDefaultsRemainConservative() throws Exception {
     ControlPolicy policy =
-        load(
-            fixture(
-                "src/main/resources/config.yml", "agent/src/main/resources/config.yml"));
+        load(fixture("src/main/resources/config.yml", "agent/src/main/resources/config.yml"));
 
     for (String scope :
         List.of(

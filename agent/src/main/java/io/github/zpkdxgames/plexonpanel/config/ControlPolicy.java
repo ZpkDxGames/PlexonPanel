@@ -68,8 +68,8 @@ public record ControlPolicy(
     for (String scope :
         List.of("audit.view", "audit.view.self", "devices.view", "settings.view", "server.status"))
       c.put(scope, true);
-    boolean backupCoordination = config.getBoolean("backups.enabled", false);
-    c.put("backup.create", remote && backupCoordination);
+    // Backup, provider, maintenance and lifecycle mutation scopes belong exclusively to the Host.
+    // Legacy Paper backup keys are deliberately ignored and can never re-enable these capabilities.
     c.put("devices.revoke", remote && config.getBoolean("access.allow-dashboard-revoke", false));
     Map<String, Set<String>> roles = new TreeMap<>(String.CASE_INSENSITIVE_ORDER);
     roles.putAll(Scopes.ROLES);
