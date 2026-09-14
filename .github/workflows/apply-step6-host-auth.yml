@@ -14,6 +14,7 @@ concurrency:
 
 jobs:
   apply:
+    if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     steps:
@@ -69,8 +70,18 @@ jobs:
           set +e
           ./gradlew --no-daemon clean test check javadoc :agent:jar :host-agent:jar > step6-backend-validation.log 2>&1
           code=$?
+          if [ "$code" -ne 0 ]; then
+            {
+              echo
+              echo '===== HOST-AGENT TEST XML ====='
+              find host-agent/build/test-results/test -type f -name '*.xml' -print -exec cat {} \; 2>/dev/null || true
+              echo
+              echo '===== PROTOCOL TEST XML ====='
+              find protocol/build/test-results/test -type f -name '*.xml' -print -exec cat {} \; 2>/dev/null || true
+            } >> step6-backend-validation.log
+          fi
           echo "exit_code=${code}" >> "$GITHUB_OUTPUT"
-          tail -n 250 step6-backend-validation.log
+          tail -n 400 step6-backend-validation.log
           exit 0
 
       - name: Upload backend validation diagnostics
@@ -91,7 +102,8 @@ jobs:
         run: |
           set -euo pipefail
           rm -f step6-backend-validation.log
-          git rm scripts/apply-step6-host-auth.py .github/workflows/apply-step6-host-auth.yml
+          git checkout -- scripts/apply-step6-host-auth.py
+          git diff --check
           git add -A
           git diff --cached --check
           git config user.name "github-actions[bot]"
