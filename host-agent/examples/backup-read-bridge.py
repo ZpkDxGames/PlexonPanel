@@ -115,27 +115,38 @@ def lstat_safe(path: Path):
         return None
 
 
-def set_acl(path: Path, user: str, directory: bool) -> None:
-    # No shell. setfacl recalculates the ACL mask to include the named user without granting write.
-    permission = "r-x" if directory else "r--"
-    subprocess.run(
-        ["/usr/bin/setfacl", "-m", f"u:{user}:{permission}", "--", str(path)],
-        check=True,
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        timeout=10,
-    )
-    if directory:
-        # Defaults help normal creates; event repair still handles chmod(0600)/atomic replacements.
+def run_setfacl(path: Path, acl: str) -> bool:
+    """Apply one ACL update, tolerating only a target that vanished during event processing."""
+    try:
         subprocess.run(
-            ["/usr/bin/setfacl", "-m", f"d:u:{user}:r-x", "--", str(path)],
+            ["/usr/bin/setfacl", "-m", acl, "--", str(path)],
             check=True,
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             timeout=10,
         )
+        return True
+    except subprocess.CalledProcessError:
+        # Paper and plugins commonly create, rename and delete temp/WAL/SHM files within the same
+        # inotify turn. A vanished target is normal churn, not a bridge failure. Persistent targets
+        # must still fail closed so a real ACL/permission problem remains operator-visible.
+        st = lstat_safe(path)
+        if st is None or stat.S_ISLNK(st.st_mode):
+            return False
+        raise
+
+
+def set_acl(path: Path, user: str, directory: bool) -> bool:
+    # No shell. setfacl recalculates the ACL mask to include the named user without granting write.
+    permission = "r-x" if directory else "r--"
+    if not run_setfacl(path, f"u:{user}:{permission}"):
+        return False
+    if directory:
+        # Defaults help normal creates; event repair still handles chmod(0600)/atomic replacements.
+        if not run_setfacl(path, f"d:u:{user}:r-x"):
+            return False
+    return True
 
 
 def repair(root: Path, path: Path, user: str, root_entry: bool = False) -> bool:
@@ -149,18 +160,11 @@ def repair(root: Path, path: Path, user: str, root_entry: bool = False) -> bool:
         return False
     if root_entry:
         # The service needs traverse only on the server root itself.
-        subprocess.run(
-            ["/usr/bin/setfacl", "-m", f"u:{user}:--x", "--", str(path)],
-            check=True,
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            timeout=10,
-        )
+        if not run_setfacl(path, f"u:{user}:--x"):
+            return False
         return stat.S_ISDIR(st.st_mode)
     if stat.S_ISDIR(st.st_mode):
-        set_acl(path, user, True)
-        return True
+        return set_acl(path, user, True)
     if stat.S_ISREG(st.st_mode):
         set_acl(path, user, False)
     return False
