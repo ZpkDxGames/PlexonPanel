@@ -5,7 +5,6 @@ import io.github.zpkdxgames.plexonpanel.audit.LocalAudit;
 import io.github.zpkdxgames.plexonpanel.chat.ChatStreamService;
 import io.github.zpkdxgames.plexonpanel.config.ControlPolicy;
 import io.github.zpkdxgames.plexonpanel.config.PanelSettings;
-import io.github.zpkdxgames.plexonpanel.console.ConsoleStreamService;
 import io.github.zpkdxgames.plexonpanel.control.ControlEngine;
 import io.github.zpkdxgames.plexonpanel.identity.DeviceIdentity;
 import io.github.zpkdxgames.plexonpanel.identity.PairingState;
@@ -21,7 +20,6 @@ public final class AgentRuntime implements AutoCloseable {
   private final PanelSettings settings;
   private final GatewayClient gateway;
   private final ChatStreamService chat;
-  private final ConsoleStreamService console;
   private final TelemetryService telemetry;
   private final PlayerPresenceService presence;
   private final ControlEngine actions;
@@ -53,7 +51,6 @@ public final class AgentRuntime implements AutoCloseable {
     this.gateway =
         new GatewayClient(plugin, settings, identity, pairingState, policy, devices, localAudit);
     this.chat = new ChatStreamService(plugin, settings.chat(), gateway);
-    this.console = new ConsoleStreamService(plugin, settings.console(), gateway, serverRoot);
     this.presence =
         new PlayerPresenceService(
             plugin.getDataFolder().toPath(), settings.playerHistory(), plugin.getLogger());
@@ -81,10 +78,6 @@ public final class AgentRuntime implements AutoCloseable {
           switch (message.envelope().type()) {
             case "backup.coordination" -> backupCoordinator.accept(message);
             case "maintenance.coordination" -> maintenanceCoordinator.accept(message);
-            case "console.authority" ->
-                console.setHostAuthority(
-                    message.body().has("hostAuthoritative")
-                        && message.body().get("hostAuthoritative").getAsBoolean());
             default -> actions.accept(message);
           }
         });
@@ -96,19 +89,13 @@ public final class AgentRuntime implements AutoCloseable {
             throw new IllegalStateException("Access sync failed", e);
           }
           telemetry.sendInitialSnapshots();
-          console.sendRecentSnapshot();
         });
-    gateway.setSnapshotRequestHandler(
-        () -> {
-          telemetry.sendInitialSnapshots();
-          console.sendRecentSnapshot();
-        });
+    gateway.setSnapshotRequestHandler(telemetry::sendInitialSnapshots);
   }
 
   public void start() {
     if (closed.get() || !started.compareAndSet(false, true)) return;
     chat.start();
-    console.start();
     telemetry.start();
     gateway.start();
   }
@@ -129,10 +116,6 @@ public final class AgentRuntime implements AutoCloseable {
     return gateway;
   }
 
-  public ConsoleStreamService console() {
-    return console;
-  }
-
   public TelemetryService telemetry() {
     return telemetry;
   }
@@ -149,7 +132,6 @@ public final class AgentRuntime implements AutoCloseable {
     telemetry.close();
     presence.close();
     gateway.close();
-    console.close();
     chat.close();
   }
 }
