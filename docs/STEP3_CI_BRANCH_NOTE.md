@@ -1,1 +1,0 @@
-Step 3 certification is performed from `agent/manual-backup-step3-cold-backup-verification` against the latest `main`. Temporary branch snapshots created during connector-side inspection are not release authorities; this branch and its pull request are authoritative for Step 3 review and CI.
