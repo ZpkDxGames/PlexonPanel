@@ -29,8 +29,10 @@ public record ControlPolicy(
     c.put(
         "players.address",
         settings.telemetry().enabled() && settings.telemetry().includePlayerAddress());
-    c.put("console.view.errors", settings.console().errorsEnabled());
-    c.put("console.view.full", settings.console().streamEnabled());
+    // Console capture/history is Host-owned. Paper keeps only console.execute.allowed and must not
+    // advertise read authority even when legacy console capture keys remain in an old config file.
+    c.put("console.view.errors", false);
+    c.put("console.view.full", false);
     c.put("chat.view", settings.chat().streamEnabled());
     boolean remote = settings.remoteActions().enabled();
     c.put("chat.send", remote && settings.chat().allowDashboardSend());
