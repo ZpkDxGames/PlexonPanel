@@ -56,11 +56,14 @@ public final class MaintenanceManager implements AutoCloseable {
     Path data = Path.of(config.dataDirectory()).toAbsolutePath().normalize();
     this.settingsPath = data.resolve("maintenance-settings.json");
     this.state = new MaintenanceStateStore(data);
+    this.state.recoverInterrupted();
     this.settings = MaintenanceSettings.load(settingsPath);
     if (!Files.exists(settingsPath)) this.settings.save(settingsPath);
   }
 
   public void start() {
+    // Legacy scheduled maintenance remains temporarily for migration compatibility. Step 5 removes
+    // recurring full-backup coordination; manual jobs already use the Host-owned durable state below.
     clock.scheduleWithFixedDelay(this::tickSafely, 2, 15, TimeUnit.SECONDS);
   }
 
@@ -95,6 +98,8 @@ public final class MaintenanceManager implements AutoCloseable {
     result.put("timezone", current.timezone());
     result.put("nextRestart", restart == null ? "" : restart.toString());
     result.put("nextFullRestorePoint", full == null ? "" : full.toString());
+    result.put("fullBackupScheduleDeprecated", true);
+    result.put("jobStateContractVersion", 2);
     result.put("currentOperation", active == null ? Map.of() : active);
     result.put("provider", fullBackups.providerStatus());
     result.put("restoreRecoveryRequired", fullBackups.recoveryRequired());
@@ -118,12 +123,27 @@ public final class MaintenanceManager implements AutoCloseable {
       boolean skipCountdown)
       throws Exception {
     if (closed.get()) throw new IllegalStateException("HOST_OFFLINE");
-    if (state.recoveryRequired() != null || fullBackups.recoveryRequired())
+
+    MaintenanceStateStore.Job blocking = state.recoveryRequired();
+    if (blocking != null) {
+      if ("RECOVERY_REQUIRED".equals(blocking.phase()))
+        throw new IllegalStateException("RESTORE_RECOVERY_REQUIRED");
+      throw new SecurityException("BUSY");
+    }
+    if (fullBackups.recoveryRequired())
       throw new IllegalStateException("RESTORE_RECOVERY_REQUIRED");
     if (worker.getQueue().remainingCapacity() == 0 || operationLock.isLocked())
       throw new SecurityException("BUSY");
+
     MaintenanceStateStore.Job job =
-        state.begin(kind, occurrence, automatic, skipCountdown ? "PREPARING" : "COUNTDOWN");
+        state.begin(
+            kind,
+            occurrence,
+            automatic,
+            "QUEUED",
+            requesterDeviceId(device, automatic),
+            requesterDeviceName(device, automatic));
+    publishPhase(job, Map.of());
     try {
       worker.execute(
           () -> {
@@ -189,6 +209,8 @@ public final class MaintenanceManager implements AutoCloseable {
       if (!operationLock.tryLock()) throw new SecurityException("BUSY");
       locked = true;
       if (fullBackups.recoveryRequired()) throw new IllegalStateException("RESTORE_RECOVERY_REQUIRED");
+
+      job = transition(job, "PREFLIGHT", null, 5, null, null, null, null, Map.of());
       if (service.stopped()) {
         if (!automatic) throw new IllegalStateException("SERVER_ALREADY_STOPPED");
         state.finish(job, "SKIPPED", "SERVER_ALREADY_STOPPED");
@@ -210,28 +232,36 @@ public final class MaintenanceManager implements AutoCloseable {
         return;
       }
       if (!paperConnected.getAsBoolean()) throw new IllegalStateException("PAPER_OFFLINE");
+
       audit("maintenance.restart", "STARTED", actor(device, automatic), automatic, job.jobId(), "", Map.of());
-      publishPhase(job, "COUNTDOWN", Map.of());
-      if (!skipCountdown) countdown(device, automatic, settings.restart().warningSeconds(), "restart");
-      job = state.update(job, "PREPARING", null);
-      publishPhase(job, "PREPARING", Map.of());
+      if (!skipCountdown) {
+        job = transition(job, "COUNTDOWN", null, 10, null, null, null, null, Map.of());
+        countdown(device, automatic, settings.restart().warningSeconds(), "restart");
+      }
+
+      job = transition(job, "FINAL_SAVE", null, 20, null, null, null, null, Map.of());
       if (!paperLink.flush(device, automatic)) throw new IOException("PAPER_FLUSH_FAILED");
       long revision = paperRevision.getAsLong();
-      job = state.update(job, "STOPPING_SERVER", null);
-      publishPhase(job, "STOPPING_SERVER", Map.of());
+
+      job = transition(job, "STOPPING_SERVER", null, 30, null, null, null, null, Map.of());
       service.action("stop");
       stoppedByUs = true;
+      job = transition(job, "WAITING_FOR_STOP", null, 40, true, null, null, null, Map.of());
       waitStopped(settings.restart().stopTimeoutSeconds());
-      job = state.update(job, "STARTING_SERVER", null);
-      publishPhase(job, "STARTING_SERVER", Map.of());
+
+      job = transition(job, "STARTING_SERVER", null, 75, true, null, null, null, Map.of());
       service.action("start");
+      job = transition(job, "VERIFYING_STARTUP", null, 90, true, null, null, null, Map.of());
       waitStarted(revision, settings.restart().startupTimeoutSeconds());
+      job = transition(job, "VERIFYING_STARTUP", null, 98, false, null, null, false, Map.of());
+
       state.finish(job, "SUCCESS", "");
       publish("maintenance.completed", Map.of("jobId", job.jobId(), "kind", job.kind(), "result", "SUCCESS"));
       audit("maintenance.restart", "SUCCESS", actor(device, automatic), automatic, job.jobId(), "", Map.of());
     } catch (Exception error) {
-      fail(job, device, automatic, "maintenance.restart", error);
-      if (stoppedByUs) tryStartAfterFailure();
+      boolean recoveryRequired = stoppedByUs && !tryStartAfterFailure();
+      if (stoppedByUs && !recoveryRequired) job = clearStoppedFlag(job);
+      fail(job, device, automatic, "maintenance.restart", error, recoveryRequired);
     } finally {
       if (locked) operationLock.unlock();
     }
@@ -248,6 +278,8 @@ public final class MaintenanceManager implements AutoCloseable {
       if (!operationLock.tryLock()) throw new SecurityException("BUSY");
       locked = true;
       if (fullBackups.recoveryRequired()) throw new IllegalStateException("RESTORE_RECOVERY_REQUIRED");
+
+      job = transition(job, "PREFLIGHT", null, 5, null, null, null, null, Map.of());
       boolean startedOnline = !service.stopped();
       long revision = paperRevision.getAsLong();
       audit(
@@ -258,44 +290,112 @@ public final class MaintenanceManager implements AutoCloseable {
           job.jobId(),
           "",
           Map.of("initialServerState", startedOnline ? "RUNNING" : "STOPPED"));
+
       if (startedOnline) {
+        // Paper command transport remains intentionally in place until the later decoupling step.
         if (!paperConnected.getAsBoolean()) throw new IllegalStateException("PAPER_OFFLINE");
-        publishPhase(job, "COUNTDOWN", Map.of());
-        if (!skipCountdown)
-          countdown(device, automatic, settings.restart().warningSeconds(), "weekly restore point");
-        job = state.update(job, "PREPARING", null);
-        publishPhase(job, "PREPARING", Map.of());
+        if (!skipCountdown) {
+          job = transition(job, "COUNTDOWN", null, 10, null, null, null, null, Map.of());
+          countdown(device, automatic, settings.restart().warningSeconds(), "full backup");
+        }
+
+        job = transition(job, "FINAL_SAVE", null, 20, null, null, null, null, Map.of());
         if (!paperLink.flush(device, automatic)) throw new IOException("PAPER_FLUSH_FAILED");
-        job = state.update(job, "STOPPING_SERVER", null);
-        publishPhase(job, "STOPPING_SERVER", Map.of());
+
+        job = transition(job, "STOPPING_SERVER", null, 30, null, null, null, null, Map.of());
         service.action("stop");
         stoppedByUs = true;
+        job = transition(job, "WAITING_FOR_STOP", null, 40, true, null, null, null, Map.of());
         waitStopped(settings.restart().stopTimeoutSeconds());
       } else {
-        job = state.update(job, "PREPARING", null);
-        publishPhase(job, "PREPARING", Map.of("serverAlreadyStopped", true));
+        job = transition(
+            job,
+            "PREFLIGHT",
+            null,
+            20,
+            false,
+            null,
+            null,
+            false,
+            Map.of("serverAlreadyStopped", true));
       }
-      job = state.update(job, "ARCHIVING", null);
-      publishPhase(job, "ARCHIVING", Map.of());
+
+      job = transition(job, "ARCHIVING", null, 50, stoppedByUs, null, null, null, Map.of());
       FullRestorePointManager.Metadata backup =
           fullBackups.createLocked(
               job.jobId(), actor(device, automatic), automatic, false, settings.fullRestorePoint(), true);
-      boolean startAfter = stoppedByUs && settings.fullRestorePoint().restartAfter();
-      job = state.update(job, startAfter ? "STARTING_SERVER" : "FINALIZING", backup.backupId());
-      publishPhase(
-          job,
-          startAfter ? "STARTING_SERVER" : "FINALIZING",
-          Map.of(
-              "backupId", backup.backupId(),
-              "local", backup.local(),
-              "offsite", backup.offsite(),
-              "verification", backup.verification(),
-              "preservedStoppedState", !stoppedByUs));
-      if (startAfter) {
-        service.action("start");
-        waitStarted(revision, settings.restart().startupTimeoutSeconds());
+
+      boolean providerConfigured = Boolean.TRUE.equals(fullBackups.providerStatus().get("configured"));
+      boolean localVerified = backup.local() && backup.sha256() != null && !backup.sha256().isBlank();
+      boolean remoteVerified = backup.offsite();
+      job =
+          transition(
+              job,
+              "VERIFYING_LOCAL",
+              backup.backupId(),
+              72,
+              stoppedByUs,
+              localVerified,
+              remoteVerified,
+              null,
+              Map.of("verification", backup.verification()));
+      if (!localVerified) throw new IOException("LOCAL_VERIFICATION_FAILED");
+
+      if (providerConfigured) {
+        job =
+            transition(
+                job,
+                "VERIFYING_REMOTE",
+                backup.backupId(),
+                82,
+                stoppedByUs,
+                true,
+                remoteVerified,
+                null,
+                Map.of("offsite", backup.offsite()));
       }
-      state.finish(job, "SUCCESS", backup.errorCode());
+
+      boolean startAfter = stoppedByUs && settings.fullRestorePoint().restartAfter();
+      if (startAfter) {
+        job =
+            transition(
+                job,
+                "STARTING_SERVER",
+                backup.backupId(),
+                90,
+                true,
+                true,
+                remoteVerified,
+                null,
+                Map.of());
+        service.action("start");
+        job =
+            transition(
+                job,
+                "VERIFYING_STARTUP",
+                backup.backupId(),
+                95,
+                true,
+                true,
+                remoteVerified,
+                null,
+                Map.of());
+        waitStarted(revision, settings.restart().startupTimeoutSeconds());
+        job =
+            transition(
+                job,
+                "VERIFYING_STARTUP",
+                backup.backupId(),
+                98,
+                false,
+                true,
+                remoteVerified,
+                false,
+                Map.of());
+      }
+
+      boolean degraded = providerConfigured && !remoteVerified;
+      state.finish(job, degraded ? "DEGRADED" : "SUCCESS", backup.errorCode());
       publish(
           "maintenance.completed",
           Map.of(
@@ -304,12 +404,10 @@ public final class MaintenanceManager implements AutoCloseable {
               "backupId", backup.backupId(),
               "local", true,
               "offsite", backup.offsite(),
-              "result", backup.offsite() || !fullBackups.providerStatus().get("configured").equals(Boolean.TRUE)
-                  ? "SUCCESS"
-                  : "DEGRADED"));
+              "result", degraded ? "DEGRADED" : "SUCCESS"));
       audit(
           "backup.full.create",
-          backup.offsite() || !Boolean.TRUE.equals(fullBackups.providerStatus().get("configured")) ? "SUCCESS" : "DEGRADED",
+          degraded ? "DEGRADED" : "SUCCESS",
           actor(device, automatic),
           automatic,
           job.jobId(),
@@ -318,12 +416,48 @@ public final class MaintenanceManager implements AutoCloseable {
               "sha256", backup.sha256(),
               "archiveBytes", backup.archiveBytes(),
               "offsite", backup.offsite(),
+              "localVerified", localVerified,
+              "remoteVerified", remoteVerified,
               "serverWasStoppedByMaintenance", stoppedByUs));
     } catch (Exception error) {
-      fail(job, device, automatic, "backup.full.create", error);
-      if (stoppedByUs) tryStartAfterFailure();
+      boolean recoveryRequired = stoppedByUs && !tryStartAfterFailure();
+      if (stoppedByUs && !recoveryRequired) job = clearStoppedFlag(job);
+      fail(job, device, automatic, "backup.full.create", error, recoveryRequired);
     } finally {
       if (locked) operationLock.unlock();
+    }
+  }
+
+  private MaintenanceStateStore.Job transition(
+      MaintenanceStateStore.Job job,
+      String phase,
+      String backupId,
+      Integer progress,
+      Boolean hostStoppedServer,
+      Boolean localVerified,
+      Boolean remoteVerified,
+      Boolean restartRecoveryRequired,
+      Map<String, Object> extra)
+      throws IOException {
+    MaintenanceStateStore.Job next =
+        state.transition(
+            job,
+            phase,
+            backupId,
+            progress,
+            hostStoppedServer,
+            localVerified,
+            remoteVerified,
+            restartRecoveryRequired);
+    publishPhase(next, extra);
+    return next;
+  }
+
+  private MaintenanceStateStore.Job clearStoppedFlag(MaintenanceStateStore.Job job) {
+    try {
+      return state.transition(job, job.phase(), null, job.progressPercent(), false, null, null, false);
+    } catch (Exception ignored) {
+      return job;
     }
   }
 
@@ -374,11 +508,13 @@ public final class MaintenanceManager implements AutoCloseable {
     TimeUnit.SECONDS.sleep(seconds);
   }
 
-  private void tryStartAfterFailure() {
+  private boolean tryStartAfterFailure() {
     try {
       if (service.stopped()) service.action("start");
+      return !service.stopped();
     } catch (Exception startFailure) {
       System.err.println("PlexonPanel Host could not recover server start after maintenance failure");
+      return false;
     }
   }
 
@@ -387,24 +523,52 @@ public final class MaintenanceManager implements AutoCloseable {
       DeviceRegistry.Device device,
       boolean automatic,
       String action,
-      Exception error) {
+      Exception error,
+      boolean recoveryRequired) {
     String code = classify(error);
     try {
-      state.finish(job, "FAILED", code);
+      if (recoveryRequired) {
+        state.finish(
+            job,
+            "RECOVERY_REQUIRED",
+            "RECOVERY_REQUIRED",
+            code,
+            "Server availability requires operator recovery verification.");
+      } else {
+        state.finish(job, "FAILED", code);
+      }
     } catch (Exception ignored) {
     }
     publish(
         "maintenance.failed",
-        Map.of("jobId", job.jobId(), "kind", job.kind(), "errorCode", code));
-    audit(action, "FAILED", actor(device, automatic), automatic, job.jobId(), job.backupId(), Map.of("errorCode", code));
+        Map.of(
+            "jobId", job.jobId(),
+            "kind", job.kind(),
+            "errorCode", code,
+            "recoveryRequired", recoveryRequired));
+    audit(
+        action,
+        recoveryRequired ? "RECOVERY_REQUIRED" : "FAILED",
+        actor(device, automatic),
+        automatic,
+        job.jobId(),
+        job.backupId(),
+        Map.of("errorCode", code, "recoveryRequired", recoveryRequired));
   }
 
-  private void publishPhase(MaintenanceStateStore.Job job, String phase, Map<String, Object> extra) {
+  private void publishPhase(MaintenanceStateStore.Job job, Map<String, Object> extra) {
     Map<String, Object> body = new LinkedHashMap<>();
     body.put("jobId", job.jobId());
     body.put("kind", job.kind());
-    body.put("phase", phase);
+    body.put("phase", job.phase());
+    body.put("phaseTimestamp", job.phaseTimestamp());
+    body.put("progressPercent", job.progressPercent());
     body.put("automatic", job.automatic());
+    body.put("hostStoppedServer", job.hostStoppedServer());
+    body.put("localBackupVerified", job.localBackupVerified());
+    body.put("remoteBackupVerified", job.remoteBackupVerified());
+    body.put("restartRecoveryRequired", job.restartRecoveryRequired());
+    if (job.backupId() != null && !job.backupId().isBlank()) body.put("backupId", job.backupId());
     body.put("capturedAt", Instant.now().toString());
     body.putAll(extra);
     publish("maintenance.phase", body);
@@ -441,8 +605,16 @@ public final class MaintenanceManager implements AutoCloseable {
     }
   }
 
-  private static String actor(DeviceRegistry.Device device, boolean automatic) {
+  private static String requesterDeviceId(DeviceRegistry.Device device, boolean automatic) {
+    return automatic ? "local-schedule" : device == null ? "local-host" : device.deviceId();
+  }
+
+  private static String requesterDeviceName(DeviceRegistry.Device device, boolean automatic) {
     return automatic ? "Host schedule" : device == null ? "Local host" : device.name();
+  }
+
+  private static String actor(DeviceRegistry.Device device, boolean automatic) {
+    return requesterDeviceName(device, automatic);
   }
 
   private static String humanDuration(int seconds) {
