@@ -35,9 +35,9 @@ class MaintenanceCountdownStateTest {
     var store = new MaintenanceStateStore(temporary);
     var job = store.begin("RESTART", null, false, "COUNTDOWN");
     store.beginCountdown(job, 900, Instant.parse("2026-09-14T12:00:00Z"));
-    job = store.update(job, "FINAL_SAVE", null);
+    var finalSave = store.update(job, "FINAL_SAVE", null);
 
-    Exception error = assertThrows(Exception.class, () -> store.countdown(job));
+    Exception error = assertThrows(Exception.class, () -> store.countdown(finalSave));
     assertEquals("COUNTDOWN_STATE_INVALID", error.getMessage());
   }
 
