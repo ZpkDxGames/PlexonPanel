@@ -62,7 +62,7 @@ class RconSaveFlushAffirmationTest {
       var result = channel.saveAllFlush();
       assertFalse(result.success());
       assertEquals("RCON_COMMAND_REJECTED", result.code());
-      assertFalse(result.toString().contains(commandResponse));
+      if (!commandResponse.isEmpty()) assertFalse(result.toString().contains(commandResponse));
       serving.get(2, TimeUnit.SECONDS);
     }
   }
