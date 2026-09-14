@@ -59,6 +59,8 @@ A full backup countdown is Host-owned and uses exactly these boundaries:
 - 15 seconds
 - 5 seconds
 
+The Host action router enforces this full-backup countdown and does not honor a dashboard-supplied countdown-skip hint for `maintenance.full-backup.create`.
+
 The 30-minute warning is due immediately when the countdown is created. The countdown deadline and consumed warning boundaries are persisted under the Host data directory. If the Host restarts during the countdown, it resumes from that durable deadline, does not replay consumed warnings, records boundaries missed while offline, and continues with the next valid boundary.
 
 Immediately before shutdown, the Host executes `save-all flush`. A timeout, authentication failure, malformed RCON response, inaccessible secret, blank response, explicit command rejection, or other negative command result fails the maintenance job before the stop continuation can execute. A protocol-valid RCON packet alone is not sufficient to affirm the final save. The server is left running in that case.
