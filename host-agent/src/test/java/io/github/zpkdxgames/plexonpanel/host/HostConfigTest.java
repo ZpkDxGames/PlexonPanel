@@ -58,8 +58,6 @@ class HostConfigTest {
         "settings.view",
         "audit.view.self",
         "audit.view",
-        "devices.view",
-        "devices.revoke",
         "server.start",
         "server.stop",
         "server.restart",
@@ -94,6 +92,16 @@ class HostConfigTest {
     Map<String, Boolean> capabilities = loaded.effectiveCapabilities();
     for (String scope : hostSupported())
       assertTrue(capabilities.get(scope), () -> "Expected Host capability: " + scope);
+  }
+
+  @Test
+  void hostDeviceManagementRemainsPaperAuthoritative() throws Exception {
+    JsonObject c = config();
+    c.getAsJsonObject("capabilities").addProperty("devices.view", true);
+    c.getAsJsonObject("capabilities").addProperty("devices.revoke", true);
+    Map<String, Boolean> capabilities = load(c).effectiveCapabilities();
+    assertFalse(capabilities.get("devices.view"));
+    assertFalse(capabilities.get("devices.revoke"));
   }
 
   @Test

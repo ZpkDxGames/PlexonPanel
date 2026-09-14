@@ -81,6 +81,13 @@ public final class AgentRuntime implements AutoCloseable {
           switch (message.envelope().type()) {
             case "backup.coordination" -> backupCoordinator.accept(message);
             case "maintenance.coordination" -> maintenanceCoordinator.accept(message);
+            case "access.authority.request" -> {
+              try {
+                actions.syncAccess();
+              } catch (java.io.IOException error) {
+                throw new IllegalStateException("Host access authority refresh failed", error);
+              }
+            }
             case "console.authority" ->
                 console.setHostAuthority(
                     message.body().has("hostAuthoritative")

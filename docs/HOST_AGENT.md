@@ -7,10 +7,10 @@ The host runs Java 25 as a dedicated non-root Linux user, with no inbound listen
 Use a disposable server first. Adjust the example user, paths and `plexoncraft.service` consistently.
 
 1. Install Java 25 and verify `/usr/bin/java -version`. Install `/usr/bin/rclone` only for optional offsite backups.
-2. Create `plexonpanel-host` as a system user with its own private group and no login shell. Create `plexonpanel-access`; add Paper and host users to it and restart services after group changes.
+2. Create `plexonpanel-host` as a system user with its own private group and no login shell. Paper and Host no longer need a permanently shared access-registry group merely for authorization.
 3. Install the JAR under root-owned `/opt/plexonpanel-host/`. Install root-owned `/etc/plexonpanel-host/host-config.json` mode 0640, readable by the private host group. The host user must not modify its JAR/config/unit/polkit rule.
-4. Create `/var/lib/plexonpanel-host` and `/var/backups/plexonpanel`, host-owned mode 0700. Backups must be outside the live root. Configure only needed top-level include names.
-5. Start Paper once to generate `plugins/PlexonPanel/access/devices.json`. Make **only the access directory** group-owned by `plexonpanel-access`, mode 2770 (setgid), and registry/lock files 0660. Parents need traversal rights. Never share private Paper keys or recursively loosen server permissions.
+4. Create `/var/lib/plexonpanel-host` and `/var/backups/plexonpanel`, host-owned mode 0700. The Host keeps its durable authorization mirror at `/var/lib/plexonpanel-host/access/devices.json`; the directory is 0700 and mirror/lock files are 0600. Backups must be outside the live root.
+5. Existing installations may leave `accessRegistry` pointed at Paper's `plugins/PlexonPanel/access/devices.json` for one-time migration. If no Host mirror exists yet, Host imports that validated registry once. After the mirror exists, Host starts and authenticates paired devices without touching the Paper/plugin path. New grants and revocations arrive as validated Paper-authoritative relay snapshots. Do not copy private keys or loosen the whole server tree.
 6. Grant host OS read/write access only to paths needed by enabled features. The unit's writable mount allowlist does not grant ownership. Test denied paths. Agents do not need each other's private keys.
 7. Initialize as the host user:
 
@@ -25,7 +25,7 @@ Copy only its printed public key to Paper `host.public-key`; copy the existing P
 
 ## Full local Host capabilities
 
-The 3.0.1 full-control example enables telemetry, server status/start/stop/restart, all implemented file operations, the complete backup family, audit, devices and settings. Effective backup capability still requires `backups.enabled`; restore additionally requires `restoreEnabled`. HostConfig continues rejecting Paper-only scope families. File operations remain confined under `serverRoot`, and lifecycle actions remain bound to the validated exact systemd service name.
+The full-control example enables telemetry, server status/start/stop/restart, all implemented file operations, the complete backup family, audit and settings. Device pairing/revocation remains Paper-authoritative even if legacy config still lists `devices.*`; Host effective capabilities force those mutations off so an explicit HOST-targeted access change fails closed. Existing paired credentials continue to authorize Host actions from the private mirror while Paper is offline. Effective backup capability still requires `backups.enabled`; restore additionally requires `restoreEnabled`. HostConfig continues rejecting Paper-only scope families. File operations remain confined under `serverRoot`, and lifecycle actions remain bound to the validated exact systemd service name.
 
 ## Backups
 
