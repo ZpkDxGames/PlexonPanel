@@ -161,7 +161,11 @@ class HostConfigTest {
 
   @Test
   void defaultsCannotInvokeShellOrUnconfiguredServices() throws Exception {
-    assertFalse(load(config()).effectiveCapabilities().get("server.start"));
+    HostConfig loaded = load(config());
+    assertFalse(loaded.effectiveCapabilities().get("server.start"));
+    assertFalse(loaded.maintenanceCommand().enabled());
+    assertEquals("127.0.0.1", loaded.maintenanceCommand().host());
+    assertTrue(Path.of(loaded.maintenanceCommand().secretFile()).isAbsolute());
     for (String service :
         List.of("*", "../ssh.service", "plexoncraft.service;id", "--all", "ssh.service extra")) {
       var c = config();
@@ -171,6 +175,36 @@ class HostConfigTest {
     var c = config();
     c.getAsJsonObject("capabilities").addProperty("shell.execute", true);
     assertThrows(IllegalArgumentException.class, () -> load(c));
+  }
+
+  @Test
+  void maintenanceCommandChannelIsLoopbackOnlyAndSecretIsHostLocal() throws Exception {
+    JsonObject valid = config();
+    JsonObject command = new JsonObject();
+    command.addProperty("enabled", true);
+    command.addProperty("host", "127.0.0.1");
+    command.addProperty("port", 25575);
+    command.addProperty("secretFile", root.resolve("rcon.password").toString());
+    command.addProperty("commandTimeoutSeconds", 5);
+    command.addProperty("readinessTimeoutSeconds", 180);
+    valid.add("maintenanceCommand", command);
+    HostConfig loaded = load(valid);
+    assertTrue(loaded.maintenanceCommand().enabled());
+    assertEquals(25575, loaded.maintenanceCommand().port());
+
+    for (String host : List.of("0.0.0.0", "192.0.2.10", "rcon.example")) {
+      JsonObject rejected = config();
+      JsonObject bad = command.deepCopy();
+      bad.addProperty("host", host);
+      rejected.add("maintenanceCommand", bad);
+      assertThrows(IllegalArgumentException.class, () -> load(rejected), host);
+    }
+
+    JsonObject relative = config();
+    JsonObject badSecret = command.deepCopy();
+    badSecret.addProperty("secretFile", "rcon.password");
+    relative.add("maintenanceCommand", badSecret);
+    assertThrows(IllegalArgumentException.class, () -> load(relative));
   }
 
   @Test
