@@ -10,9 +10,9 @@ import java.util.*;
 /**
  * Host-owned, non-secret maintenance configuration edited through the control plane.
  *
- * <p>Live snapshots intentionally remain governed only by HostConfig.backups.intervalMinutes in
- * protocol 3. The former liveSnapshot calendar field was never executed and is deliberately not
- * represented here; Gson safely ignores that legacy JSON member when loading older settings.
+ * <p>Full backups are manual-only. Gson intentionally ignores legacy full-restore-point schedule
+ * members when loading older settings, and saving this schema removes them. Restart-only scheduling
+ * remains an independent feature.
  */
 public record MaintenanceSettings(
     int schemaVersion, String timezone, Restart restart, FullRestorePoint fullRestorePoint) {
@@ -35,7 +35,6 @@ public record MaintenanceSettings(
   }
 
   public record FullRestorePoint(
-      Schedule schedule,
       String retentionMode,
       int retentionCount,
       boolean restartAfter,
@@ -51,14 +50,11 @@ public record MaintenanceSettings(
 
   public static MaintenanceSettings migratedDefaults() {
     Schedule disabledDaily = new Schedule(false, "DAILY", List.of(), "04:00");
-    Schedule disabledWeekly =
-        new Schedule(false, "WEEKLY", List.of(DayOfWeek.SUNDAY.name()), "04:00");
     return new MaintenanceSettings(
         1,
         "America/Sao_Paulo",
         new Restart(disabledDaily, List.of(900, 300, 60, 30, 10), 180, 180),
         new FullRestorePoint(
-            disabledWeekly,
             "SINGLE_CURRENT",
             1,
             true,
@@ -99,7 +95,6 @@ public record MaintenanceSettings(
     if (settings.restart == null || settings.fullRestorePoint == null)
       throw new IllegalArgumentException("Incomplete maintenance settings");
     validateSchedule(settings.restart.schedule);
-    validateSchedule(settings.fullRestorePoint.schedule);
     if (settings.restart.warningSeconds.size() > 16
         || settings.restart.warningSeconds.stream().anyMatch(v -> v == null || v < 0 || v > 86_400)
         || settings.restart.stopTimeoutSeconds < 30
