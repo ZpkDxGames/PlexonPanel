@@ -55,7 +55,7 @@ class MaintenanceStateStoreTest {
   void secondJobIsBlockedWhileNormalJobIsRunningWithoutCallingItRecovery() throws Exception {
     var store = new MaintenanceStateStore(temporary);
     var job = store.begin("FULL_RESTORE_POINT", null, false, "QUEUED");
-    job = store.transition(job, "COUNTDOWN", null, 10, false, false, false, false);
+    job = store.transition(job, "PREFLIGHT", null, 5, false, false, false, false);
 
     assertNotNull(store.blocking());
     assertNull(store.recoveryRequired());
@@ -72,7 +72,7 @@ class MaintenanceStateStoreTest {
     var job =
         store.begin(
             "FULL_RESTORE_POINT", null, false, "QUEUED", "device-123", "Owner desktop");
-    job = store.transition(job, "COUNTDOWN", null, 10, false, false, false, false);
+    job = store.transition(job, "PREFLIGHT", null, 5, false, false, false, false);
 
     var restarted = new MaintenanceStateStore(temporary);
     var recovered = restarted.recoverInterrupted();
@@ -82,6 +82,39 @@ class MaintenanceStateStoreTest {
     assertFalse(recovered.restartRecoveryRequired());
     assertNull(restarted.recoveryRequired());
     assertNull(restarted.blocking());
+  }
+
+  @Test
+  void countdownStateSurvivesHostRestartForResume() throws Exception {
+    var store = new MaintenanceStateStore(temporary);
+    var job =
+        store.begin(
+            "FULL_RESTORE_POINT", null, false, "QUEUED", "device-123", "Owner desktop");
+    Instant deadline = Instant.parse("2026-09-14T13:00:00Z");
+    job = store.startCountdown(job, deadline);
+    job = store.markWarningEmitted(job, 1800);
+
+    var restarted = new MaintenanceStateStore(temporary);
+    var recovered = restarted.recoverInterrupted();
+    assertNotNull(recovered);
+    assertEquals("COUNTDOWN", recovered.phase());
+    assertEquals(deadline.toString(), recovered.countdownDeadline());
+    assertEquals(java.util.List.of(1800), recovered.emittedWarningSeconds());
+    assertEquals("RESUMED_AFTER_HOST_RESTART", recovered.countdownRecovery());
+    assertNotNull(restarted.blocking());
+    assertNull(restarted.recoveryRequired());
+  }
+
+  @Test
+  void countdownWithoutDurableDeadlineFailsClosed() throws Exception {
+    var store = new MaintenanceStateStore(temporary);
+    var job = store.begin("FULL_RESTORE_POINT", null, false, "QUEUED");
+    job = store.transition(job, "COUNTDOWN", null, 10, false, false, false, false);
+
+    var restarted = new MaintenanceStateStore(temporary);
+    var failed = restarted.recoverInterrupted();
+    assertEquals("FAILED", failed.phase());
+    assertEquals("COUNTDOWN_STATE_INVALID", failed.errorCode());
   }
 
   @Test
