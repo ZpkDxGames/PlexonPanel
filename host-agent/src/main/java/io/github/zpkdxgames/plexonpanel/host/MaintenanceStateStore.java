@@ -5,6 +5,7 @@ import io.github.zpkdxgames.plexonpanel.util.AtomicFiles;
 import java.io.IOException;
 import java.nio.file.*;
 import java.time.Instant;
+import java.time.format.DateTimeParseException;
 import java.util.*;
 
 /** Durable scheduler claims and Host-authoritative destructive-job state. */
@@ -29,12 +30,22 @@ public final class MaintenanceStateStore {
       boolean hostStoppedServer,
       boolean localBackupVerified,
       boolean remoteBackupVerified,
-      boolean restartRecoveryRequired) {}
+      boolean restartRecoveryRequired,
+      String countdownDeadline,
+      List<Integer> emittedWarningSeconds,
+      List<Integer> skippedWarningSeconds,
+      String countdownRecovery) {
+    public Job {
+      emittedWarningSeconds =
+          emittedWarningSeconds == null ? List.of() : List.copyOf(emittedWarningSeconds);
+      skippedWarningSeconds =
+          skippedWarningSeconds == null ? List.of() : List.copyOf(skippedWarningSeconds);
+    }
+  }
 
   private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
   private static final Set<String> TERMINAL_PHASES = Set.of("COMPLETED", "DEGRADED", "FAILED");
-  private static final Set<String> PRE_DESTRUCTIVE_PHASES =
-      Set.of("QUEUED", "PREFLIGHT", "COUNTDOWN", "FINAL_SAVE");
+  private static final Set<String> PRE_DESTRUCTIVE_PHASES = Set.of("QUEUED", "PREFLIGHT", "FINAL_SAVE");
   private static final Set<String> AMBIGUOUS_DESTRUCTIVE_PHASES =
       Set.of(
           "STOPPING_SERVER",
@@ -107,7 +118,11 @@ public final class MaintenanceStateStore {
             false,
             false,
             false,
-            false);
+            false,
+            "",
+            List.of(),
+            List.of(),
+            "");
     write(job);
     return job;
   }
@@ -152,9 +167,106 @@ public final class MaintenanceStateStore {
             remoteBackupVerified == null ? job.remoteBackupVerified() : remoteBackupVerified,
             restartRecoveryRequired == null
                 ? job.restartRecoveryRequired()
-                : restartRecoveryRequired);
+                : restartRecoveryRequired,
+            safe(job.countdownDeadline()),
+            normalizeWarnings(job.emittedWarningSeconds()),
+            normalizeWarnings(job.skippedWarningSeconds()),
+            boundedMessage(job.countdownRecovery()));
     write(next);
     return next;
+  }
+
+  public synchronized Job startCountdown(Job job, Instant deadline) throws IOException {
+    Objects.requireNonNull(job, "job");
+    Objects.requireNonNull(deadline, "deadline");
+    String existing = safe(job.countdownDeadline());
+    String effectiveDeadline = existing.isBlank() ? deadline.toString() : validateDeadline(existing);
+    Job phased = transition(job, "COUNTDOWN", job.backupId(), null, null, null, null, null);
+    Job next =
+        copyCountdown(
+            phased,
+            effectiveDeadline,
+            existing.isBlank() ? List.of() : phased.emittedWarningSeconds(),
+            existing.isBlank() ? List.of() : phased.skippedWarningSeconds(),
+            phased.countdownRecovery());
+    write(next);
+    return next;
+  }
+
+  public synchronized Job markWarningEmitted(Job job, int remainingSeconds) throws IOException {
+    return markWarning(job, remainingSeconds, true);
+  }
+
+  public synchronized Job markWarningSkipped(Job job, int remainingSeconds) throws IOException {
+    return markWarning(job, remainingSeconds, false);
+  }
+
+  public synchronized Job recordCountdownRecovery(Job job, String behavior) throws IOException {
+    Job next =
+        copyCountdown(
+            job,
+            validateDeadline(job.countdownDeadline()),
+            job.emittedWarningSeconds(),
+            job.skippedWarningSeconds(),
+            boundedMessage(behavior));
+    write(next);
+    return next;
+  }
+
+  private Job markWarning(Job job, int remainingSeconds, boolean emitted) throws IOException {
+    if (remainingSeconds < 1 || remainingSeconds > 86_400)
+      throw new IllegalArgumentException("Invalid warning boundary");
+    List<Integer> emittedValues = new ArrayList<>(normalizeWarnings(job.emittedWarningSeconds()));
+    List<Integer> skippedValues = new ArrayList<>(normalizeWarnings(job.skippedWarningSeconds()));
+    List<Integer> target = emitted ? emittedValues : skippedValues;
+    List<Integer> other = emitted ? skippedValues : emittedValues;
+    other.remove(Integer.valueOf(remainingSeconds));
+    if (!target.contains(remainingSeconds)) target.add(remainingSeconds);
+    emittedValues = new ArrayList<>(normalizeWarnings(emittedValues));
+    skippedValues = new ArrayList<>(normalizeWarnings(skippedValues));
+    Job next =
+        copyCountdown(
+            job,
+            validateDeadline(job.countdownDeadline()),
+            emittedValues,
+            skippedValues,
+            job.countdownRecovery());
+    write(next);
+    return next;
+  }
+
+  private static Job copyCountdown(
+      Job job,
+      String deadline,
+      List<Integer> emitted,
+      List<Integer> skipped,
+      String recovery) {
+    String now = Instant.now().toString();
+    return new Job(
+        job.jobId(),
+        job.kind(),
+        safe(job.requesterDeviceId()),
+        safe(job.requesterDeviceName()),
+        job.phase(),
+        safe(job.phaseTimestamp()),
+        safe(job.scheduledOccurrence()),
+        safe(job.startedAt()),
+        now,
+        safe(job.completedAt()),
+        safe(job.result()),
+        safe(job.errorCode()),
+        boundedMessage(job.errorMessage()),
+        safe(job.backupId()),
+        clampProgress(job.progressPercent()),
+        job.automatic(),
+        job.hostStoppedServer(),
+        job.localBackupVerified(),
+        job.remoteBackupVerified(),
+        job.restartRecoveryRequired(),
+        validateDeadline(deadline),
+        normalizeWarnings(emitted),
+        normalizeWarnings(skipped),
+        boundedMessage(recovery));
   }
 
   public synchronized Job finish(Job job, String result, String errorCode) throws IOException {
@@ -200,20 +312,35 @@ public final class MaintenanceStateStore {
             job.hostStoppedServer(),
             job.localBackupVerified(),
             job.remoteBackupVerified(),
-            "RECOVERY_REQUIRED".equals(normalizedPhase) || job.restartRecoveryRequired());
+            "RECOVERY_REQUIRED".equals(normalizedPhase) || job.restartRecoveryRequired(),
+            safe(job.countdownDeadline()),
+            normalizeWarnings(job.emittedWarningSeconds()),
+            normalizeWarnings(job.skippedWarningSeconds()),
+            boundedMessage(job.countdownRecovery()));
     write(finished);
     if (terminal(finished)) appendHistory(finished);
     return finished;
   }
 
   /**
-   * Classifies a job left non-terminal by a Host process restart. Before the stop boundary the job
-   * is safely failed. At or after that boundary, the Host preserves an explicit recovery gate rather
-   * than guessing whether Minecraft is safe to restart or whether archive mutation completed.
+   * Classifies a job left non-terminal by a Host process restart. A countdown is resumable because
+   * its absolute deadline and already-emitted warning boundaries are durable. Before or after that
+   * resumable phase, the existing fail-closed destructive-state rules remain in force.
    */
   public synchronized Job recoverInterrupted() throws IOException {
     Job job = active();
     if (job == null || terminal(job) || "RECOVERY_REQUIRED".equals(job.phase())) return job;
+
+    if ("COUNTDOWN".equals(job.phase())) {
+      if (!validDeadline(job.countdownDeadline()))
+        return finishAs(
+            job,
+            "FAILED",
+            "FAILED",
+            "COUNTDOWN_STATE_INVALID",
+            "The Host cannot safely resume a maintenance countdown without its durable deadline.");
+      return recordCountdownRecovery(job, "RESUMED_AFTER_HOST_RESTART");
+    }
 
     if (PRE_DESTRUCTIVE_PHASES.contains(job.phase()))
       return finishAs(
@@ -337,6 +464,8 @@ public final class MaintenanceStateStore {
     String phaseTimestamp = safe(job.phaseTimestamp());
     if (phaseTimestamp.isEmpty()) phaseTimestamp = updated.isEmpty() ? started : updated;
     String phase = normalizePhase(job.phase());
+    String deadline = safe(job.countdownDeadline());
+    if (!deadline.isBlank()) deadline = validateDeadline(deadline);
     return new Job(
         job.jobId(),
         safe(job.kind()),
@@ -357,7 +486,44 @@ public final class MaintenanceStateStore {
         job.hostStoppedServer(),
         job.localBackupVerified(),
         job.remoteBackupVerified(),
-        job.restartRecoveryRequired());
+        job.restartRecoveryRequired(),
+        deadline,
+        normalizeWarnings(job.emittedWarningSeconds()),
+        normalizeWarnings(job.skippedWarningSeconds()),
+        boundedMessage(job.countdownRecovery()));
+  }
+
+  private static List<Integer> normalizeWarnings(List<Integer> values) {
+    if (values == null || values.isEmpty()) return List.of();
+    TreeSet<Integer> sorted = new TreeSet<>(Comparator.reverseOrder());
+    for (Integer value : values) {
+      if (value == null || value < 1 || value > 86_400)
+        throw new IllegalArgumentException("Invalid persisted maintenance warning boundary");
+      sorted.add(value);
+      if (sorted.size() > 32)
+        throw new IllegalArgumentException("Too many persisted maintenance warning boundaries");
+    }
+    return List.copyOf(sorted);
+  }
+
+  private static String validateDeadline(String value) {
+    String deadline = safe(value);
+    try {
+      Instant.parse(deadline);
+      return deadline;
+    } catch (DateTimeParseException invalid) {
+      throw new IllegalArgumentException("Invalid persisted maintenance countdown deadline", invalid);
+    }
+  }
+
+  private static boolean validDeadline(String value) {
+    if (safe(value).isBlank()) return false;
+    try {
+      Instant.parse(value);
+      return true;
+    } catch (DateTimeParseException invalid) {
+      return false;
+    }
   }
 
   private static String normalizePhase(String value) {
