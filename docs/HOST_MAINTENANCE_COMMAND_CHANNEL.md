@@ -59,12 +59,14 @@ A full backup countdown is Host-owned and uses exactly these boundaries:
 - 15 seconds
 - 5 seconds
 
+The Host action router enforces this full-backup countdown and does not honor a dashboard-supplied countdown-skip hint for `maintenance.full-backup.create`.
+
 The 30-minute warning is due immediately when the countdown is created. The countdown deadline and consumed warning boundaries are persisted under the Host data directory. If the Host restarts during the countdown, it resumes from that durable deadline, does not replay consumed warnings, records boundaries missed while offline, and continues with the next valid boundary.
 
-Immediately before shutdown, the Host executes `save-all flush`. A timeout, authentication failure, malformed RCON response, inaccessible secret, or other negative command result fails the maintenance job before the stop continuation can execute. The server is left running in that case.
+Immediately before shutdown, the Host executes `save-all flush`. A timeout, authentication failure, malformed RCON response, inaccessible secret, blank response, explicit command rejection, or other negative command result fails the maintenance job before the stop continuation can execute. A protocol-valid RCON packet alone is not sufficient to affirm the final save. The server is left running in that case.
 
 After a maintenance-controlled start, readiness requires both an active systemd service and a successful fixed RCON readiness probe. Paper/PlexonPanel plugin reconnection is no longer required for this maintenance command path.
 
 ## Error classifications
 
-Expected safe error codes include `COMMAND_CHANNEL_DISABLED`, `RCON_SECRET_INVALID`, `RCON_SECRET_PERMISSIONS`, `RCON_AUTH_FAILED`, `RCON_TIMEOUT`, `RCON_UNAVAILABLE`, `RCON_TARGET_NOT_LOOPBACK`, `RCON_PROTOCOL_ERROR`, `RCON_IO_FAILED`, and `SERVER_READINESS_TIMEOUT`. These codes intentionally do not contain the password or raw RCON response text.
+Expected safe error codes include `COMMAND_CHANNEL_DISABLED`, `RCON_SECRET_INVALID`, `RCON_SECRET_PERMISSIONS`, `RCON_AUTH_FAILED`, `RCON_TIMEOUT`, `RCON_UNAVAILABLE`, `RCON_TARGET_NOT_LOOPBACK`, `RCON_PROTOCOL_ERROR`, `RCON_COMMAND_REJECTED`, `RCON_IO_FAILED`, and `SERVER_READINESS_TIMEOUT`. These codes intentionally do not contain the password or raw RCON response text.
