@@ -15,8 +15,8 @@ class BackupSafetyTest {
   @TempDir Path temporary;
 
   private static String relayPublicKey() throws Exception {
-    return io.github.zpkdxgames.plexonpanel.identity.KeyCodec.encodePublic(
-        KeyPairGenerator.getInstance("Ed25519").generateKeyPair().getPublic());
+    return Base64.getEncoder()
+        .encodeToString(KeyPairGenerator.getInstance("Ed25519").generateKeyPair().getPublic().getEncoded());
   }
 
   BackupManager manager(Path root, long max) throws Exception {
