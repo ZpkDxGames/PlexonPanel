@@ -25,8 +25,6 @@ public final class AgentRuntime implements AutoCloseable {
   private final ControlEngine actions;
   private final ControlPolicy policy;
   private final DeviceRegistry devices;
-  private final io.github.zpkdxgames.plexonpanel.backup.BackupCoordinator backupCoordinator;
-  private final io.github.zpkdxgames.plexonpanel.backup.MaintenanceCoordinator maintenanceCoordinator;
   private final AtomicBoolean started = new AtomicBoolean();
   private final AtomicBoolean closed = new AtomicBoolean();
 
@@ -38,8 +36,7 @@ public final class AgentRuntime implements AutoCloseable {
       Path serverRoot)
       throws java.io.IOException {
     this.settings = settings;
-    this.policy =
-        ControlPolicy.load(plugin.getConfig(), settings, plugin.getDataFolder().toPath());
+    this.policy = ControlPolicy.load(plugin.getConfig(), settings, plugin.getDataFolder().toPath());
     this.devices =
         new DeviceRegistry(
             plugin.getDataFolder().toPath().resolve("access").resolve("devices.json"),
@@ -67,26 +64,17 @@ public final class AgentRuntime implements AutoCloseable {
             gateway,
             gateway::isAuthenticated,
             identity.serverId().toString());
-    backupCoordinator =
-        new io.github.zpkdxgames.plexonpanel.backup.BackupCoordinator(
-            plugin, devices, policy, gateway);
-    maintenanceCoordinator =
-        new io.github.zpkdxgames.plexonpanel.backup.MaintenanceCoordinator(
-            plugin, devices, policy, gateway);
     gateway.setInboundHandler(
         message -> {
-          switch (message.envelope().type()) {
-            case "backup.coordination" -> backupCoordinator.accept(message);
-            case "maintenance.coordination" -> maintenanceCoordinator.accept(message);
-            case "access.authority.request" -> {
-              try {
-                actions.syncAccess();
-              } catch (java.io.IOException error) {
-                throw new IllegalStateException("Host access authority refresh failed", error);
-              }
+          if (message.envelope().type().equals("access.authority.request")) {
+            try {
+              actions.syncAccess();
+            } catch (java.io.IOException error) {
+              throw new IllegalStateException("Host access authority refresh failed", error);
             }
-            default -> actions.accept(message);
+            return;
           }
+          actions.accept(message);
         });
     gateway.setConnectedHandler(
         () -> {
@@ -134,7 +122,6 @@ public final class AgentRuntime implements AutoCloseable {
   @Override
   public void close() {
     if (!closed.compareAndSet(false, true)) return;
-    backupCoordinator.close();
     actions.close();
     telemetry.close();
     presence.close();
