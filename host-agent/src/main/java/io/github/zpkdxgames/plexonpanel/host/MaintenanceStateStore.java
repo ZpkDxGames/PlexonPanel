@@ -7,22 +7,45 @@ import java.nio.file.*;
 import java.time.Instant;
 import java.util.*;
 
-/** Durable scheduler claims and destructive-job state. */
+/** Durable scheduler claims and Host-authoritative destructive-job state. */
 public final class MaintenanceStateStore {
   public record Job(
       String jobId,
       String kind,
+      String requesterDeviceId,
+      String requesterDeviceName,
       String phase,
+      String phaseTimestamp,
       String scheduledOccurrence,
       String startedAt,
       String updatedAt,
       String completedAt,
       String result,
       String errorCode,
+      String errorMessage,
       String backupId,
-      boolean automatic) {}
+      int progressPercent,
+      boolean automatic,
+      boolean hostStoppedServer,
+      boolean localBackupVerified,
+      boolean remoteBackupVerified,
+      boolean restartRecoveryRequired) {}
 
   private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
+  private static final Set<String> TERMINAL_PHASES = Set.of("COMPLETED", "DEGRADED", "FAILED");
+  private static final Set<String> PRE_DESTRUCTIVE_PHASES =
+      Set.of("QUEUED", "PREFLIGHT", "COUNTDOWN", "FINAL_SAVE");
+  private static final Set<String> AMBIGUOUS_DESTRUCTIVE_PHASES =
+      Set.of(
+          "STOPPING_SERVER",
+          "WAITING_FOR_STOP",
+          "ARCHIVING",
+          "VERIFYING_LOCAL",
+          "UPLOADING_REMOTE",
+          "VERIFYING_REMOTE",
+          "STARTING_SERVER",
+          "VERIFYING_STARTUP");
+
   private final Path directory, claimsFile, activeFile, historyFile;
 
   public MaintenanceStateStore(Path dataDirectory) throws IOException {
@@ -45,15 +68,32 @@ public final class MaintenanceStateStore {
 
   public synchronized Job begin(
       String kind, Instant occurrence, boolean automatic, String initialPhase) throws IOException {
-    Job existing = active();
-    if (existing != null && !terminal(existing))
-      throw new IllegalStateException("RECOVERY_REQUIRED");
+    return begin(kind, occurrence, automatic, initialPhase, "", automatic ? "Host schedule" : "Local host");
+  }
+
+  public synchronized Job begin(
+      String kind,
+      Instant occurrence,
+      boolean automatic,
+      String initialPhase,
+      String requesterDeviceId,
+      String requesterDeviceName)
+      throws IOException {
+    Job existing = blocking();
+    if (existing != null)
+      throw new IllegalStateException(
+          existing.restartRecoveryRequired() || "RECOVERY_REQUIRED".equals(existing.phase())
+              ? "RECOVERY_REQUIRED"
+              : "BUSY");
     String now = Instant.now().toString();
     Job job =
         new Job(
             UUID.randomUUID().toString(),
-            kind,
-            initialPhase,
+            requireToken(kind, "kind"),
+            safe(requesterDeviceId),
+            safe(requesterDeviceName),
+            normalizePhase(initialPhase),
+            now,
             occurrence == null ? "" : occurrence.toString(),
             now,
             now,
@@ -61,78 +101,220 @@ public final class MaintenanceStateStore {
             "",
             "",
             "",
-            automatic);
+            "",
+            0,
+            automatic,
+            false,
+            false,
+            false,
+            false);
     write(job);
     return job;
   }
 
   public synchronized Job update(Job job, String phase, String backupId) throws IOException {
+    return transition(job, phase, backupId, null, null, null, null, null);
+  }
+
+  public synchronized Job transition(
+      Job job,
+      String phase,
+      String backupId,
+      Integer progressPercent,
+      Boolean hostStoppedServer,
+      Boolean localBackupVerified,
+      Boolean remoteBackupVerified,
+      Boolean restartRecoveryRequired)
+      throws IOException {
+    Objects.requireNonNull(job, "job");
+    String normalizedPhase = normalizePhase(phase);
+    String now = Instant.now().toString();
     Job next =
         new Job(
-            job.jobId,
-            job.kind,
-            phase,
-            job.scheduledOccurrence,
-            job.startedAt,
-            Instant.now().toString(),
+            job.jobId(),
+            job.kind(),
+            safe(job.requesterDeviceId()),
+            safe(job.requesterDeviceName()),
+            normalizedPhase,
+            normalizedPhase.equals(job.phase()) ? safe(job.phaseTimestamp()) : now,
+            safe(job.scheduledOccurrence()),
+            safe(job.startedAt()),
+            now,
             "",
             "",
             "",
-            backupId == null ? job.backupId : backupId,
-            job.automatic);
+            "",
+            backupId == null ? safe(job.backupId()) : safe(backupId),
+            progressPercent == null ? job.progressPercent() : clampProgress(progressPercent),
+            job.automatic(),
+            hostStoppedServer == null ? job.hostStoppedServer() : hostStoppedServer,
+            localBackupVerified == null ? job.localBackupVerified() : localBackupVerified,
+            remoteBackupVerified == null ? job.remoteBackupVerified() : remoteBackupVerified,
+            restartRecoveryRequired == null
+                ? job.restartRecoveryRequired()
+                : restartRecoveryRequired);
     write(next);
     return next;
   }
 
   public synchronized Job finish(Job job, String result, String errorCode) throws IOException {
+    return finish(job, result, errorCode, safeErrorMessage(errorCode));
+  }
+
+  public synchronized Job finish(Job job, String result, String errorCode, String errorMessage)
+      throws IOException {
+    String finalPhase =
+        switch (safe(result)) {
+          case "SUCCESS", "SKIPPED" -> "COMPLETED";
+          case "DEGRADED" -> "DEGRADED";
+          case "RECOVERY_REQUIRED" -> "RECOVERY_REQUIRED";
+          default -> "FAILED";
+        };
+    return finishAs(job, finalPhase, result, errorCode, errorMessage);
+  }
+
+  private Job finishAs(
+      Job job, String finalPhase, String result, String errorCode, String errorMessage)
+      throws IOException {
+    Objects.requireNonNull(job, "job");
     String now = Instant.now().toString();
+    String normalizedPhase = normalizePhase(finalPhase);
     Job finished =
         new Job(
-            job.jobId,
-            job.kind,
-            "SUCCESS".equals(result) ? "COMPLETE" : "FAILED",
-            job.scheduledOccurrence,
-            job.startedAt,
+            job.jobId(),
+            job.kind(),
+            safe(job.requesterDeviceId()),
+            safe(job.requesterDeviceName()),
+            normalizedPhase,
             now,
+            safe(job.scheduledOccurrence()),
+            safe(job.startedAt()),
             now,
-            result,
-            errorCode == null ? "" : errorCode,
-            job.backupId,
-            job.automatic);
+            "RECOVERY_REQUIRED".equals(normalizedPhase) ? "" : now,
+            safe(result),
+            safe(errorCode),
+            boundedMessage(errorMessage),
+            safe(job.backupId()),
+            terminalProgress(normalizedPhase, job.progressPercent()),
+            job.automatic(),
+            job.hostStoppedServer(),
+            job.localBackupVerified(),
+            job.remoteBackupVerified(),
+            "RECOVERY_REQUIRED".equals(normalizedPhase) || job.restartRecoveryRequired());
     write(finished);
-    Files.writeString(
-        historyFile,
-        GSON.toJson(finished) + System.lineSeparator(),
-        StandardOpenOption.CREATE,
-        StandardOpenOption.APPEND,
-        StandardOpenOption.WRITE);
-    if (Files.size(historyFile) > 4 * 1024 * 1024) rotateHistory();
+    if (terminal(finished)) appendHistory(finished);
     return finished;
+  }
+
+  /**
+   * Classifies a job left non-terminal by a Host process restart. Before the stop boundary the job
+   * is safely failed. At or after that boundary, the Host preserves an explicit recovery gate rather
+   * than guessing whether Minecraft is safe to restart or whether archive mutation completed.
+   */
+  public synchronized Job recoverInterrupted() throws IOException {
+    Job job = active();
+    if (job == null || terminal(job) || "RECOVERY_REQUIRED".equals(job.phase())) return job;
+
+    if (PRE_DESTRUCTIVE_PHASES.contains(job.phase()))
+      return finishAs(
+          job,
+          "FAILED",
+          "FAILED",
+          "HOST_RESTART_INTERRUPTED",
+          "The Host restarted before the destructive maintenance phase began.");
+
+    if (job.localBackupVerified()
+        && !job.remoteBackupVerified()
+        && !job.hostStoppedServer()
+        && !job.restartRecoveryRequired())
+      return finishAs(
+          job,
+          "DEGRADED",
+          "DEGRADED",
+          "REMOTE_VERIFICATION_PENDING",
+          "A verified local backup exists; off-site verification is incomplete.");
+
+    if (job.hostStoppedServer()
+        || job.restartRecoveryRequired()
+        || AMBIGUOUS_DESTRUCTIVE_PHASES.contains(job.phase()))
+      return finishAs(
+          transition(job, job.phase(), job.backupId(), null, null, null, null, true),
+          "RECOVERY_REQUIRED",
+          "RECOVERY_REQUIRED",
+          "HOST_RESTART_RECOVERY_REQUIRED",
+          "The Host restarted after destructive maintenance may have begun; verify server state before retrying.");
+
+    return finishAs(
+        job,
+        "FAILED",
+        "FAILED",
+        "HOST_RESTART_INTERRUPTED",
+        "The Host restarted before the maintenance operation reached a recognized destructive phase.");
+  }
+
+  /** Returns the active job that must serialize any new destructive maintenance operation. */
+  public synchronized Job blocking() throws IOException {
+    Job job = active();
+    return job != null
+            && (!terminal(job)
+                || job.restartRecoveryRequired()
+                || "RECOVERY_REQUIRED".equals(job.phase()))
+        ? job
+        : null;
   }
 
   public synchronized Job recoveryRequired() throws IOException {
     Job job = active();
-    return job != null && !terminal(job) ? job : null;
+    return job != null
+            && (job.restartRecoveryRequired() || "RECOVERY_REQUIRED".equals(job.phase()))
+        ? job
+        : null;
   }
 
   public synchronized Job active() throws IOException {
     if (!Files.exists(activeFile)) return null;
     if (!Files.isRegularFile(activeFile, LinkOption.NOFOLLOW_LINKS)
         || Files.isSymbolicLink(activeFile)
-        || Files.size(activeFile) > 32_768)
+        || Files.size(activeFile) > 65_536)
       throw new IOException("Invalid maintenance job journal");
     Job job = GSON.fromJson(Files.readString(activeFile), Job.class);
-    if (job == null || job.jobId == null) throw new IOException("Invalid maintenance job state");
-    UUID.fromString(job.jobId);
-    return job;
+    if (job == null || job.jobId() == null) throw new IOException("Invalid maintenance job state");
+    UUID.fromString(job.jobId());
+    Job normalized = normalize(job);
+    if (!normalized.equals(job)) write(normalized);
+    return normalized;
   }
 
   public synchronized void markRecovered(Job job, String result) throws IOException {
-    finish(job, result, result.equals("SUCCESS") ? "" : "RECOVERY_REQUIRED");
+    Job cleared =
+        transition(
+            job,
+            "RECOVERY_REQUIRED",
+            job.backupId(),
+            null,
+            null,
+            null,
+            null,
+            false);
+    finish(cleared, result, "SUCCESS".equals(result) ? "" : "RECOVERY_REQUIRED");
+  }
+
+  static boolean terminal(Job job) {
+    return job != null && TERMINAL_PHASES.contains(safe(job.phase()));
   }
 
   private void write(Job job) throws IOException {
     AtomicFiles.writeUtf8(activeFile, GSON.toJson(job));
+  }
+
+  private void appendHistory(Job job) throws IOException {
+    Files.writeString(
+        historyFile,
+        GSON.toJson(job) + System.lineSeparator(),
+        StandardOpenOption.CREATE,
+        StandardOpenOption.APPEND,
+        StandardOpenOption.WRITE);
+    if (Files.size(historyFile) > 4 * 1024 * 1024) rotateHistory();
   }
 
   private LinkedHashMap<String, String> readClaims() throws IOException {
@@ -149,13 +331,84 @@ public final class MaintenanceStateStore {
     return result;
   }
 
-  private static boolean terminal(Job job) {
-    return Set.of("COMPLETE", "FAILED").contains(job.phase);
+  private static Job normalize(Job job) {
+    String updated = safe(job.updatedAt());
+    String started = safe(job.startedAt());
+    String phaseTimestamp = safe(job.phaseTimestamp());
+    if (phaseTimestamp.isEmpty()) phaseTimestamp = updated.isEmpty() ? started : updated;
+    String phase = normalizePhase(job.phase());
+    return new Job(
+        job.jobId(),
+        safe(job.kind()),
+        safe(job.requesterDeviceId()),
+        safe(job.requesterDeviceName()),
+        phase,
+        phaseTimestamp,
+        safe(job.scheduledOccurrence()),
+        started,
+        updated,
+        safe(job.completedAt()),
+        safe(job.result()),
+        safe(job.errorCode()),
+        boundedMessage(job.errorMessage()),
+        safe(job.backupId()),
+        clampProgress(job.progressPercent()),
+        job.automatic(),
+        job.hostStoppedServer(),
+        job.localBackupVerified(),
+        job.remoteBackupVerified(),
+        job.restartRecoveryRequired());
+  }
+
+  private static String normalizePhase(String value) {
+    return switch (safe(value)) {
+      case "" -> "QUEUED";
+      case "COMPLETE" -> "COMPLETED";
+      case "PREPARING" -> "FINAL_SAVE";
+      case "STOPPING" -> "STOPPING_SERVER";
+      case "UPLOADING" -> "UPLOADING_REMOTE";
+      case "STARTING" -> "STARTING_SERVER";
+      case "FINALIZING" -> "VERIFYING_REMOTE";
+      default -> requireToken(value, "phase");
+    };
+  }
+
+  private static int terminalProgress(String phase, int current) {
+    return "COMPLETED".equals(phase) ? 100 : clampProgress(current);
+  }
+
+  private static int clampProgress(int value) {
+    return Math.max(0, Math.min(100, value));
+  }
+
+  private static String safeErrorMessage(String code) {
+    String safeCode = safe(code);
+    return safeCode.isEmpty() ? "" : "Operation did not complete (" + safeCode + ").";
+  }
+
+  private static String boundedMessage(String value) {
+    String message = safe(value).replace('\n', ' ').replace('\r', ' ').trim();
+    return message.length() <= 320 ? message : message.substring(0, 320);
+  }
+
+  private static String requireToken(String value, String field) {
+    String token = safe(value);
+    if (!token.matches("[A-Z0-9_.-]{2,64}"))
+      throw new IllegalArgumentException("Invalid maintenance " + field);
+    return token;
+  }
+
+  private static String safe(String value) {
+    return value == null ? "" : value;
   }
 
   private void rotateHistory() throws IOException {
     Path old = directory.resolve("history.previous.jsonl");
     Files.deleteIfExists(old);
-    Files.move(historyFile, old, StandardCopyOption.ATOMIC_MOVE);
+    try {
+      Files.move(historyFile, old, StandardCopyOption.ATOMIC_MOVE);
+    } catch (AtomicMoveNotSupportedException unsupported) {
+      Files.move(historyFile, old, StandardCopyOption.REPLACE_EXISTING);
+    }
   }
 }
