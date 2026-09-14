@@ -17,14 +17,32 @@ public final class RcloneBackupProvider {
       String verifiedAt,
       String detail) {}
 
+  @FunctionalInterface
+  interface CommandRunner {
+    ProcessResult run(List<String> arguments, int timeoutSeconds) throws Exception;
+  }
+
+  record ProcessResult(int exitCode, String output) {}
+
   private static final int OUTPUT_LIMIT = 64 * 1024;
+  private static final int MAX_ATTEMPTS = 3;
   private final HostConfig.BackupConfig config;
+  private final CommandRunner commandRunner;
+  private final boolean enforceHostFiles;
   private volatile String lastTestAt = "";
   private volatile String lastTestState = "NOT_TESTED";
   private volatile String lastSuccessfulVerificationAt = "";
 
   public RcloneBackupProvider(HostConfig.BackupConfig config) {
     this.config = Objects.requireNonNull(config);
+    this.commandRunner = this::executeProcess;
+    this.enforceHostFiles = true;
+  }
+
+  RcloneBackupProvider(HostConfig.BackupConfig config, CommandRunner commandRunner) {
+    this.config = Objects.requireNonNull(config);
+    this.commandRunner = Objects.requireNonNull(commandRunner);
+    this.enforceHostFiles = false;
   }
 
   public boolean configured() {
@@ -61,7 +79,7 @@ public final class RcloneBackupProvider {
     long started = System.nanoTime();
     String checkedAt = Instant.now().toString();
     try {
-      requireConfigured();
+      requireConfigured(enforceHostFiles);
       run(
           List.of(
               config.rcloneExecutable(),
@@ -108,14 +126,16 @@ public final class RcloneBackupProvider {
       String canonicalFilename,
       int timeoutSeconds)
       throws Exception {
-    requireConfigured();
+    requireConfigured(enforceHostFiles);
     UUID.fromString(jobId);
     validateCanonical(canonicalFilename);
+    if (timeoutSeconds < 1) throw new IllegalArgumentException("Invalid upload timeout");
     if (!Files.isRegularFile(archive, LinkOption.NOFOLLOW_LINKS)
         || Files.isSymbolicLink(archive)
         || !Files.isRegularFile(metadata, LinkOption.NOFOLLOW_LINKS)
         || Files.isSymbolicLink(metadata)) throw new IOException("Local restore point is unavailable");
 
+    Deadline deadline = Deadline.after(timeoutSeconds);
     String root = remoteRoot(),
         canonicalZip = root + "/" + canonicalFilename,
         canonicalJson = root + "/" + canonicalFilename.substring(0, canonicalFilename.length() - 4) + ".json",
@@ -124,53 +144,62 @@ public final class RcloneBackupProvider {
         previousZip = root + "/staging/previous-" + jobId + ".zip",
         previousJson = root + "/staging/previous-" + jobId + ".json";
 
-    copyLocalToRemote(archive, stageZip, timeoutSeconds);
-    long localBytes = Files.size(archive), remoteBytes = remoteSize(stageZip, timeoutSeconds);
-    if (remoteBytes != localBytes) {
-      safeDelete(stageZip, timeoutSeconds);
+    long localBytes = Files.size(archive);
+    long metadataBytes = Files.size(metadata);
+    copyLocalToRemote(archive, stageZip, deadline);
+    if (remoteSize(stageZip, deadline) != localBytes) {
+      safeDelete(stageZip, deadline);
       throw new IOException("REMOTE_VERIFY_FAILED");
     }
-    copyLocalToRemote(metadata, stageJson, timeoutSeconds);
+    copyLocalToRemote(metadata, stageJson, deadline);
+    if (remoteSize(stageJson, deadline) != metadataBytes) {
+      safeDelete(stageJson, deadline);
+      throw new IOException("REMOTE_VERIFY_FAILED");
+    }
 
-    boolean hadZip = remoteExists(canonicalZip, timeoutSeconds),
-        hadJson = remoteExists(canonicalJson, timeoutSeconds);
-    if (hadZip) copyRemote(canonicalZip, previousZip, timeoutSeconds);
-    if (hadJson) copyRemote(canonicalJson, previousJson, timeoutSeconds);
+    boolean hadZip = remoteExists(canonicalZip, deadline),
+        hadJson = remoteExists(canonicalJson, deadline);
+    if (hadZip) copyRemote(canonicalZip, previousZip, deadline);
+    if (hadJson) copyRemote(canonicalJson, previousJson, deadline);
 
     try {
-      copyRemote(stageZip, canonicalZip, timeoutSeconds);
-      if (remoteSize(canonicalZip, timeoutSeconds) != localBytes)
+      copyRemote(stageZip, canonicalZip, deadline);
+      if (remoteSize(canonicalZip, deadline) != localBytes)
         throw new IOException("REMOTE_PROMOTION_FAILED");
-      copyRemote(stageJson, canonicalJson, timeoutSeconds);
+      copyRemote(stageJson, canonicalJson, deadline);
+      if (remoteSize(canonicalJson, deadline) != metadataBytes)
+        throw new IOException("REMOTE_PROMOTION_FAILED");
     } catch (Exception failure) {
-      try {
-        if (hadZip && remoteExists(previousZip, timeoutSeconds))
-          copyRemote(previousZip, canonicalZip, timeoutSeconds);
-        if (hadJson && remoteExists(previousJson, timeoutSeconds))
-          copyRemote(previousJson, canonicalJson, timeoutSeconds);
-      } catch (Exception ignored) {
-        // Preserve original failure. Previous objects remain in staging for manual recovery.
-      }
+      rollbackCanonical(
+          canonicalZip,
+          canonicalJson,
+          previousZip,
+          previousJson,
+          hadZip,
+          hadJson,
+          deadline);
       throw failure;
     }
 
-    safeDelete(stageZip, timeoutSeconds);
-    safeDelete(stageJson, timeoutSeconds);
-    safeDelete(previousZip, timeoutSeconds);
-    safeDelete(previousJson, timeoutSeconds);
+    safeDelete(stageZip, deadline);
+    safeDelete(stageJson, deadline);
+    safeDelete(previousZip, deadline);
+    safeDelete(previousJson, deadline);
     String verifiedAt = Instant.now().toString();
+    lastTestAt = verifiedAt;
+    lastTestState = "CONNECTED";
     lastSuccessfulVerificationAt = verifiedAt;
     return new Promotion(
         true,
         true,
         safeRemoteLabel() + "/" + canonicalFilename,
         verifiedAt,
-        "Remote staging verified before canonical promotion");
+        "Remote archive and metadata verified before canonical promotion");
   }
 
   public Path fetchCanonical(
       Path stagingDirectory, String canonicalFilename, int timeoutSeconds) throws Exception {
-    requireConfigured();
+    requireConfigured(enforceHostFiles);
     validateCanonical(canonicalFilename);
     Files.createDirectories(stagingDirectory);
     Path partial = stagingDirectory.resolve(canonicalFilename + ".download.partial"),
@@ -201,67 +230,100 @@ public final class RcloneBackupProvider {
     return complete;
   }
 
-  private void copyLocalToRemote(Path local, String remote, int timeout) throws Exception {
-    run(
-        List.of(
-            config.rcloneExecutable(),
-            "copyto",
-            local.toString(),
-            remote,
-            "--config",
-            config.rcloneConfig(),
-            "--transfers",
-            "1",
-            "--checkers",
-            "1",
-            "--log-level",
-            "ERROR"),
-        timeout);
-  }
-
-  private void copyRemote(String source, String destination, int timeout) throws Exception {
-    run(
-        List.of(
-            config.rcloneExecutable(),
-            "copyto",
-            source,
-            destination,
-            "--config",
-            config.rcloneConfig(),
-            "--transfers",
-            "1",
-            "--checkers",
-            "1",
-            "--log-level",
-            "ERROR"),
-        timeout);
-  }
-
-  private long remoteSize(String remote, int timeout) throws Exception {
-    String output =
-        run(
-            List.of(
-                config.rcloneExecutable(),
-                "lsl",
-                remote,
-                "--config",
-                config.rcloneConfig(),
-                "--max-depth",
-                "1"),
-            timeout);
-    for (String line : output.split("\\R")) {
-      String trimmed = line.trim();
-      if (trimmed.isEmpty()) continue;
-      String first = trimmed.split("\\s+", 2)[0];
-      try {
-        return Long.parseLong(first);
-      } catch (NumberFormatException ignored) {
-      }
+  private void rollbackCanonical(
+      String canonicalZip,
+      String canonicalJson,
+      String previousZip,
+      String previousJson,
+      boolean hadZip,
+      boolean hadJson,
+      Deadline deadline) {
+    try {
+      if (hadZip && remoteExists(previousZip, deadline)) copyRemote(previousZip, canonicalZip, deadline);
+      else if (!hadZip) safeDelete(canonicalZip, deadline);
+      if (hadJson && remoteExists(previousJson, deadline)) copyRemote(previousJson, canonicalJson, deadline);
+      else if (!hadJson) safeDelete(canonicalJson, deadline);
+    } catch (Exception ignored) {
+      // Preserve the primary failure. Previous verified objects remain staged for operator recovery.
     }
-    throw new IOException("REMOTE_VERIFY_FAILED");
   }
 
-  private boolean remoteExists(String remote, int timeout) throws Exception {
+  private void copyLocalToRemote(Path local, String remote, Deadline deadline) throws Exception {
+    retry(
+        deadline,
+        timeout -> {
+          run(
+              List.of(
+                  config.rcloneExecutable(),
+                  "copyto",
+                  local.toString(),
+                  remote,
+                  "--config",
+                  config.rcloneConfig(),
+                  "--transfers",
+                  "1",
+                  "--checkers",
+                  "1",
+                  "--log-level",
+                  "ERROR"),
+              timeout);
+          return null;
+        });
+  }
+
+  private void copyRemote(String source, String destination, Deadline deadline) throws Exception {
+    retry(
+        deadline,
+        timeout -> {
+          run(
+              List.of(
+                  config.rcloneExecutable(),
+                  "copyto",
+                  source,
+                  destination,
+                  "--config",
+                  config.rcloneConfig(),
+                  "--transfers",
+                  "1",
+                  "--checkers",
+                  "1",
+                  "--log-level",
+                  "ERROR"),
+              timeout);
+          return null;
+        });
+  }
+
+  private long remoteSize(String remote, Deadline deadline) throws Exception {
+    return retry(
+        deadline,
+        timeout -> {
+          String output =
+              run(
+                  List.of(
+                      config.rcloneExecutable(),
+                      "lsl",
+                      remote,
+                      "--config",
+                      config.rcloneConfig(),
+                      "--max-depth",
+                      "1"),
+                  timeout);
+          for (String line : output.split("\\R")) {
+            String trimmed = line.trim();
+            if (trimmed.isEmpty()) continue;
+            String first = trimmed.split("\\s+", 2)[0];
+            try {
+              return Long.parseLong(first);
+            } catch (NumberFormatException ignored) {
+            }
+          }
+          throw new IOException("REMOTE_VERIFY_FAILED");
+        });
+  }
+
+  private boolean remoteExists(String remote, Deadline deadline) throws Exception {
+    int timeout = deadline.remainingSeconds();
     ProcessResult result =
         runAllowFailure(
             List.of(
@@ -273,10 +335,14 @@ public final class RcloneBackupProvider {
                 "--max-depth",
                 "1"),
             timeout);
-    return result.exitCode == 0 && !result.output.isBlank();
+    if (result.exitCode == 0) return !result.output.isBlank();
+    if (result.exitCode == 3 || result.exitCode == 4) return false;
+    throw new IOException("RCLONE_COMMAND_FAILED");
   }
 
-  private void safeDelete(String remote, int timeout) {
+  private void safeDelete(String remote, Deadline deadline) {
+    int timeout = deadline.cleanupSeconds();
+    if (timeout <= 0) return;
     try {
       runAllowFailure(
           List.of(
@@ -290,16 +356,48 @@ public final class RcloneBackupProvider {
     }
   }
 
+  private <T> T retry(Deadline deadline, TimedOperation<T> operation) throws Exception {
+    Exception last = null;
+    for (int attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+      int timeout = deadline.remainingSeconds();
+      try {
+        return operation.run(timeout);
+      } catch (Exception failure) {
+        last = normalizeInterruption(failure);
+        if (terminal(last) || attempt == MAX_ATTEMPTS) throw last;
+        long pauseMillis = Math.min(1000L, 250L * attempt);
+        if (!deadline.canPause(pauseMillis)) throw new IOException("RCLONE_UPLOAD_TIMEOUT", last);
+        try {
+          Thread.sleep(pauseMillis);
+        } catch (InterruptedException interrupted) {
+          Thread.currentThread().interrupt();
+          throw new IOException("RCLONE_UPLOAD_INTERRUPTED", interrupted);
+        }
+      }
+    }
+    throw last == null ? new IOException("REMOTE_UPLOAD_FAILED") : last;
+  }
+
   private String run(List<String> arguments, int timeoutSeconds) throws Exception {
     ProcessResult result = runAllowFailure(arguments, timeoutSeconds);
-    if (result.exitCode != 0)
-      throw new IOException("Rclone operation failed with exit code " + result.exitCode);
+    if (result.exitCode != 0) throw new IOException("RCLONE_COMMAND_FAILED");
     return result.output;
   }
 
   private ProcessResult runAllowFailure(List<String> arguments, int timeoutSeconds) throws Exception {
-    if (!arguments.get(0).equals(config.rcloneExecutable()))
+    if (arguments.isEmpty() || !arguments.get(0).equals(config.rcloneExecutable()))
       throw new SecurityException("RCLONE_EXECUTABLE_MISMATCH");
+    if (timeoutSeconds < 1) throw new IOException("RCLONE_UPLOAD_TIMEOUT");
+    try {
+      ProcessResult result = commandRunner.run(List.copyOf(arguments), timeoutSeconds);
+      return new ProcessResult(result.exitCode, redact(result.output));
+    } catch (InterruptedException interrupted) {
+      Thread.currentThread().interrupt();
+      throw new IOException("RCLONE_UPLOAD_INTERRUPTED", interrupted);
+    }
+  }
+
+  private ProcessResult executeProcess(List<String> arguments, int timeoutSeconds) throws Exception {
     Process process = new ProcessBuilder(arguments).redirectErrorStream(true).start();
     CompletableFuture<String> output = new CompletableFuture<>();
     Thread.ofVirtual()
@@ -322,12 +420,12 @@ public final class RcloneBackupProvider {
               }
             });
     try {
-      if (!process.waitFor(Math.max(10, timeoutSeconds), TimeUnit.SECONDS)) {
+      if (!process.waitFor(timeoutSeconds, TimeUnit.SECONDS)) {
         process.destroyForcibly();
-        throw new IOException("Rclone operation timed out");
+        throw new IOException("RCLONE_COMMAND_TIMEOUT");
       }
-      String text = output.get(5, TimeUnit.SECONDS);
-      return new ProcessResult(process.exitValue(), redact(text));
+      String text = output.get(Math.min(5, timeoutSeconds), TimeUnit.SECONDS);
+      return new ProcessResult(process.exitValue(), text);
     } finally {
       if (process.isAlive()) process.destroyForcibly();
     }
@@ -342,12 +440,22 @@ public final class RcloneBackupProvider {
     return value.length() <= 220 ? value : value.substring(0, 220);
   }
 
-  private void requireConfigured() {
+  private void requireConfigured(boolean checkHostFiles) throws IOException {
     if (!configured()) throw new IllegalStateException("RCLONE_UNAVAILABLE");
     if (!"/usr/bin/rclone".equals(config.rcloneExecutable()))
       throw new IllegalStateException("RCLONE_CONFIG_INVALID");
+    if (config.rcloneConfig() == null) throw new IllegalStateException("RCLONE_CONFIG_INVALID");
     Path path = Path.of(config.rcloneConfig());
     if (!path.isAbsolute()) throw new IllegalStateException("RCLONE_CONFIG_INVALID");
+    if (!checkHostFiles) return;
+
+    Path executable = Path.of(config.rcloneExecutable());
+    if (!Files.isRegularFile(executable, LinkOption.NOFOLLOW_LINKS)
+        || Files.isSymbolicLink(executable)
+        || !Files.isExecutable(executable)) throw new IOException("RCLONE_EXECUTABLE_UNAVAILABLE");
+    if (!Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS)
+        || Files.isSymbolicLink(path)
+        || !Files.isReadable(path)) throw new IOException("RCLONE_CONFIG_UNREADABLE");
   }
 
   private static void validateCanonical(String filename) {
@@ -355,11 +463,73 @@ public final class RcloneBackupProvider {
       throw new IllegalArgumentException("Invalid canonical restore-point filename");
   }
 
+  private static Exception normalizeInterruption(Exception failure) {
+    if (failure instanceof InterruptedException) {
+      Thread.currentThread().interrupt();
+      return new IOException("RCLONE_UPLOAD_INTERRUPTED", failure);
+    }
+    return failure;
+  }
+
+  private static boolean terminal(Exception failure) {
+    String message = failure.getMessage();
+    return Thread.currentThread().isInterrupted()
+        || "RCLONE_UPLOAD_TIMEOUT".equals(message)
+        || "RCLONE_UPLOAD_INTERRUPTED".equals(message)
+        || "RCLONE_CONFIG_INVALID".equals(message)
+        || "RCLONE_EXECUTABLE_UNAVAILABLE".equals(message)
+        || "RCLONE_CONFIG_UNREADABLE".equals(message);
+  }
+
   private static String redact(String text) {
     if (text == null) return "";
-    String cleaned = text.replaceAll("(?i)(token|secret|password|client_secret)[^\\r\\n]{0,256}", "$1=[REDACTED]");
+    String cleaned =
+        text.replaceAll(
+            "(?i)(token|secret|password|client_secret)[^\\r\\n]{0,256}", "$1=[REDACTED]");
     return cleaned.length() > OUTPUT_LIMIT ? cleaned.substring(0, OUTPUT_LIMIT) : cleaned;
   }
 
-  private record ProcessResult(int exitCode, String output) {}
+  private interface TimedOperation<T> {
+    T run(int timeoutSeconds) throws Exception;
+  }
+
+  private static final class Deadline {
+    private final long expiresAtNanos;
+
+    private Deadline(long expiresAtNanos) {
+      this.expiresAtNanos = expiresAtNanos;
+    }
+
+    static Deadline after(int timeoutSeconds) {
+      long now = System.nanoTime();
+      long duration = TimeUnit.SECONDS.toNanos(timeoutSeconds);
+      long expires;
+      try {
+        expires = Math.addExact(now, duration);
+      } catch (ArithmeticException overflow) {
+        expires = Long.MAX_VALUE;
+      }
+      return new Deadline(expires);
+    }
+
+    int remainingSeconds() throws IOException {
+      long remaining = expiresAtNanos - System.nanoTime();
+      if (remaining <= 0) throw new IOException("RCLONE_UPLOAD_TIMEOUT");
+      long seconds = TimeUnit.NANOSECONDS.toSeconds(remaining);
+      if (seconds == 0) return 1;
+      return (int) Math.min(Integer.MAX_VALUE, seconds);
+    }
+
+    boolean canPause(long millis) {
+      long remaining = expiresAtNanos - System.nanoTime();
+      return remaining > TimeUnit.MILLISECONDS.toNanos(millis);
+    }
+
+    int cleanupSeconds() {
+      long remaining = expiresAtNanos - System.nanoTime();
+      if (remaining <= 0) return 0;
+      long seconds = Math.max(1, TimeUnit.NANOSECONDS.toSeconds(remaining));
+      return (int) Math.min(5, seconds);
+    }
+  }
 }

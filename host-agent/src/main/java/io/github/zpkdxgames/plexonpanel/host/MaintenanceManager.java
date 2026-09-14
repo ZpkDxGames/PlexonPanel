@@ -20,6 +20,7 @@ public final class MaintenanceManager implements AutoCloseable {
   private final Path settingsPath;
   private final MaintenanceStateStore state;
   private final FullRestorePointManager fullBackups;
+  private final FullBackupPreflight fullBackupPreflight;
   private final SystemdService service;
   private final PaperMaintenanceLink paperLink;
   private final BooleanSupplier paperConnected;
@@ -54,6 +55,7 @@ public final class MaintenanceManager implements AutoCloseable {
     this.audit = audit;
     this.events = events;
     this.fullBackups = fullBackups;
+    this.fullBackupPreflight = new FullBackupPreflight(config, fullBackups);
     Path data = Path.of(config.dataDirectory()).toAbsolutePath().normalize();
     this.settingsPath = data.resolve("maintenance-settings.json");
     this.state = new MaintenanceStateStore(data);
@@ -293,7 +295,10 @@ public final class MaintenanceManager implements AutoCloseable {
       if (!operationLock.tryLock()) throw new SecurityException("BUSY");
       locked = true;
       if (fullBackups.recoveryRequired()) throw new IllegalStateException("RESTORE_RECOVERY_REQUIRED");
+      MaintenanceSettings current = settings;
       job = transition(job, "PREFLIGHT", null, 5, null, null, null, null, Map.of());
+      Map<String, Object> preflight = fullBackupPreflight.check(current.fullRestorePoint());
+      job = transition(job, "PREFLIGHT", null, 7, null, null, null, null, preflight);
       boolean startedOnline = !service.stopped();
       long revision = paperRevision.getAsLong();
       audit(
@@ -309,7 +314,7 @@ public final class MaintenanceManager implements AutoCloseable {
         if (!paperConnected.getAsBoolean()) throw new IllegalStateException("PAPER_OFFLINE");
         if (!skipCountdown) {
           job = transition(job, "COUNTDOWN", null, 10, null, null, null, null, Map.of());
-          countdown(device, automatic, settings.restart().warningSeconds(), "full backup");
+          countdown(device, automatic, current.restart().warningSeconds(), "full backup");
         }
         job = transition(job, "FINAL_SAVE", null, 25, null, null, null, null, Map.of());
         if (!paperLink.flush(device, automatic)) throw new IOException("PAPER_FLUSH_FAILED");
@@ -317,26 +322,29 @@ public final class MaintenanceManager implements AutoCloseable {
         service.action("stop");
         stoppedByUs = true;
         job = transition(job, "WAITING_FOR_STOP", null, 40, true, null, null, true, Map.of());
-        waitStopped(settings.restart().stopTimeoutSeconds());
+        waitStopped(current.restart().stopTimeoutSeconds());
       } else {
-        job = transition(
-            job,
-            "PREFLIGHT",
-            null,
-            40,
-            false,
-            null,
-            null,
-            false,
-            Map.of("serverAlreadyStopped", true));
+        job =
+            transition(
+                job,
+                "PREFLIGHT",
+                null,
+                40,
+                false,
+                null,
+                null,
+                false,
+                Map.of("serverAlreadyStopped", true));
       }
       job = transition(job, "ARCHIVING", null, 50, null, null, null, null, Map.of());
       FullRestorePointManager.Metadata backup =
           fullBackups.createLocked(
-              job.jobId(), actor(device, automatic), automatic, false, settings.fullRestorePoint(), true);
+              job.jobId(), actor(device, automatic), automatic, false, current.fullRestorePoint(), true);
       boolean providerConfigured = Boolean.TRUE.equals(fullBackups.providerStatus().get("configured"));
       boolean localVerified = backup.local() && backup.sha256() != null && !backup.sha256().isBlank();
       boolean remoteVerified = backup.offsite();
+      boolean degraded = providerConfigured && !remoteVerified;
+      String errorCode = degraded ? retryableOffsiteCode(backup.errorCode()) : "";
       job =
           transition(
               job,
@@ -360,9 +368,13 @@ public final class MaintenanceManager implements AutoCloseable {
                 true,
                 remoteVerified,
                 stoppedByUs,
-                Map.of("offsite", backup.offsite()));
+                Map.of(
+                    "offsite", backup.offsite(),
+                    "errorCode", errorCode,
+                    "retryUploadAvailable", degraded && backup.local()));
       }
-      boolean startAfter = stoppedByUs && settings.fullRestorePoint().restartAfter();
+      boolean safetyRestart = stoppedByUs && degraded && !current.fullRestorePoint().restartAfter();
+      boolean startAfter = stoppedByUs && (degraded || current.fullRestorePoint().restartAfter());
       if (startAfter) {
         job =
             transition(
@@ -374,7 +386,7 @@ public final class MaintenanceManager implements AutoCloseable {
                 true,
                 remoteVerified,
                 true,
-                Map.of());
+                Map.of("safetyRestart", safetyRestart));
         service.action("start");
         job =
             transition(
@@ -386,8 +398,8 @@ public final class MaintenanceManager implements AutoCloseable {
                 true,
                 remoteVerified,
                 true,
-                Map.of());
-        waitStarted(revision, settings.restart().startupTimeoutSeconds());
+                Map.of("safetyRestart", safetyRestart));
+        waitStarted(revision, current.restart().startupTimeoutSeconds());
         job =
             transition(
                 job,
@@ -398,9 +410,10 @@ public final class MaintenanceManager implements AutoCloseable {
                 true,
                 remoteVerified,
                 false,
-                Map.of());
+                Map.of("safetyRestart", safetyRestart));
       } else if (stoppedByUs) {
-        // Intentionally preserving the stopped state is not an unresolved recovery condition.
+        // A successful off-site result may intentionally preserve the stopped state. Degraded
+        // results never take this branch because availability recovery overrides restartAfter=false.
         job =
             transition(
                 job,
@@ -413,17 +426,20 @@ public final class MaintenanceManager implements AutoCloseable {
                 false,
                 Map.of("preservedStoppedState", true));
       }
-      String finalResult = providerConfigured && !remoteVerified ? "DEGRADED" : "SUCCESS";
-      state.finish(job, finalResult, backup.errorCode());
+      String finalResult = degraded ? "DEGRADED" : "SUCCESS";
+      state.finish(job, finalResult, errorCode);
       publish(
           "maintenance.completed",
           Map.of(
               "jobId", job.jobId(),
               "kind", job.kind(),
               "backupId", backup.backupId(),
-              "local", true,
+              "local", backup.local(),
               "offsite", backup.offsite(),
-              "result", finalResult));
+              "result", finalResult,
+              "errorCode", errorCode,
+              "retryUploadAvailable", degraded && backup.local(),
+              "safetyRestart", safetyRestart));
       audit(
           "backup.full.create",
           finalResult,
@@ -437,6 +453,9 @@ public final class MaintenanceManager implements AutoCloseable {
               "offsite", backup.offsite(),
               "localVerified", localVerified,
               "remoteVerified", remoteVerified,
+              "errorCode", errorCode,
+              "retryUploadAvailable", degraded && backup.local(),
+              "safetyRestart", safetyRestart,
               "serverWasStoppedByMaintenance", stoppedByUs));
     } catch (Exception error) {
       fail(job, device, automatic, "backup.full.create", error, stoppedByUs);
@@ -643,6 +662,10 @@ public final class MaintenanceManager implements AutoCloseable {
       return minutes + (minutes == 1 ? " minute" : " minutes");
     }
     return seconds + (seconds == 1 ? " second" : " seconds");
+  }
+
+  private static String retryableOffsiteCode(String errorCode) {
+    return errorCode == null || errorCode.isBlank() ? "REMOTE_UPLOAD_FAILED" : errorCode;
   }
 
   private static String classify(Exception error) {
