@@ -68,8 +68,8 @@ public record ControlPolicy(
     for (String scope :
         List.of("audit.view", "audit.view.self", "devices.view", "settings.view", "server.status"))
       c.put(scope, true);
-    boolean backupCoordination = config.getBoolean("backups.enabled", false);
-    c.put("backup.create", remote && backupCoordination);
+    // Backup, maintenance, provider, and lifecycle authority belongs to the Linux Host Companion.
+    // Paper keeps these global protocol scopes disabled regardless of legacy backups.* config keys.
     c.put("devices.revoke", remote && config.getBoolean("access.allow-dashboard-revoke", false));
     Map<String, Set<String>> roles = new TreeMap<>(String.CASE_INSENSITIVE_ORDER);
     roles.putAll(Scopes.ROLES);
