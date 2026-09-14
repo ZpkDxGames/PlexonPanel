@@ -44,6 +44,11 @@ public record MaintenanceSettings(
       long maximumBytes,
       List<String> excludes) {
     public FullRestorePoint {
+      // Step 8 finalizes one operator-facing workflow: a manual full backup always restores
+      // Minecraft availability after a successful or safely degraded operation. Keep the legacy
+      // JSON field for rolling-upgrade compatibility, but normalize false to true so an older
+      // maintenance-settings.json cannot silently preserve the server-offline behavior.
+      restartAfter = true;
       excludes = excludes == null ? List.of() : List.copyOf(excludes);
     }
   }
