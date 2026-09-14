@@ -22,7 +22,10 @@ class RcloneBackupProviderTest {
             "/tmp/rclone.conf");
     var provider = new RcloneBackupProvider(config);
 
-    assertEquals("", provider.status().get("lastSuccessfulVerificationAt"));
+    var initial = provider.status();
+    assertEquals("RCLONE", initial.get("provider"));
+    assertEquals("CONFIGURED_UNTESTED", initial.get("status"));
+    assertEquals("", initial.get("lastSuccessfulVerificationAt"));
 
     var successField =
         RcloneBackupProvider.class.getDeclaredField("lastSuccessfulVerificationAt");
