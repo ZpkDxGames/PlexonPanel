@@ -74,6 +74,43 @@ class RconCommandChannelTest {
   }
 
   @Test
+  void commandTimeoutIsClassifiedSafely() throws Exception {
+    Path secret = protectedSecret("timeout-secret");
+    try (ServerSocket server = new ServerSocket(0, 8, InetAddress.getByName("127.0.0.1"));
+        ExecutorService executor = Executors.newSingleThreadExecutor()) {
+      Future<?> serving =
+          executor.submit(
+              () -> {
+                try (Socket socket = server.accept()) {
+                  Packet auth = readPacket(socket.getInputStream());
+                  assertEquals("timeout-secret", auth.payload());
+                  writePacket(socket.getOutputStream(), auth.id(), 2, "");
+                  Packet command = readPacket(socket.getInputStream());
+                  assertEquals("save-all flush", command.payload());
+                  Thread.sleep(600);
+                } catch (Exception error) {
+                  throw new CompletionException(error);
+                }
+              });
+      RconCommandChannel channel =
+          new RconCommandChannel(
+              new HostConfig.CommandChannelConfig(
+                  true,
+                  "127.0.0.1",
+                  server.getLocalPort(),
+                  secret.toAbsolutePath().toString(),
+                  250,
+                  250));
+      OperationFailure failure =
+          assertThrows(OperationFailure.class, channel::saveAllFlush);
+      assertEquals("RCON_TIMEOUT", failure.code());
+      assertFalse(failure.getMessage().contains("timeout-secret"));
+      assertFalse(failure.safeData().toString().contains("timeout-secret"));
+      serving.get(2, TimeUnit.SECONDS);
+    }
+  }
+
+  @Test
   void unsupportedWarningCannotBecomeGenericCommandExecution() {
     RconCommandChannel channel =
         new RconCommandChannel(
