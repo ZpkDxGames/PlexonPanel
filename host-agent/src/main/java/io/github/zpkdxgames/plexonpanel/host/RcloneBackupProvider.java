@@ -21,6 +21,7 @@ public final class RcloneBackupProvider {
   private final HostConfig.BackupConfig config;
   private volatile String lastTestAt = "";
   private volatile String lastTestState = "NOT_TESTED";
+  private volatile String lastSuccessfulVerificationAt = "";
 
   public RcloneBackupProvider(HostConfig.BackupConfig config) {
     this.config = Objects.requireNonNull(config);
@@ -46,6 +47,7 @@ public final class RcloneBackupProvider {
     result.put("remote", configured ? safeRemoteLabel() : "");
     result.put("lastTestAt", lastTestAt);
     result.put("lastTestState", lastTestState);
+    result.put("lastSuccessfulVerificationAt", lastSuccessfulVerificationAt);
     return Map.copyOf(result);
   }
 
@@ -72,6 +74,7 @@ public final class RcloneBackupProvider {
           timeoutSeconds);
       lastTestAt = checkedAt;
       lastTestState = "CONNECTED";
+      lastSuccessfulVerificationAt = checkedAt;
       return Map.of(
           "provider",
           "RCLONE",
@@ -155,11 +158,13 @@ public final class RcloneBackupProvider {
     safeDelete(stageJson, timeoutSeconds);
     safeDelete(previousZip, timeoutSeconds);
     safeDelete(previousJson, timeoutSeconds);
+    String verifiedAt = Instant.now().toString();
+    lastSuccessfulVerificationAt = verifiedAt;
     return new Promotion(
         true,
         true,
         safeRemoteLabel() + "/" + canonicalFilename,
-        Instant.now().toString(),
+        verifiedAt,
         "Remote staging verified before canonical promotion");
   }
 
