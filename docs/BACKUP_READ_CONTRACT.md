@@ -10,12 +10,14 @@ The bridge:
 
 - runs as a separate root-owned systemd service; the Java Host remains `plexonpanel-host` and non-root;
 - reads a root-owned JSON file only at startup;
-- accepts no network traffic and no command, path, user, or argument from the browser, relay, Paper agent, or Host process;
+- accepts no network traffic and no command, path, user, or argument from the browser, relay, Paper, or Host process;
 - is restricted to one fixed `serverRoot` and a bounded set of top-level backup include names;
 - rejects a symlinked server root and never follows symlinks while scanning/watching includes;
 - grants the named `plexonpanel-host` user **read** on regular files and **read/traverse** on included directories, never write;
 - grants only traverse on the server root itself;
+- explicitly excludes `plugins/PlexonPanel/access` and its descendants because that subtree has a separate shared read/write group contract between Paper and Host;
 - repairs ACLs after create, close-write, attribute-change, and atomic move-in events;
+- treats a target that disappears between an inotify event and `setfacl` as normal transient file churn, while persistent ACL failures still fail closed;
 - uses fixed `/usr/bin/setfacl` argv arrays, never a shell command;
 - has no network address families and a restricted systemd capability set.
 
@@ -54,6 +56,8 @@ Before enabling, edit `/etc/plexonpanel-host/read-bridge.json` as root so `serve
 
 The example service hardens and permits writes only under `/opt/plexoncraft/server`. If the trusted server root differs, edit the root-owned `ReadWritePaths=` line to the same absolute root as `serverRoot`. Do not use a broad parent such as `/opt`, `/`, or `/home`.
 
+Only one ACL guardian should authoritatively manage Host backup-read ACLs for the same server tree. Once this bridge passes its acceptance checks, disable/remove older ad-hoc ACL guardian services rather than running them in parallel. The `plugins/PlexonPanel/access` directory remains managed by its dedicated `plexonpanel-access` shared-group contract, not by the backup-read bridge.
+
 ## Acceptance checks
 
 After installation, run the following locally during the 3.4.1 runtime gate:
@@ -68,9 +72,20 @@ echo "HOST_WRITE=$?"
 
 Expected: `HOST_READ=0` and `HOST_WRITE=1`.
 
+Also verify the shared device registry still permits Host writes:
+
+```bash
+sudo -u plexonpanel-host test -w /opt/plexoncraft/server/plugins/PlexonPanel/access/devices.json
+echo "REGISTRY_WRITE=$?"
+sudo -u plexonpanel-host test -w /opt/plexoncraft/server/plugins/PlexonPanel/access/devices.json.lock
+echo "LOCK_WRITE=$?"
+```
+
+Expected: both values are `0`.
+
 Then execute `save-all flush` from Paper repeatedly and repeat the checks. Also exercise representative plugin file churn. Finally run **Backup Diagnostics** from the Dashboard; `unreadableDurableCount` must remain zero for required durable data.
 
-Do not remove an existing working ACL guardian until these checks pass with this service.
+Do not remove an existing working ACL guardian until these checks pass with this service. After the new bridge is accepted, do not leave the old guardian running in parallel.
 
 ## Upgrade
 
