@@ -19,8 +19,12 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04, ubuntu-24.04-arm]
-    runs-on: ${{ matrix.os }}
+        include:
+          - runner: ubuntu-24.04
+            platform: linux-x64
+          - runner: ubuntu-24.04-arm
+            platform: linux-arm64
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v7
@@ -33,6 +37,17 @@ jobs:
           java-version: '25'
 
       - uses: gradle/actions/setup-gradle@v6
+
+      - name: Verify Linux runner architecture
+        shell: bash
+        run: |
+          set -euo pipefail
+          case '${{ matrix.platform }}' in
+            linux-x64) test "$(uname -m)" = 'x86_64' ;;
+            linux-arm64) test "$(uname -m)" = 'aarch64' ;;
+            *) echo "Unknown Host platform" >&2; exit 1 ;;
+          esac
+          java -XshowSettings:properties -version 2>&1 | grep -E 'os\.arch|java\.version'
 
       - name: Provision PlexonCore 2.0.4 API
         shell: bash
@@ -73,6 +88,9 @@ jobs:
           set -euo pipefail
           python3 scripts/summarize-tests.py
           python3 scripts/package-release.py
+          python3 scripts/verify-host-portability.py \
+            "build/release/plexonpanel-host-${{ steps.project.outputs.version }}.jar" \
+            --expected-platform '${{ matrix.platform }}'
           python3 - <<'PY'
           import json, os, re, zipfile
           from pathlib import Path
@@ -92,6 +110,8 @@ jobs:
           assert manifest['rollback']['plexonPanelCommit'] == 'e0984b625d692de6076afa7e20c4fe4b35f07e9a'
           assert manifest['rollback']['dashboardCommit'] == '03777c7dc108b54dda625c7f56f5e723ca35124f'
           assert manifest['runtimeCertification'] == 'NOT_EXECUTED'
+          assert manifest['hostArtifactType'] == 'architecture-neutral-java-jar'
+          assert manifest['hostSupportedPlatforms'] == ['linux-x64', 'linux-arm64']
 
           jar=Path(f'build/release/PlexonPanel-{version}.jar')
           host=Path(f'build/release/plexonpanel-host-{version}.jar')
@@ -120,7 +140,7 @@ jobs:
 
       - uses: actions/upload-artifact@v7
         with:
-          name: PlexonPanel-${{ steps.project.outputs.version }}-${{ matrix.os }}
+          name: PlexonPanel-${{ steps.project.outputs.version }}-${{ matrix.platform }}
           path: build/release/
           if-no-files-found: error
           retention-days: 14
