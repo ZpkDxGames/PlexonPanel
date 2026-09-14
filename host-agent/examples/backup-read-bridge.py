@@ -32,6 +32,7 @@ WATCH_MASK = IN_ATTRIB | IN_CLOSE_WRITE | IN_MOVED_TO | IN_CREATE | IN_DELETE_SE
 EVENT = struct.Struct("iIII")
 MAX_WATCHES = 200_000
 MAX_EVENT_BYTES = 1 << 20
+SETFACL_ATTEMPTS = 3
 PANEL_ACCESS_RELATIVE = Path("plugins") / "PlexonPanel" / "access"
 
 libc = ctypes.CDLL("libc.so.6", use_errno=True)
@@ -115,26 +116,42 @@ def lstat_safe(path: Path):
         return None
 
 
+def inode_key(st) -> tuple[int, int, int]:
+    return st.st_dev, st.st_ino, stat.S_IFMT(st.st_mode)
+
+
 def run_setfacl(path: Path, acl: str) -> bool:
-    """Apply one ACL update, tolerating only a target that vanished during event processing."""
-    try:
-        subprocess.run(
+    """Apply one ACL update while safely tolerating bounded inode replacement churn.
+
+    Paper and plugins can unlink and recreate temp/WAL/SHM paths between an inotify event and
+    setfacl. A post-failure existence check alone is insufficient because the same pathname may
+    already refer to a new inode. Retry when the inode disappeared or changed; fail closed only
+    when setfacl repeatedly fails against the same persistent inode.
+    """
+    for _attempt in range(SETFACL_ATTEMPTS):
+        before = lstat_safe(path)
+        if before is None or stat.S_ISLNK(before.st_mode):
+            return False
+        before_key = inode_key(before)
+        result = subprocess.run(
             ["/usr/bin/setfacl", "-m", acl, "--", str(path)],
-            check=True,
+            check=False,
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             timeout=10,
         )
-        return True
-    except subprocess.CalledProcessError:
-        # Paper and plugins commonly create, rename and delete temp/WAL/SHM files within the same
-        # inotify turn. A vanished target is normal churn, not a bridge failure. Persistent targets
-        # must still fail closed so a real ACL/permission problem remains operator-visible.
-        st = lstat_safe(path)
-        if st is None or stat.S_ISLNK(st.st_mode):
+        if result.returncode == 0:
+            return True
+        after = lstat_safe(path)
+        if after is None or stat.S_ISLNK(after.st_mode):
             return False
-        raise
+        if inode_key(after) != before_key:
+            continue
+        raise subprocess.CalledProcessError(result.returncode, ["/usr/bin/setfacl", "-m", acl, "--", str(path)])
+    # The pathname kept changing across all bounded attempts. A later inotify event or backup
+    # preflight will reconcile durable data; transient churn must not crash the bridge.
+    return False
 
 
 def set_acl(path: Path, user: str, directory: bool) -> bool:
