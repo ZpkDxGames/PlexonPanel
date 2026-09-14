@@ -52,6 +52,8 @@ public final class HostMain {
     LocalAudit audit = new LocalAudit(data.resolve("audit"), 30);
     audit.clean();
     HostConnection connection = new HostConnection(config, identity);
+    HostConsoleHistory consoleHistory =
+        new HostConsoleHistory(config.serviceName(), config.console());
     SystemdService service = new SystemdService(config.serviceName());
     PaperSaveLease leases = new PaperSaveLease(connection, devices);
     PaperMaintenanceLink maintenanceLink = new PaperMaintenanceLink(connection, devices);
@@ -201,7 +203,10 @@ public final class HostMain {
                 }
                 case "backup.full.verify" -> {
                   var result = fullBackups.verify(text(p, "backupId", 36));
-                  return Map.of("backupId", result.backupId(), "sha256", result.sha256(), "verification", "VERIFIED");
+                  return Map.of(
+                      "backupId", result.backupId(),
+                      "sha256", result.sha256(),
+                      "verification", "VERIFIED");
                 }
                 case "backup.full.retry-upload" -> {
                   var result =
@@ -264,6 +269,12 @@ public final class HostMain {
                 }
                 case "provider.test" -> {
                   return fullBackups.testProvider(30);
+                }
+                case "console.history" -> {
+                  return consoleHistory.query(p, false);
+                }
+                case "console.history.errors" -> {
+                  return consoleHistory.query(p, true);
                 }
                 case "server.status" -> {
                   var status = new HashMap<>(service.status());
@@ -390,6 +401,7 @@ public final class HostMain {
                                 "requestId", id,
                                 "serverId", config.serverId(),
                                 "deviceId", "local-schedule",
+                                "role", "Local",
                                 "actorLabel", "Host schedule",
                                 "actionType", "backup.create",
                                 "outcome", "FAILED",
