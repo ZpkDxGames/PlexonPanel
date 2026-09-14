@@ -186,7 +186,9 @@ public final class MaintenanceManager implements AutoCloseable {
   }
 
   public String fullRestorePointNow(DeviceRegistry.Device device, boolean skipCountdown) throws Exception {
-    return queue("FULL_RESTORE_POINT", null, device, false, skipCountdown);
+    // Manual full backups always execute the Host-owned warning schedule. Keep the legacy argument
+    // for caller compatibility, but never allow it to bypass the mandatory countdown contract.
+    return queue("FULL_RESTORE_POINT", null, device, false, false);
   }
 
   private synchronized String queue(
