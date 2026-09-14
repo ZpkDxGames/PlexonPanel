@@ -97,7 +97,7 @@ jobs:
 
           text=Path('build.gradle.kts').read_text()
           version=re.search(r'^version\s*=\s*"([^"]+)"\s*$', text, re.M).group(1)
-          dashboard='54b79f98201fc56835f8ff1cca20853ce4bebc39'
+          dashboard='c051d59010ec1d09f6a5a624246a6b108b85ae12'
           manifest=json.loads(Path('build/release/release-manifest.json').read_text())
           assert manifest['sourceCommit'] == os.environ['GITHUB_SHA']
           assert manifest['javaCandidateCommit'] == os.environ['GITHUB_SHA']
@@ -106,7 +106,7 @@ jobs:
           assert manifest['protocolVersion'] == 3
           assert manifest['java'] == 25
           assert manifest['dashboardCandidateCommit'] == dashboard
-          assert manifest['dashboardCiRun'] == 34880343784
+          assert manifest['dashboardCiRun'] == 34905567114
           assert manifest['rollback']['plexonPanelCommit'] == 'e0984b625d692de6076afa7e20c4fe4b35f07e9a'
           assert manifest['rollback']['dashboardCommit'] == '03777c7dc108b54dda625c7f56f5e723ca35124f'
           assert manifest['runtimeCertification'] == 'NOT_EXECUTED'
