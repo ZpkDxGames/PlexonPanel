@@ -34,7 +34,8 @@ class FullRestorePointPolicyTest {
             "/usr/bin/rclone",
             "",
             temporary.resolve("rclone.conf").toString()),
-        HostConfig.ConsoleConfig.defaults());
+        HostConfig.ConsoleConfig.defaults(),
+        HostConfig.MaintenanceCommandConfig.defaults());
   }
 
   private FullRestorePointManager manager(Path root, Path backups) throws Exception {
