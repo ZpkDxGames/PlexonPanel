@@ -41,6 +41,24 @@ jobs:
             -Dfile="${core_jar}" -DgroupId=com.zpkdxgames -DartifactId=PlexonCore \
             -Dversion=2.0.4 -Dpackaging=jar -DgeneratePom=true
 
+      - name: Normalize current-source status anchors
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path("scripts/apply-step6-host-auth.py")
+          text = p.read_text()
+          start = text.index("replace_count(\n    host_main,\n    '            status.put")
+          end = text.index("\n\n# Host never mutates", start)
+          replacement = '''replace_count(
+              host_main,
+              '            status.put("paperConnected", paper.get());\\n',
+              '            status.put("paperConnected", paper.get());\\n            status.put("authorizationMirror", authorization.status());\\n',
+              2,
+          )'''
+          p.write_text(text[:start] + replacement + text[end:])
+          PY
+
       - name: Apply Step 6 source transformation
         run: python3 scripts/apply-step6-host-auth.py
 
