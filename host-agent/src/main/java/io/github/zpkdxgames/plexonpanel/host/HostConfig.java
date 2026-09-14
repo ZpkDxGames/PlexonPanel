@@ -18,7 +18,35 @@ public record HostConfig(
     String serviceName,
     Map<String, Boolean> capabilities,
     BackupConfig backups,
-    ConsoleConfig console) {
+    ConsoleConfig console,
+    CommandChannelConfig commandChannel) {
+  public HostConfig(
+      String serverId,
+      String serverName,
+      String relayUrl,
+      String relayPublicKey,
+      String serverRoot,
+      String dataDirectory,
+      String accessRegistry,
+      String serviceName,
+      Map<String, Boolean> capabilities,
+      BackupConfig backups,
+      ConsoleConfig console) {
+    this(
+        serverId,
+        serverName,
+        relayUrl,
+        relayPublicKey,
+        serverRoot,
+        dataDirectory,
+        accessRegistry,
+        serviceName,
+        capabilities,
+        backups,
+        console,
+        CommandChannelConfig.defaults());
+  }
+
   public record BackupConfig(
       boolean enabled,
       String directory,
@@ -85,6 +113,19 @@ public record HostConfig(
     }
   }
 
+  /** Host-local fixed maintenance command transport. The secret value is never stored here. */
+  public record CommandChannelConfig(
+      boolean enabled,
+      String host,
+      int port,
+      String secretFile,
+      int commandTimeoutMillis,
+      int readinessTimeoutSeconds) {
+    static CommandChannelConfig defaults() {
+      return new CommandChannelConfig(false, "127.0.0.1", 25575, "", 5000, 180);
+    }
+  }
+
   public static List<String> defaultLiveSnapshotExcludes() {
     return List.of("logs", "crash-reports", "cache", ".cache", "tmp", "plugins/spark/tmp");
   }
@@ -103,51 +144,54 @@ public record HostConfig(
             "serviceName",
             "capabilities",
             "backups",
-            "console")
+            "console",
+            "commandChannel")
         .containsAll(raw.keySet()))
       throw new IllegalArgumentException("Unknown host configuration key");
-    HostConfig c = new Gson().fromJson(raw, HostConfig.class);
-    if (c.console == null)
-      c =
-          new HostConfig(
-              c.serverId,
-              c.serverName,
-              c.relayUrl,
-              c.relayPublicKey,
-              c.serverRoot,
-              c.dataDirectory,
-              c.accessRegistry,
-              c.serviceName,
-              c.capabilities,
-              c.backups,
-              ConsoleConfig.defaults());
-    if (c.backups != null && c.backups.liveSnapshotExcludes == null) {
-      BackupConfig b = c.backups;
-      c =
-          new HostConfig(
-              c.serverId,
-              c.serverName,
-              c.relayUrl,
-              c.relayPublicKey,
-              c.serverRoot,
-              c.dataDirectory,
-              c.accessRegistry,
-              c.serviceName,
-              c.capabilities,
-              new BackupConfig(
-                  b.enabled,
-                  b.directory,
-                  b.include,
-                  b.retentionCount,
-                  b.intervalMinutes,
-                  b.maximumBytes,
-                  b.restoreEnabled,
-                  b.rcloneExecutable,
-                  b.rcloneRemote,
-                  b.rcloneConfig,
-                  defaultLiveSnapshotExcludes()),
-              c.console);
+    if (raw.has("commandChannel")) {
+      JsonElement commandRaw = raw.get("commandChannel");
+      if (!commandRaw.isJsonObject()
+          || !Set.of(
+                  "enabled",
+                  "host",
+                  "port",
+                  "secretFile",
+                  "commandTimeoutMillis",
+                  "readinessTimeoutSeconds")
+              .containsAll(commandRaw.getAsJsonObject().keySet()))
+        throw new IllegalArgumentException("Unknown Host maintenance command-channel key");
     }
+    HostConfig parsed = new Gson().fromJson(raw, HostConfig.class);
+    BackupConfig backups = parsed.backups;
+    if (backups != null && backups.liveSnapshotExcludes == null) {
+      backups =
+          new BackupConfig(
+              backups.enabled,
+              backups.directory,
+              backups.include,
+              backups.retentionCount,
+              backups.intervalMinutes,
+              backups.maximumBytes,
+              backups.restoreEnabled,
+              backups.rcloneExecutable,
+              backups.rcloneRemote,
+              backups.rcloneConfig,
+              defaultLiveSnapshotExcludes());
+    }
+    HostConfig c =
+        new HostConfig(
+            parsed.serverId,
+            parsed.serverName,
+            parsed.relayUrl,
+            parsed.relayPublicKey,
+            parsed.serverRoot,
+            parsed.dataDirectory,
+            parsed.accessRegistry,
+            parsed.serviceName,
+            parsed.capabilities,
+            backups,
+            parsed.console == null ? ConsoleConfig.defaults() : parsed.console,
+            parsed.commandChannel == null ? CommandChannelConfig.defaults() : parsed.commandChannel);
     UUID.fromString(c.serverId);
     if (c.serverName == null || c.serverName.length() > 64 || c.serverName.isBlank())
       throw new IllegalArgumentException("Invalid server label");
@@ -216,6 +260,7 @@ public record HostConfig(
         throw new IllegalArgumentException("Invalid locally configured rclone provider");
     }
     validateConsole(c.console);
+    validateCommandChannel(c.commandChannel);
     return c;
   }
 
@@ -255,9 +300,34 @@ public record HostConfig(
     new ConsoleRedactor(console.redactPatterns);
   }
 
+  private static void validateCommandChannel(CommandChannelConfig channel) {
+    if (channel == null
+        || !isLoopbackHost(channel.host)
+        || channel.port < 1
+        || channel.port > 65_535
+        || channel.commandTimeoutMillis < 250
+        || channel.commandTimeoutMillis > 30_000
+        || channel.readinessTimeoutSeconds < 30
+        || channel.readinessTimeoutSeconds > 1_800)
+      throw new IllegalArgumentException("Invalid Host maintenance command channel");
+    if (channel.enabled) {
+      if (channel.secretFile == null
+          || channel.secretFile.isBlank()
+          || !Path.of(channel.secretFile).isAbsolute())
+        throw new IllegalArgumentException("RCON secret must use a Host-local absolute file path");
+    } else if (channel.secretFile != null
+        && !channel.secretFile.isBlank()
+        && !Path.of(channel.secretFile).isAbsolute()) {
+      throw new IllegalArgumentException("RCON secret file path must be absolute");
+    }
+  }
+
   private static boolean isLoopbackWebSocket(URI uri) {
     if (!"ws".equalsIgnoreCase(uri.getScheme())) return false;
-    String host = uri.getHost();
+    return isLoopbackHost(uri.getHost());
+  }
+
+  private static boolean isLoopbackHost(String host) {
     if (host == null) return false;
     String normalized = host.toLowerCase(Locale.ROOT);
     return normalized.equals("127.0.0.1")
