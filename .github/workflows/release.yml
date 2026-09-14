@@ -13,7 +13,71 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  host-platform-contract:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            platform: linux-x64
+          - runner: ubuntu-24.04-arm
+            platform: linux-arm64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
+    steps:
+      - name: Checkout exact stable candidate
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '25'
+
+      - uses: gradle/actions/setup-gradle@v6
+
+      - name: Verify Linux runner architecture
+        shell: bash
+        run: |
+          set -euo pipefail
+          case '${{ matrix.platform }}' in
+            linux-x64) test "$(uname -m)" = 'x86_64' ;;
+            linux-arm64) test "$(uname -m)" = 'aarch64' ;;
+            *) echo "Unknown Host platform" >&2; exit 1 ;;
+          esac
+          java -XshowSettings:properties -version 2>&1 | grep -E 'os\.arch|java\.version'
+
+      - name: Read project version
+        id: project
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(python3 - <<'PY'
+          import re
+          from pathlib import Path
+          text=Path('build.gradle.kts').read_text()
+          match=re.search(r'^version\s*=\s*"([^"]+)"\s*$', text, re.M)
+          if not match:
+              raise SystemExit('root Gradle version is missing')
+          print(match.group(1))
+          PY
+          )"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+
+      - name: Build and test Host companion
+        run: ./gradlew --no-daemon :host-agent:clean :host-agent:test :host-agent:jar
+
+      - name: Verify Host portability contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/verify-host-portability.py \
+            "host-agent/build/libs/plexonpanel-host-${{ steps.project.outputs.version }}.jar" \
+            --expected-platform '${{ matrix.platform }}'
+
   release:
+    needs: host-platform-contract
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
@@ -91,6 +155,9 @@ jobs:
           set -euo pipefail
           python3 scripts/summarize-tests.py
           python3 scripts/package-release.py
+          python3 scripts/verify-host-portability.py \
+            "build/release/plexonpanel-host-${{ steps.project.outputs.version }}.jar" \
+            --expected-platform linux-x64
           python3 - <<'PY'
           import json, os, re, zipfile
           from pathlib import Path
@@ -104,8 +171,10 @@ jobs:
           assert manifest['protocolVersion'] == 3
           assert manifest['java'] == 25
           assert manifest['runtimeCertification'] == 'NOT_EXECUTED'
-          assert manifest['dashboardCandidateCommit'] == '16d0768952d77b8054c5b8b88785d3f903c5359d'
-          assert manifest['dashboardCiRun'] == 34775174696
+          assert manifest['dashboardCandidateCommit'] == '54b79f98201fc56835f8ff1cca20853ce4bebc39'
+          assert manifest['dashboardCiRun'] == 34880343784
+          assert manifest['hostArtifactType'] == 'architecture-neutral-java-jar'
+          assert manifest['hostSupportedPlatforms'] == ['linux-x64', 'linux-arm64']
 
           paper=Path(f'build/release/PlexonPanel-{version}.jar')
           host=Path(f'build/release/plexonpanel-host-{version}.jar')

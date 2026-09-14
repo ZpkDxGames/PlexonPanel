@@ -26,6 +26,8 @@ JAVA_ROLLBACK_VERSION = "v3.1.1"
 JAVA_ROLLBACK_COMMIT = "e0984b625d692de6076afa7e20c4fe4b35f07e9a"
 DASHBOARD_ROLLBACK_COMMIT = "03777c7dc108b54dda625c7f56f5e723ca35124f"
 RUNTIME_CERTIFICATION = "NOT_EXECUTED"
+HOST_ARTIFACT_TYPE = "architecture-neutral-java-jar"
+HOST_SUPPORTED_PLATFORMS = ["linux-x64", "linux-arm64"]
 
 out = root / "build/release"
 out.mkdir(parents=True, exist_ok=True)
@@ -47,6 +49,7 @@ examples = [
     *sorted((root / "agent/examples").glob("*")),
     *sorted((root / "host-agent/examples").glob("*")),
     *sorted((root / "docs").glob("*.md")),
+    root / "scripts/verify-host-portability.py",
     root / "README.md",
     root / "CHANGELOG.md",
     root / "PRIVACY.md",
@@ -116,6 +119,8 @@ manifest.write_text(
             "javaCandidateCommit": commit,
             "dashboardCandidateCommit": DASHBOARD_CANDIDATE,
             "dashboardCiRun": DASHBOARD_CI_RUN,
+            "hostArtifactType": HOST_ARTIFACT_TYPE,
+            "hostSupportedPlatforms": HOST_SUPPORTED_PLATFORMS,
             "rollback": {
                 "plexonPanelVersion": JAVA_ROLLBACK_VERSION,
                 "plexonPanelCommit": JAVA_ROLLBACK_COMMIT,
@@ -143,4 +148,7 @@ if test_summary.is_file():
         for path in artifacts
     )
 )
-print(f"Packaged PlexonPanel {version} JARs, examples, manifest, test summary and checksums")
+print(
+    f"Packaged PlexonPanel {version} JARs, examples, manifest, test summary and checksums "
+    f"for Host platforms {', '.join(HOST_SUPPORTED_PLATFORMS)}"
+)
