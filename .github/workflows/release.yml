@@ -171,8 +171,8 @@ jobs:
           assert manifest['protocolVersion'] == 3
           assert manifest['java'] == 25
           assert manifest['runtimeCertification'] == 'NOT_EXECUTED'
-          assert manifest['dashboardCandidateCommit'] == '54b79f98201fc56835f8ff1cca20853ce4bebc39'
-          assert manifest['dashboardCiRun'] == 34880343784
+          assert manifest['dashboardCandidateCommit'] == 'c051d59010ec1d09f6a5a624246a6b108b85ae12'
+          assert manifest['dashboardCiRun'] == 34905567114
           assert manifest['hostArtifactType'] == 'architecture-neutral-java-jar'
           assert manifest['hostSupportedPlatforms'] == ['linux-x64', 'linux-arm64']
 

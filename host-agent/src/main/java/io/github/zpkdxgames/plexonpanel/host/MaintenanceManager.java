@@ -171,7 +171,7 @@ public final class MaintenanceManager implements AutoCloseable {
     result.put("timezone", current.timezone());
     result.put("nextRestart", restart == null ? "" : restart.toString());
     result.put("fullBackupMode", "MANUAL_ONLY");
-    result.put("jobStateContractVersion", 2);
+    result.put("jobStateContractVersion", 3);
     result.put("currentOperation", active == null ? Map.of() : active);
     result.put("provider", fullBackups.providerStatus());
     result.put("restoreRecoveryRequired", fullBackups.recoveryRequired());
@@ -179,6 +179,21 @@ public final class MaintenanceManager implements AutoCloseable {
     result.put(
         "commandChannel",
         Map.of("enabled", commandChannel.enabled(), "type", "HOST_LOCAL_RCON"));
+    if (active != null && "COUNTDOWN".equals(active.phase())) {
+      try {
+        MaintenanceStateStore.Countdown countdown = state.countdown(active);
+        Instant deadline = Instant.parse(countdown.deadline());
+        long remainingSeconds = Math.max(0L, Duration.between(now, deadline).getSeconds());
+        result.put("countdownDeadline", countdown.deadline());
+        result.put("countdownRemainingSeconds", remainingSeconds);
+        result.put("countdownWarningsSent", countdown.consumedWarnings());
+        result.put("countdownState", "ACTIVE");
+      } catch (IOException | DateTimeException invalidCountdown) {
+        // Never invent a deadline in the public status contract. Recovery logic will classify an
+        // invalid durable countdown independently; the Dashboard must show it as unavailable.
+        result.put("countdownState", "UNAVAILABLE");
+      }
+    }
     return result;
   }
 
@@ -526,9 +541,10 @@ public final class MaintenanceManager implements AutoCloseable {
                     "errorCode", errorCode,
                     "retryUploadAvailable", degraded && backup.local()));
       }
-      boolean safetyRestart = stoppedByUs && degraded && !current.fullRestorePoint().restartAfter();
-      boolean startAfter = stoppedByUs && (degraded || current.fullRestorePoint().restartAfter());
-      if (startAfter) {
+      // Manual full-backup service recovery is mandatory. The serialized restartAfter field is
+      // compatibility-only and cannot preserve a stopped service after this workflow stopped it.
+      boolean safetyRestart = stoppedByUs && degraded;
+      if (stoppedByUs) {
         job =
             transition(
                 job,
@@ -564,20 +580,6 @@ public final class MaintenanceManager implements AutoCloseable {
                 remoteVerified,
                 false,
                 Map.of("safetyRestart", safetyRestart));
-      } else if (stoppedByUs) {
-        // A successful off-site result may intentionally preserve the stopped state. Degraded
-        // results never take this branch because availability recovery overrides restartAfter=false.
-        job =
-            transition(
-                job,
-                job.phase(),
-                backup.backupId(),
-                100,
-                true,
-                true,
-                remoteVerified,
-                false,
-                Map.of("preservedStoppedState", true));
       }
       String finalResult = degraded ? "DEGRADED" : "SUCCESS";
       state.finish(job, finalResult, errorCode);
