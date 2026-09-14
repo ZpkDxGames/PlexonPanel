@@ -43,7 +43,8 @@ class BackupSafetyTest {
                 "",
                 "",
                 HostConfig.defaultLiveSnapshotExcludes()),
-            HostConfig.ConsoleConfig.defaults()),
+            HostConfig.ConsoleConfig.defaults(),
+            HostConfig.MaintenanceCommandConfig.defaults()),
         null,
         null,
         () -> false,
@@ -111,7 +112,8 @@ class BackupSafetyTest {
                 "",
                 "",
                 HostConfig.defaultLiveSnapshotExcludes()),
-            HostConfig.ConsoleConfig.defaults());
+            HostConfig.ConsoleConfig.defaults(),
+            HostConfig.MaintenanceCommandConfig.defaults());
     assertTrue(LiveSnapshotPolicy.volatileExcluded(config, "plugins/spark/tmp/profile-1.tmp"));
     assertFalse(LiveSnapshotPolicy.volatileExcluded(config, "plugins/PlexonChats/config.yml"));
     assertTrue(LiveSnapshotPolicy.allowed(config, "plugins/PlexonChats/config.yml"));
