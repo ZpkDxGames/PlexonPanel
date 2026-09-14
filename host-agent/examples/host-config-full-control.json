@@ -80,5 +80,13 @@
     "maximumLineBytes": 8192,
     "cursorPersistenceMillis": 1000,
     "redactPatterns": []
+  },
+  "maintenanceCommand": {
+    "enabled": true,
+    "host": "127.0.0.1",
+    "port": 25575,
+    "secretFile": "/etc/plexonpanel-host/rcon.password",
+    "commandTimeoutSeconds": 5,
+    "readinessTimeoutSeconds": 180
   }
 }
