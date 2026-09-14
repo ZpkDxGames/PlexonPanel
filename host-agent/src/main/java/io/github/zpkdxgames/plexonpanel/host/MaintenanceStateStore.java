@@ -31,6 +31,14 @@ public final class MaintenanceStateStore {
       boolean remoteBackupVerified,
       boolean restartRecoveryRequired) {}
 
+  /** Durable countdown state kept separately so the public job contract remains stable. */
+  public record Countdown(String jobId, String deadline, List<Integer> consumedWarnings) {
+    public Countdown {
+      consumedWarnings =
+          consumedWarnings == null ? List.of() : List.copyOf(consumedWarnings);
+    }
+  }
+
   private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
   private static final Set<String> TERMINAL_PHASES = Set.of("COMPLETED", "DEGRADED", "FAILED");
   private static final Set<String> PRE_DESTRUCTIVE_PHASES =
@@ -46,13 +54,15 @@ public final class MaintenanceStateStore {
           "STARTING_SERVER",
           "VERIFYING_STARTUP");
 
-  private final Path directory, claimsFile, activeFile, historyFile;
+  private final Path directory, claimsFile, activeFile, historyFile, countdownFile, recoveryFile;
 
   public MaintenanceStateStore(Path dataDirectory) throws IOException {
     directory = dataDirectory.resolve("maintenance").toAbsolutePath().normalize();
     claimsFile = directory.resolve("claims.json");
     activeFile = directory.resolve("active-job.json");
     historyFile = directory.resolve("history.jsonl");
+    countdownFile = directory.resolve("countdown.json");
+    recoveryFile = directory.resolve("countdown-recovery.jsonl");
     Files.createDirectories(directory);
   }
 
@@ -109,7 +119,63 @@ public final class MaintenanceStateStore {
             false,
             false);
     write(job);
+    Files.deleteIfExists(countdownFile);
     return job;
+  }
+
+  public synchronized Countdown beginCountdown(Job job, int durationSeconds, Instant now)
+      throws IOException {
+    if (durationSeconds < 0 || durationSeconds > 86_400)
+      throw new IllegalArgumentException("Invalid countdown duration");
+    requireCurrent(job);
+    if (!"COUNTDOWN".equals(job.phase())) throw new IOException("COUNTDOWN_STATE_INVALID");
+    Countdown countdown =
+        new Countdown(job.jobId(), now.plusSeconds(durationSeconds).toString(), List.of());
+    AtomicFiles.writeUtf8(countdownFile, GSON.toJson(countdown));
+    return countdown;
+  }
+
+  public synchronized Countdown countdown(Job job) throws IOException {
+    requireCurrent(job);
+    if (!"COUNTDOWN".equals(job.phase())) throw new IOException("COUNTDOWN_STATE_INVALID");
+    if (!Files.isRegularFile(countdownFile, LinkOption.NOFOLLOW_LINKS)
+        || Files.isSymbolicLink(countdownFile)
+        || Files.size(countdownFile) > 32_768)
+      throw new IOException("COUNTDOWN_STATE_MISSING");
+    Countdown countdown = GSON.fromJson(Files.readString(countdownFile), Countdown.class);
+    if (countdown == null || !job.jobId().equals(countdown.jobId()))
+      throw new IOException("COUNTDOWN_STATE_INVALID");
+    Instant.parse(countdown.deadline());
+    for (Integer warning : countdown.consumedWarnings())
+      if (warning == null || warning < 0 || warning > 86_400)
+        throw new IOException("COUNTDOWN_STATE_INVALID");
+    return countdown;
+  }
+
+  public synchronized Countdown consumeWarning(Job job, int warningSeconds) throws IOException {
+    Countdown current = countdown(job);
+    LinkedHashSet<Integer> consumed = new LinkedHashSet<>(current.consumedWarnings());
+    consumed.add(warningSeconds);
+    Countdown next = new Countdown(job.jobId(), current.deadline(), List.copyOf(consumed));
+    AtomicFiles.writeUtf8(countdownFile, GSON.toJson(next));
+    return next;
+  }
+
+  public synchronized void recordCountdownRecovery(Job job, String code, int warningSeconds)
+      throws IOException {
+    Map<String, Object> entry = new LinkedHashMap<>();
+    entry.put("timestamp", Instant.now().toString());
+    entry.put("jobId", job.jobId());
+    entry.put("kind", job.kind());
+    entry.put("code", requireToken(code, "recovery code"));
+    if (warningSeconds > 0) entry.put("warningSeconds", warningSeconds);
+    Files.writeString(
+        recoveryFile,
+        GSON.toJson(entry) + System.lineSeparator(),
+        StandardOpenOption.CREATE,
+        StandardOpenOption.APPEND,
+        StandardOpenOption.WRITE);
+    if (Files.size(recoveryFile) > 1_048_576L) rotateRecovery();
   }
 
   public synchronized Job update(Job job, String phase, String backupId) throws IOException {
@@ -154,6 +220,7 @@ public final class MaintenanceStateStore {
                 ? job.restartRecoveryRequired()
                 : restartRecoveryRequired);
     write(next);
+    if (!"COUNTDOWN".equals(normalizedPhase)) Files.deleteIfExists(countdownFile);
     return next;
   }
 
@@ -202,6 +269,7 @@ public final class MaintenanceStateStore {
             job.remoteBackupVerified(),
             "RECOVERY_REQUIRED".equals(normalizedPhase) || job.restartRecoveryRequired());
     write(finished);
+    Files.deleteIfExists(countdownFile);
     if (terminal(finished)) appendHistory(finished);
     return finished;
   }
@@ -301,6 +369,12 @@ public final class MaintenanceStateStore {
 
   static boolean terminal(Job job) {
     return job != null && TERMINAL_PHASES.contains(safe(job.phase()));
+  }
+
+  private void requireCurrent(Job job) throws IOException {
+    Job current = active();
+    if (current == null || !current.jobId().equals(job.jobId()))
+      throw new IOException("COUNTDOWN_STATE_INVALID");
   }
 
   private void write(Job job) throws IOException {
@@ -409,6 +483,16 @@ public final class MaintenanceStateStore {
       Files.move(historyFile, old, StandardCopyOption.ATOMIC_MOVE);
     } catch (AtomicMoveNotSupportedException unsupported) {
       Files.move(historyFile, old, StandardCopyOption.REPLACE_EXISTING);
+    }
+  }
+
+  private void rotateRecovery() throws IOException {
+    Path old = directory.resolve("countdown-recovery.previous.jsonl");
+    Files.deleteIfExists(old);
+    try {
+      Files.move(recoveryFile, old, StandardCopyOption.ATOMIC_MOVE);
+    } catch (AtomicMoveNotSupportedException unsupported) {
+      Files.move(recoveryFile, old, StandardCopyOption.REPLACE_EXISTING);
     }
   }
 }

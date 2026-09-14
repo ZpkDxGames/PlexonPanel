@@ -80,5 +80,13 @@
     "maximumLineBytes": 8192,
     "cursorPersistenceMillis": 1000,
     "redactPatterns": []
+  },
+  "commandChannel": {
+    "enabled": false,
+    "host": "127.0.0.1",
+    "port": 25575,
+    "secretFile": "",
+    "commandTimeoutMillis": 5000,
+    "readinessTimeoutSeconds": 180
   }
 }

@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased — Host-owned maintenance command channel
+
+- Move maintenance warning broadcasts, final `save-all flush`, and post-start readiness probing onto a Host-local fixed-command RCON client so the Paper plugin is no longer required for those maintenance steps.
+- Add protected Host `commandChannel` configuration with loopback-only targets, a secret-file reference instead of an inline password, bounded command/readiness timeouts, and no browser-facing arbitrary command route.
+- Make full-backup countdown timing Host-owned with the required 30m / 15m / 1m / 30s / 15s / 5s warning boundaries, durable deadline/consumed-warning state, and restart recovery that skips missed boundaries instead of replaying them.
+- Enforce a tested final-save safety gate: any RCON authentication, timeout, secret, protocol, or save-flush failure fails maintenance before the systemd stop continuation can run.
+- Replace Paper reconnection as maintenance startup readiness with active-systemd plus fixed RCON readiness verification.
+- Add RCON protocol/security/config/countdown/recovery tests and Host-local migration guidance. Live PlexonCraft RCON/firewall behavior remains a deployment acceptance gate rather than a CI claim.
+
 ## 3.4.0 — Host-authoritative Linux console and relay parity
 
 - Add a Host-owned journald console source for the configured PlexonCraft systemd service with fixed executable/arguments, bounded replay/history/queues/batches, cursor and invocation persistence, restart backoff, drop accounting, shared severity classification, and pre-transport redaction.
