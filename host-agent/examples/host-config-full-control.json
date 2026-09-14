@@ -43,30 +43,13 @@
   "backups": {
     "enabled": true,
     "directory": "/var/lib/plexonpanel-host/backups",
-    "include": [
-      "world",
-      "world_nether",
-      "world_the_end",
-      "plugins",
-      "bukkit.yml",
-      "spigot.yml",
-      "config"
-    ],
+    "include": ["world", "world_nether", "world_the_end", "plugins", "bukkit.yml", "spigot.yml", "config"],
     "retentionCount": 7,
-    "intervalMinutes": 0,
     "maximumBytes": 21474836480,
     "restoreEnabled": true,
     "rcloneExecutable": "/usr/bin/rclone",
     "rcloneRemote": "gdrive:PlexonCraft",
-    "rcloneConfig": "/etc/plexonpanel-host/rclone.conf",
-    "liveSnapshotExcludes": [
-      "logs",
-      "crash-reports",
-      "cache",
-      ".cache",
-      "tmp",
-      "plugins/spark/tmp"
-    ]
+    "rcloneConfig": "/etc/plexonpanel-host/rclone.conf"
   },
   "console": {
     "enabled": true,
