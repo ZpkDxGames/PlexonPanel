@@ -6,13 +6,16 @@ Repository CI is necessary but is not runtime certification. A green unit/build 
 
 ## Current source-integration baseline
 
-- Java/Paper/Host implementation merge: `069a3453005a6b50000154498f9fd69acf72be13`
-- Dashboard/relay merge: `a8be1e136e92f1003380082edf6494f410c0d5e7`
-- Dashboard post-merge CI: `34792944291`
-- Java final source-gate CI: `34793062255`
+- Java/Paper/Host Step 7 merge: `57c4842a6d91827205de3f00dc0a0c35e58674c5`
+- Dashboard/relay Step 7 merge: `a5e99a4f23d9e65db942a27012fbe74e368579e3`
+- Dashboard post-merge CI: `34855843387` — **PASS**
+- Java current-main-equivalent source-gate CI: `34856187122` — **PASS** on Ubuntu 24.04 x64 and ARM; the CI-only branch differed from Java `main` only by `docs/STEP7_CURRENT_MAIN_CI_TRIGGER.md` and was closed unmerged.
+- Production relay deployment run: `34855843392` — **FAIL before deployment** because `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, and `PRODUCTION_RELAY_URL` were not configured in the GitHub Actions environment. No new Worker revision was deployed by that run.
 - Protocol: `3`
 - Java: `25`
 - Runtime certification at source integration: `NOT_EXECUTED`
+
+Step 7 source integration is therefore repository-green but **not production-certified**. Production relay deployment must succeed against the accepted Dashboard/relay commit, and the live Host/Paper/journald acceptance checks must run on the authorized PlexonCraft host before Step 7 can be recorded as runtime PASS.
 
 If any repository changes are merged after this document, record the exact deployed `main` commit in the acceptance evidence. Do not silently treat the implementation baseline above as the deployed release SHA.
 
@@ -58,6 +61,17 @@ Verify:
 - duplicate/stale request replay, malformed payloads, protocol mismatch, wrong-server routing, and replaced sessions are rejected;
 - multi-server isolation is verified when more than one server is configured;
 - Cloudflare/relay exposure is limited to the intended control-plane surface.
+
+### Step 7 console-history acceptance
+
+For the Host-authoritative console architecture added in Step 7, PASS additionally requires:
+
+1. stop Paper while leaving the Host Companion online;
+2. browse retained console history through Host-owned journald history actions and verify no Paper fallback data is fabricated;
+3. start Paper again and verify new server output continues through the same Host-owned console UI;
+4. restart the Host Companion and verify cursor/replay recovery does not create an unsafe duplicate stream or lose the declared Host authority;
+5. verify historical queries remain restricted to the configured systemd unit and documented journald retention;
+6. verify `console.execute` remains Paper-only and is unavailable while Paper is offline.
 
 ## 3. Backup read bridge and permission-drift gate
 
@@ -232,7 +246,7 @@ Use a gate table or equivalent evidence record containing at least:
 | Gate | Status | Evidence / run ID | Started UTC | Ended UTC | Operator | Rollback result |
 | --- | --- | --- | --- | --- | --- | --- |
 | Upgrade / identity | NOT_EXECUTED |  |  |  |  |  |
-| Control plane / telemetry | NOT_EXECUTED |  |  |  |  |  |
+| Control plane / telemetry | NOT_EXECUTED | Step 7 repository CI only; live test pending |  |  |  |  |
 | Backup read bridge | NOT_EXECUTED |  |  |  |  |  |
 | Save coordination / preflight | NOT_EXECUTED |  |  |  |  |  |
 | Provider / Google Drive | NOT_EXECUTED |  |  |  |  |  |
