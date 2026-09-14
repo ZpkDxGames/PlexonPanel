@@ -31,6 +31,15 @@ public final class OperationFailure extends RuntimeException {
       String phase,
       String message,
       boolean retryable,
+      Map<String, String> safeDetails) {
+    this(code, phase, message, retryable, null, safeDetails, null);
+  }
+
+  public OperationFailure(
+      String code,
+      String phase,
+      String message,
+      boolean retryable,
       String safeRelativePath) {
     this(code, phase, message, retryable, safeRelativePath, Map.of(), null);
   }
