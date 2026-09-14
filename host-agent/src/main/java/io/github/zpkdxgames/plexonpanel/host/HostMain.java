@@ -45,10 +45,11 @@ public final class HostMain {
         identity =
             new DeviceIdentity(
                 UUID.fromString(config.serverId()), stored.createdAt(), stored.keyPair());
-    if (!Files.isRegularFile(Path.of(config.accessRegistry()), LinkOption.NOFOLLOW_LINKS))
-      throw new IllegalStateException("Paper must create its local access registry first");
-    DeviceRegistry devices =
-        new DeviceRegistry(Path.of(config.accessRegistry()), config.serverId());
+    Path legacyAccessRegistry = Path.of(config.accessRegistry()).toAbsolutePath().normalize();
+    HostAuthorizationMirror authorization =
+        new HostAuthorizationMirror(data.resolve("access"), config.serverId());
+    authorization.bootstrapLegacy(legacyAccessRegistry);
+    DeviceRegistry devices = authorization.registry();
     LocalAudit audit = new LocalAudit(data.resolve("audit"), 30);
     audit.clean();
     HostConnection connection = new HostConnection(config, identity);
@@ -104,7 +105,7 @@ public final class HostMain {
         new SafeFiles(
             new PathPolicy(
                 Map.of("server", root),
-                List.of(data, Path.of(config.accessRegistry()).getParent())),
+                List.of(data, legacyAccessRegistry.getParent())),
             Set.of("server"));
     SystemMetrics metrics = new SystemMetrics(root);
     ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
@@ -279,6 +280,7 @@ public final class HostMain {
                 case "server.status" -> {
                   var status = new HashMap<>(service.status());
                   status.put("paperConnected", paper.get());
+            status.put("authorizationMirror", authorization.status());
                   status.put("recoveryRequired", backups.recoveryRequired() || fullBackups.recoveryRequired());
                   return status;
                 }
@@ -336,6 +338,7 @@ public final class HostMain {
           try {
             var status = new HashMap<>(service.status());
             status.put("paperConnected", paper.get());
+            status.put("authorizationMirror", authorization.status());
             status.put("recoveryRequired", backups.recoveryRequired() || fullBackups.recoveryRequired());
             connection.send("service.status", status, MessagePriority.TELEMETRY);
           } catch (Exception e) {
@@ -350,12 +353,24 @@ public final class HostMain {
               paper.set(online);
               if (online) paperRevision.incrementAndGet();
             }
+            case "access.authority.sync" -> {
+              try {
+                authorization.apply(m.body());
+              } catch (Exception rejected) {
+                System.err.println(
+                    "PlexonPanel Host access mirror rejected snapshot: "
+                        + rejected.getClass().getSimpleName()
+                        + ": "
+                        + rejected.getMessage());
+              }
+            }
             case "backup.coordination.result" -> leases.accept(m);
             case "maintenance.coordination.result" -> maintenanceLink.accept(m);
             default -> engine.accept(m);
           }
         },
         () -> {
+          connection.send("access.authority.request", Map.of(), MessagePriority.CRITICAL);
           telemetryScheduler.execute(fastSnapshot);
           scheduler.execute(serviceSnapshot);
         });

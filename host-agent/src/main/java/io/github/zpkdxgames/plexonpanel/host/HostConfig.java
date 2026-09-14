@@ -270,6 +270,8 @@ public record HostConfig(
     Map<String, Boolean> result = new TreeMap<>();
     for (String s : Scopes.ALL) result.put(s, false);
     result.putAll(capabilities);
+    for (String s : Scopes.ALL)
+      if (s.startsWith("devices.")) result.put(s, false);
     for (String s :
         List.of(
             "backup.view", "backup.create", "backup.download", "backup.delete", "backup.restore"))

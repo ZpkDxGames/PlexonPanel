@@ -14,6 +14,7 @@ import java.util.*;
  */
 public final class DeviceRegistry {
   private static final String SHARED_FILE_MODE = "rw-rw----";
+  private static final String PRIVATE_FILE_MODE = "rw-------";
 
   public record Device(
       String deviceId,
@@ -33,6 +34,9 @@ public final class DeviceRegistry {
   private final Path path;
   private final String serverId;
   private final Clock clock;
+  private final String fileMode;
+  private final boolean trackLastSeen;
+  private final long initialGeneration;
   private final Gson gson = new Gson();
   private Pending pending;
 
@@ -41,9 +45,28 @@ public final class DeviceRegistry {
   }
 
   public DeviceRegistry(Path path, String serverId, Clock clock) throws IOException {
+    this(path, serverId, clock, SHARED_FILE_MODE, true, Math.max(1, clock.millis()));
+  }
+
+  /** Host-owned mirror: private files, no local last-seen revision churn, deterministic bootstrap marker. */
+  public static DeviceRegistry hostMirror(Path path, String serverId) throws IOException {
+    return new DeviceRegistry(path, serverId, Clock.systemUTC(), PRIVATE_FILE_MODE, false, 1L);
+  }
+
+  private DeviceRegistry(
+      Path path,
+      String serverId,
+      Clock clock,
+      String fileMode,
+      boolean trackLastSeen,
+      long initialGeneration)
+      throws IOException {
     this.path = path.toAbsolutePath().normalize();
     this.serverId = UUID.fromString(serverId).toString();
     this.clock = clock;
+    this.fileMode = fileMode;
+    this.trackLastSeen = trackLastSeen;
+    this.initialGeneration = initialGeneration;
     Files.createDirectories(this.path.getParent());
     if (Files.isSymbolicLink(path)) throw new IOException("Access registry must not be a symlink");
     locked(state -> state);
@@ -105,7 +128,7 @@ public final class DeviceRegistry {
     if (!device.scopes.contains(scope)) throw new SecurityException("SCOPE_DENIED");
     if (!Boolean.TRUE.equals(capabilities.get(scope)))
       throw new SecurityException("CAPABILITY_DISABLED");
-    seen(deviceId);
+    if (trackLastSeen) seen(deviceId);
     return device;
   }
 
@@ -155,6 +178,29 @@ public final class DeviceRegistry {
     locked(s -> new State(3, serverId, Math.addExact(s.generation, 1), s.revision + 1, List.of()));
   }
 
+  /**
+   * Replace this registry from an already authenticated authoritative snapshot. The normal Host
+   * path refuses generation/revision rollback. Bootstrap is allowed only before a Host mirror has
+   * ever received a Paper-authoritative state.
+   */
+  public synchronized State replaceAuthoritative(State incoming, boolean bootstrap) throws IOException {
+    validateIncoming(incoming);
+    return locked(
+        current -> {
+          if (!bootstrap) {
+            if (incoming.generation < current.generation)
+              throw new SecurityException("ACCESS_SNAPSHOT_STALE_GENERATION");
+            if (incoming.generation == current.generation && incoming.revision < current.revision)
+              throw new SecurityException("ACCESS_SNAPSHOT_STALE_REVISION");
+            if (incoming.generation == current.generation
+                && incoming.revision == current.revision
+                && !incoming.equals(current))
+              throw new SecurityException("ACCESS_SNAPSHOT_REVISION_CONFLICT");
+          }
+          return incoming.equals(current) ? current : incoming;
+        });
+  }
+
   public synchronized State snapshot() throws IOException {
     return locked(s -> s);
   }
@@ -186,26 +232,51 @@ public final class DeviceRegistry {
           if (device.expiresAt <= device.issuedAt || device.expiresAt - device.issuedAt > 2592000)
             throw new IOException("Invalid device lifetime");
         }
-      } else previous = new State(3, serverId, Math.max(1, clock.millis()), 1, List.of());
+      } else previous = new State(3, serverId, initialGeneration, 1, List.of());
       State next = operation.apply(previous);
       if (!Files.exists(path) || next != previous) {
         AtomicFiles.writeUtf8(path, gson.toJson(next));
-        enforceSharedFileMode(path);
-        enforceSharedFileMode(lock);
+        enforceFileMode(path, fileMode);
+        enforceFileMode(lock, fileMode);
       }
       return next;
     }
   }
 
-  /**
-   * Paper and Host intentionally access the same registry as different Linux users. A shared file
-   * may therefore already have the required 0660 mode while the current process is not its owner.
-   * Linux permits group read/write in that case but rejects chmod with EPERM. Accept that ownership
-   * hand-off only when the existing POSIX mode is already exactly the required private shared mode.
-   */
-  private static void enforceSharedFileMode(Path target) throws IOException {
+  private void validateIncoming(State state) throws IOException {
+    if (state == null
+        || state.protocolVersion != 3
+        || !serverId.equals(state.serverId)
+        || state.devices == null
+        || state.devices.size() > 64
+        || state.generation < 1
+        || state.revision < 1)
+      throw new IOException("Invalid authoritative access snapshot");
     try {
-      Files.setPosixFilePermissions(target, PosixFilePermissions.fromString(SHARED_FILE_MODE));
+      for (Device device : state.devices) {
+        UUID.fromString(device.deviceId);
+        Scopes.validate(device.scopes);
+        if (device.name == null
+            || !device.name.matches("[\\p{L}\\p{N} ._()-]{1,64}")
+            || device.role == null
+            || !device.role.matches("[A-Za-z][A-Za-z0-9_-]{0,31}")
+            || device.expiresAt <= device.issuedAt
+            || device.expiresAt - device.issuedAt > 2592000)
+          throw new IOException("Invalid authoritative device grant");
+      }
+    } catch (IllegalArgumentException invalid) {
+      throw new IOException("Invalid authoritative device grant", invalid);
+    }
+  }
+
+  /**
+   * Paper's registry remains group-shared at 0660. Host-owned mirrors use 0600. If a shared file
+   * already has the exact required mode but this process is not its owner, accept that safe mode
+   * rather than failing only because chmod returned EPERM.
+   */
+  private static void enforceFileMode(Path target, String requiredMode) throws IOException {
+    try {
+      Files.setPosixFilePermissions(target, PosixFilePermissions.fromString(requiredMode));
     } catch (UnsupportedOperationException ignoredPermissions) {
       /* Non-POSIX development platform. */
     } catch (IOException permissionError) {
@@ -213,7 +284,7 @@ public final class DeviceRegistry {
         String actual =
             PosixFilePermissions.toString(
                 Files.getPosixFilePermissions(target, LinkOption.NOFOLLOW_LINKS));
-        if (!SHARED_FILE_MODE.equals(actual)) throw permissionError;
+        if (!requiredMode.equals(actual)) throw permissionError;
       } catch (UnsupportedOperationException ignoredPermissions) {
         throw permissionError;
       } catch (IOException verificationError) {
