@@ -207,6 +207,64 @@ public final class MaintenanceManager implements AutoCloseable {
     return queue("FULL_RESTORE_POINT", null, device, false, false);
   }
 
+  /**
+   * Resolves a durable maintenance recovery gate only after the operator has restored Minecraft to
+   * a positively verified running state. This never invents backup success; the interrupted job is
+   * finalized as FAILED while preserving its original error code.
+   */
+  public synchronized Map<String, Object> resolveRecovery(DeviceRegistry.Device device)
+      throws Exception {
+    if (closed.get()) throw new IllegalStateException("HOST_OFFLINE");
+    MaintenanceStateStore.Job recovery = state.recoveryRequired();
+    if (recovery == null)
+      return Map.of("resolved", false, "state", "NONE");
+
+    Map<String, Object> serviceStatus = service.status();
+    if (!"active".equals(serviceStatus.get("state")))
+      throw new OperationFailure(
+          "RECOVERY_STATE_NOT_VERIFIED",
+          "RECOVERY_REQUIRED",
+          "Minecraft must be running before maintenance recovery can be acknowledged.",
+          true,
+          Map.of(
+              "jobId", recovery.jobId(),
+              "state", recovery.phase(),
+              "requiredServiceState", "active"));
+
+    requireCommandChannel();
+    MinecraftCommandChannel.Result readiness = commandChannel.readinessProbe();
+    if (!readiness.success())
+      throw new OperationFailure(
+          "RECOVERY_STATE_NOT_VERIFIED",
+          "RECOVERY_REQUIRED",
+          "Minecraft must pass the Host-local readiness probe before maintenance recovery can be acknowledged.",
+          true,
+          Map.of("jobId", recovery.jobId(), "state", recovery.phase()));
+
+    String originalCode = recovery.errorCode();
+    state.markRecovered(recovery, "FAILED");
+    MaintenanceStateStore.Job resolved = state.active();
+    publish(
+        "maintenance.recovery.resolved",
+        Map.of(
+            "jobId", recovery.jobId(),
+            "kind", recovery.kind(),
+            "result", "FAILED",
+            "errorCode", originalCode == null ? "" : originalCode));
+    audit(
+        "maintenance.recovery.resolve",
+        "SUCCESS",
+        actor(device, false),
+        false,
+        recovery.jobId(),
+        recovery.backupId(),
+        Map.of("verifiedServiceState", "active", "readinessVerified", true));
+    return Map.of(
+        "resolved", true,
+        "jobId", recovery.jobId(),
+        "state", resolved == null ? "FAILED" : resolved.phase());
+  }
+
   private synchronized String queue(
       String kind,
       Instant occurrence,
@@ -619,7 +677,8 @@ public final class MaintenanceManager implements AutoCloseable {
       }
       boolean destructiveBoundary = stoppedByUs || stopBoundaryEntered.get();
       fail(job, device, automatic, "backup.full.create", error, destructiveBoundary);
-      if (destructiveBoundary) tryStartAfterFailure();
+      if (shouldStartAfterFullBackupFailure(destructiveBoundary, job.localBackupVerified()))
+        tryStartAfterFailure();
     } finally {
       if (locked) operationLock.unlock();
     }
@@ -729,6 +788,11 @@ public final class MaintenanceManager implements AutoCloseable {
 
   private static void requireSuccess(MinecraftCommandChannel.Result result) throws IOException {
     if (!result.success()) throw new IOException(result.code());
+  }
+
+  static boolean shouldStartAfterFullBackupFailure(
+      boolean destructiveBoundary, boolean localBackupVerified) {
+    return destructiveBoundary && localBackupVerified;
   }
 
   private void tryStartAfterFailure() {

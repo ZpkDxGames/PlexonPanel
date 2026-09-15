@@ -118,6 +118,7 @@ public final class Scopes {
     actions.put("maintenance.settings.update", "maintenance.configure");
     actions.put("maintenance.restart.now", "maintenance.restart");
     actions.put("maintenance.full-backup.create", "maintenance.run");
+    actions.put("maintenance.recovery.resolve", "maintenance.run");
     actions.put("provider.status", "provider.view");
     actions.put("provider.test", "provider.test");
     actions.put("audit.list", "audit.view");

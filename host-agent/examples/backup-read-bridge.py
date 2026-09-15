@@ -19,6 +19,7 @@ import stat
 import struct
 import subprocess
 import sys
+import time
 
 IN_ATTRIB = 0x00000004
 IN_CLOSE_WRITE = 0x00000008
@@ -27,11 +28,20 @@ IN_CREATE = 0x00000100
 IN_DELETE_SELF = 0x00000400
 IN_MOVE_SELF = 0x00000800
 IN_IGNORED = 0x00008000
-IN_ISDIR = 0x40000000
 WATCH_MASK = IN_ATTRIB | IN_CLOSE_WRITE | IN_MOVED_TO | IN_CREATE | IN_DELETE_SELF | IN_MOVE_SELF
 EVENT = struct.Struct("iIII")
 MAX_WATCHES = 200_000
 MAX_EVENT_BYTES = 1 << 20
+SETFACL_ATTEMPTS = 3
+SETFACL_RETRY_DELAY_SECONDS = 0.02
+
+# These paths are deliberately outside the Host backup/read authority even though "plugins" is a
+# configured top-level include. In particular, never grant the Host read access to device.key.
+EXCLUDED_RELATIVE_PREFIXES = (
+    Path("plugins/PlexonPanel/audit"),
+    Path("plugins/PlexonPanel/identity"),
+    Path("plugins/spark/tmp"),
+)
 
 libc = ctypes.CDLL("libc.so.6", use_errno=True)
 libc.inotify_init1.argtypes = [ctypes.c_int]
@@ -103,27 +113,68 @@ def lstat_safe(path: Path):
         return None
 
 
-def set_acl(path: Path, user: str, directory: bool) -> None:
+def inode_key(st) -> tuple[int, int]:
+    return st.st_dev, st.st_ino
+
+
+def excluded_path(root: Path, path: Path) -> bool:
+    try:
+        relative = path.relative_to(root)
+    except ValueError:
+        return True
+    return any(relative == prefix or prefix in relative.parents for prefix in EXCLUDED_RELATIVE_PREFIXES)
+
+
+def run_setfacl(path: Path, acl: str) -> bool:
+    """Best-effort bounded ACL repair for a single mutable pathname.
+
+    SQLite WAL/SHM and atomic-save paths can disappear or change inode between inotify delivery,
+    lstat and setfacl. Such per-path churn must never terminate the guardian. A later inotify event
+    or the authoritative backup preflight will catch any durable unreadable file.
+    """
+    for attempt in range(SETFACL_ATTEMPTS):
+        before = lstat_safe(path)
+        if before is None or stat.S_ISLNK(before.st_mode):
+            return False
+        before_key = inode_key(before)
+        try:
+            result = subprocess.run(
+                ["/usr/bin/setfacl", "-m", acl, "--", str(path)],
+                check=False,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=10,
+            )
+        except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+            result = None
+        if result is not None and result.returncode == 0:
+            return True
+
+        after = lstat_safe(path)
+        if after is None or stat.S_ISLNK(after.st_mode):
+            return False
+        if inode_key(after) != before_key:
+            if attempt + 1 < SETFACL_ATTEMPTS:
+                time.sleep(SETFACL_RETRY_DELAY_SECONDS)
+            continue
+
+        # Persistent failure on one path is not a service-fatal condition. The Host's preflight is
+        # the fail-closed authority for durable unreadable data. Keep watching the remaining tree.
+        return False
+    return False
+
+
+def set_acl(path: Path, user: str, directory: bool) -> bool:
     # No shell. setfacl recalculates the ACL mask to include the named user without granting write.
     permission = "r-x" if directory else "r--"
-    subprocess.run(
-        ["/usr/bin/setfacl", "-m", f"u:{user}:{permission}", "--", str(path)],
-        check=True,
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        timeout=10,
-    )
+    if not run_setfacl(path, f"u:{user}:{permission}"):
+        return False
     if directory:
         # Defaults help normal creates; event repair still handles chmod(0600)/atomic replacements.
-        subprocess.run(
-            ["/usr/bin/setfacl", "-m", f"d:u:{user}:r-x", "--", str(path)],
-            check=True,
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            timeout=10,
-        )
+        if not run_setfacl(path, f"d:u:{user}:r-x"):
+            return False
+    return True
 
 
 def repair(root: Path, path: Path, user: str, root_entry: bool = False) -> bool:
@@ -133,26 +184,23 @@ def repair(root: Path, path: Path, user: str, root_entry: bool = False) -> bool:
     resolved = Path(os.path.realpath(path))
     if not contained(root, resolved):
         return False
+    if excluded_path(root, path):
+        return False
     if root_entry:
         # The service needs traverse only on the server root itself.
-        subprocess.run(
-            ["/usr/bin/setfacl", "-m", f"u:{user}:--x", "--", str(path)],
-            check=True,
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            timeout=10,
-        )
+        if not run_setfacl(path, f"u:{user}:--x"):
+            return False
         return stat.S_ISDIR(st.st_mode)
     if stat.S_ISDIR(st.st_mode):
-        set_acl(path, user, True)
-        return True
+        return set_acl(path, user, True)
     if stat.S_ISREG(st.st_mode):
         set_acl(path, user, False)
     return False
 
 
 def scan_tree(root: Path, include_path: Path, user: str, add_watch) -> None:
+    if excluded_path(root, include_path):
+        return
     st = lstat_safe(include_path)
     if st is None or stat.S_ISLNK(st.st_mode):
         return
@@ -166,6 +214,9 @@ def scan_tree(root: Path, include_path: Path, user: str, add_watch) -> None:
         return
     for current, dirs, files in os.walk(include_path, topdown=True, followlinks=False):
         current_path = Path(current)
+        if excluded_path(root, current_path):
+            dirs[:] = []
+            continue
         if not contained(root, Path(os.path.realpath(current_path))):
             dirs[:] = []
             continue
@@ -175,11 +226,17 @@ def scan_tree(root: Path, include_path: Path, user: str, add_watch) -> None:
         for name in dirs:
             child = current_path / name
             st_child = lstat_safe(child)
-            if st_child is not None and not stat.S_ISLNK(st_child.st_mode):
+            if (
+                st_child is not None
+                and not stat.S_ISLNK(st_child.st_mode)
+                and not excluded_path(root, child)
+            ):
                 safe_dirs.append(name)
         dirs[:] = safe_dirs
         for name in files:
-            repair(root, current_path / name, user)
+            child = current_path / name
+            if not excluded_path(root, child):
+                repair(root, child, user)
 
 
 def main() -> int:
@@ -198,6 +255,8 @@ def main() -> int:
     watches: dict[int, Path] = {}
 
     def add_watch(directory: Path) -> None:
+        if excluded_path(root, directory):
+            return
         if len(watches) >= MAX_WATCHES:
             fail("inotify watch safety limit exceeded")
         encoded = os.fsencode(directory)
@@ -236,6 +295,8 @@ def main() -> int:
             target = base / name if name else base
             if mask & (IN_DELETE_SELF | IN_MOVE_SELF):
                 watches.pop(wd, None)
+                continue
+            if excluded_path(root, target):
                 continue
             is_dir = repair(root, target, user)
             if is_dir and mask & (IN_CREATE | IN_MOVED_TO):

@@ -364,7 +364,17 @@ public final class MaintenanceStateStore {
             null,
             null,
             false);
-    finish(cleared, result, "SUCCESS".equals(result) ? "" : "RECOVERY_REQUIRED");
+    if ("SUCCESS".equals(result)) {
+      finish(cleared, result, "");
+      return;
+    }
+    String code = safe(job.errorCode());
+    if (code.isBlank()) code = "RECOVERY_REQUIRED";
+    finish(
+        cleared,
+        result,
+        code,
+        "Recovery was acknowledged after Minecraft service state and readiness were verified.");
   }
 
   static boolean terminal(Job job) {

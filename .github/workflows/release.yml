@@ -48,6 +48,13 @@ jobs:
           esac
           java -XshowSettings:properties -version 2>&1 | grep -E 'os\.arch|java\.version'
 
+      - name: Validate backup read bridge
+        shell: bash
+        run: |
+          set -euo pipefail
+          PYTHONPYCACHEPREFIX="${RUNNER_TEMP}/pycache" python3 -m py_compile host-agent/examples/backup-read-bridge.py
+          PYTHONDONTWRITEBYTECODE=1 python3 scripts/test-backup-read-bridge.py
+
       - name: Read project version
         id: project
         shell: bash
@@ -146,6 +153,13 @@ jobs:
             exit 1
           fi
 
+      - name: Validate backup read bridge
+        shell: bash
+        run: |
+          set -euo pipefail
+          PYTHONPYCACHEPREFIX="${RUNNER_TEMP}/pycache" python3 -m py_compile host-agent/examples/backup-read-bridge.py
+          PYTHONDONTWRITEBYTECODE=1 python3 scripts/test-backup-read-bridge.py
+
       - name: Test, check, Javadoc and build matched pair
         run: ./gradlew --no-daemon clean test check javadoc :agent:jar :host-agent:jar
 
@@ -171,8 +185,8 @@ jobs:
           assert manifest['protocolVersion'] == 3
           assert manifest['java'] == 25
           assert manifest['runtimeCertification'] == 'NOT_EXECUTED'
-          assert manifest['dashboardCandidateCommit'] == '5c087fc78b65a4e106a703f73cc7c14aa4731c87'
-          assert manifest['dashboardCiRun'] == 34918283724
+          assert manifest['dashboardCandidateCommit'] == 'c9d459d23da4408a16ff38fa2d1c9fb469cf6aa9'
+          assert manifest['dashboardCiRun'] == 35005309781
           assert manifest['hostArtifactType'] == 'architecture-neutral-java-jar'
           assert manifest['hostSupportedPlatforms'] == ['linux-x64', 'linux-arm64']
 
