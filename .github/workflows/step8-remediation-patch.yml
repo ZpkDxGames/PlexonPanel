@@ -18,37 +18,7 @@ jobs:
           fetch-depth: 0
 
       - name: Apply fail-closed maintenance remediation
-        run: |
-          python3 - <<'PY'
-          from pathlib import Path
-
-          path = Path('host-agent/src/main/java/io/github/zpkdxgames/plexonpanel/host/MaintenanceManager.java')
-          text = path.read_text()
-
-          if 'static boolean shouldStartAfterFullBackupFailure(' not in text:
-              needle = '      if (destructiveBoundary) tryStartAfterFailure();'
-              index = text.rfind(needle)
-              if index < 0:
-                  raise SystemExit('full-backup recovery-start call not found')
-              replacement = '''      if (shouldStartAfterFullBackupFailure(destructiveBoundary, job.localBackupVerified()))
-                tryStartAfterFailure();'''
-              text = text[:index] + replacement + text[index + len(needle):]
-
-              marker = '  private void tryStartAfterFailure() {'
-              helper = '''  static boolean shouldStartAfterFullBackupFailure(
-              boolean destructiveBoundary, boolean localBackupVerified) {
-            return destructiveBoundary && localBackupVerified;
-          }
-
-'''
-              if marker not in text:
-                  raise SystemExit('recovery-start method marker not found')
-              text = text.replace(marker, helper + marker, 1)
-              path.write_text(text)
-
-          test = Path('host-agent/src/test/java/io/github/zpkdxgames/plexonpanel/host/MaintenanceFullBackupFailurePolicyTest.java')
-          test.write_text('''package io.github.zpkdxgames.plexonpanel.host;\n\nimport static org.junit.jupiter.api.Assertions.*;\n\nimport org.junit.jupiter.api.Test;\n\nclass MaintenanceFullBackupFailurePolicyTest {\n  @Test\n  void archiveFailureBeforeLocalVerificationFailsClosed() {\n    assertFalse(MaintenanceManager.shouldStartAfterFullBackupFailure(true, false));\n  }\n\n  @Test\n  void preDestructiveFailureNeverStartsService() {\n    assertFalse(MaintenanceManager.shouldStartAfterFullBackupFailure(false, false));\n    assertFalse(MaintenanceManager.shouldStartAfterFullBackupFailure(false, true));\n  }\n\n  @Test\n  void verifiedLocalBackupMayRecoverServiceAvailability() {\n    assertTrue(MaintenanceManager.shouldStartAfterFullBackupFailure(true, true));\n  }\n}\n''')
-          PY
+        run: python3 scripts/step8-remediation-patch.py
 
       - name: Commit remediation
         run: |
