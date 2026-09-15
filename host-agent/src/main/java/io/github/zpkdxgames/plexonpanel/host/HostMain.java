@@ -59,13 +59,14 @@ public final class HostMain {
     SystemdService service = new SystemdService(config.serviceName());
     MinecraftCommandChannel commands = new RconMinecraftCommandChannel(config.commandChannel());
     AtomicBoolean paper = new AtomicBoolean();
+    MinecraftReadinessCache minecraftReadiness = new MinecraftReadinessCache(commands);
     ReentrantLock operationLock = new ReentrantLock();
 
     FullRestorePointManager fullBackups =
         new FullRestorePointManager(
             config,
             service,
-            () -> commands.readinessProbe().success(),
+            minecraftReadiness::probeNow,
             operationLock,
             progress -> connection.send("backup.progress", progress, MessagePriority.EVENT));
     FullBackupPreflight fullPreflight = new FullBackupPreflight(config, fullBackups);
@@ -131,6 +132,11 @@ public final class HostMain {
                   result.put(
                       "backupRootWritable", Files.isDirectory(directory) && Files.isWritable(directory));
                   result.put("commandChannelConfigured", commands.enabled());
+                  Map<String, Object> serviceStatus = service.status();
+                  result.put(
+                      "minecraftReady",
+                      minecraftReadiness.refresh(
+                          "active".equals(serviceStatus.get("state"))));
                   result.put("hostStartedAt", hostStartedAt.toString());
                   result.put(
                       "hostConfigLoadedAt", Instant.ofEpochMilli(configLoadedMtime).toString());
@@ -240,7 +246,10 @@ public final class HostMain {
                   status.put("paperConnected", paper.get());
                   status.put("authorizationMirror", authorization.status());
                   status.put("commandChannelConfigured", commands.enabled());
-                  status.put("minecraftReady", commands.readinessProbe().success());
+                  status.put(
+                      "minecraftReady",
+                      minecraftReadiness.observeServiceState(
+                          "active".equals(status.get("state"))));
                   status.put("recoveryRequired", fullBackups.recoveryRequired());
                   return status;
                 }
@@ -252,6 +261,7 @@ public final class HostMain {
                     if (action.equals("server.restart") || action.equals("server.stop")) {
                       service.action("stop");
                       waitStopped(service, commands, 180);
+                      minecraftReadiness.markStopped();
                     }
                     if (!action.equals("server.stop")) {
                       if (action.equals("server.start") && !service.stopped())
@@ -259,6 +269,7 @@ public final class HostMain {
                       service.action("start");
                       waitStarted(
                           service, commands, config.commandChannel().readinessTimeoutSeconds());
+                      minecraftReadiness.markStarted();
                     }
                     return Map.of(
                         "state", action.equals("server.stop") ? "stopped" : "running",
@@ -292,7 +303,10 @@ public final class HostMain {
             var status = new HashMap<>(service.status());
             status.put("paperConnected", paper.get());
             status.put("authorizationMirror", authorization.status());
-            status.put("minecraftReady", commands.readinessProbe().success());
+            status.put(
+                      "minecraftReady",
+                      minecraftReadiness.observeServiceState(
+                          "active".equals(status.get("state"))));
             status.put("recoveryRequired", fullBackups.recoveryRequired());
             connection.send("service.status", status, MessagePriority.TELEMETRY);
           } catch (Exception e) {
