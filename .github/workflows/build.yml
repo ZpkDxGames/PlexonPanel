@@ -79,6 +79,13 @@ jobs:
           )"
           echo "version=${version}" >> "$GITHUB_OUTPUT"
 
+      - name: Validate backup read bridge
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile host-agent/examples/backup-read-bridge.py
+          python3 scripts/test-backup-read-bridge.py
+
       - name: Test, check, Javadoc and build matched pair
         run: ./gradlew --no-daemon clean test check javadoc :agent:jar :host-agent:jar
 
