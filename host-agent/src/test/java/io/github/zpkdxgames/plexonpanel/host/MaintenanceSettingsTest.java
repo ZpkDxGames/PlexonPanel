@@ -20,6 +20,11 @@ class MaintenanceSettingsTest {
     assertFalse(settings.restart().schedule().enabled());
     assertTrue(settings.fullRestorePoint().restartAfter());
     assertEquals("SINGLE_CURRENT", settings.fullRestorePoint().retentionMode());
+    assertTrue(
+        settings
+            .fullRestorePoint()
+            .excludes()
+            .containsAll(MaintenanceSettings.REQUIRED_FULL_BACKUP_EXCLUDES));
   }
 
   @Test
@@ -50,6 +55,11 @@ class MaintenanceSettingsTest {
     var loaded = MaintenanceSettings.load(path);
     assertEquals(configured, loaded);
     assertEquals("Europe/Berlin", loaded.timezone());
+    assertTrue(
+        loaded
+            .fullRestorePoint()
+            .excludes()
+            .containsAll(MaintenanceSettings.REQUIRED_FULL_BACKUP_EXCLUDES));
   }
 
   @Test
@@ -88,11 +98,37 @@ class MaintenanceSettingsTest {
     assertNotNull(loaded);
     assertFalse(loaded.restart().schedule().enabled());
     assertEquals("SINGLE_CURRENT", loaded.fullRestorePoint().retentionMode());
+    assertTrue(
+        loaded
+            .fullRestorePoint()
+            .excludes()
+            .containsAll(MaintenanceSettings.REQUIRED_FULL_BACKUP_EXCLUDES));
 
     loaded.save(path);
     JsonObject saved = JsonParser.parseString(Files.readString(path)).getAsJsonObject();
     assertFalse(saved.has("liveSnapshot"));
     assertFalse(saved.getAsJsonObject("fullRestorePoint").has("schedule"));
+  }
+
+  @Test
+  void operatorCannotRemoveMandatorySecurityExclusions() {
+    var base = MaintenanceSettings.migratedDefaults();
+    var configured =
+        new MaintenanceSettings.FullRestorePoint(
+            base.fullRestorePoint().retentionMode(),
+            base.fullRestorePoint().retentionCount(),
+            true,
+            base.fullRestorePoint().canonicalFilename(),
+            base.fullRestorePoint().uploadTimeoutSeconds(),
+            base.fullRestorePoint().verificationMode(),
+            base.fullRestorePoint().maximumBytes(),
+            List.of("world/session.lock"));
+
+    assertTrue(configured.excludes().contains("world/session.lock"));
+    assertTrue(configured.excludes().containsAll(MaintenanceSettings.REQUIRED_FULL_BACKUP_EXCLUDES));
+    assertTrue(configured.excludes().contains("plugins/PlexonPanel/identity"));
+    assertTrue(configured.excludes().contains("plugins/PlexonPanel/audit"));
+    assertTrue(configured.excludes().contains("plugins/spark/tmp"));
   }
 
   @Test
