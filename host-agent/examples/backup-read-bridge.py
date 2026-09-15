@@ -187,8 +187,9 @@ def repair(root: Path, path: Path, user: str, root_entry: bool = False) -> bool:
     if excluded_path(root, path):
         return False
     if root_entry:
-        # The service needs traverse only on the server root itself.
-        if not run_setfacl(path, f"u:{user}:--x"):
+        # Java backup/preflight walkers enumerate the server root, so the Host needs read + traverse
+        # here as well as on configured include directories. Never grant write.
+        if not run_setfacl(path, f"u:{user}:r-x"):
             return False
         return stat.S_ISDIR(st.st_mode)
     if stat.S_ISDIR(st.st_mode):

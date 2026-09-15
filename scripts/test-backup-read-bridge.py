@@ -11,14 +11,15 @@ assert spec.loader is not None
 spec.loader.exec_module(bridge)
 
 class FakeStat:
-    def __init__(self, inode: int):
-        self.st_mode = stat.S_IFREG | 0o600
+    def __init__(self, inode: int, mode: int = stat.S_IFREG | 0o600):
+        self.st_mode = mode
         self.st_dev = 1
         self.st_ino = inode
 
 original_lstat = bridge.lstat_safe
 original_run = bridge.subprocess.run
 original_sleep = bridge.time.sleep
+original_run_setfacl = bridge.run_setfacl
 try:
     fixed = FakeStat(10)
     bridge.lstat_safe = lambda _path: fixed
@@ -37,7 +38,15 @@ try:
     assert bridge.excluded_path(root, root / "plugins/PlexonPanel/audit/audit.jsonl")
     assert bridge.excluded_path(root, root / "plugins/spark/tmp/cache.bin")
     assert not bridge.excluded_path(root, root / "plugins/GhostBlocks/ghostblocks.yml")
+
+    root_stat = FakeStat(30, stat.S_IFDIR | 0o755)
+    captured = []
+    bridge.lstat_safe = lambda _path: root_stat
+    bridge.run_setfacl = lambda path, acl: captured.append((path, acl)) or True
+    assert bridge.repair(root, root, "plexonpanel-host", root_entry=True) is True
+    assert captured == [(root, "u:plexonpanel-host:r-x")]
 finally:
     bridge.lstat_safe = original_lstat
     bridge.subprocess.run = original_run
     bridge.time.sleep = original_sleep
+    bridge.run_setfacl = original_run_setfacl

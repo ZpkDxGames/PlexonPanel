@@ -14,7 +14,7 @@ The bridge:
 - is restricted to one fixed `serverRoot` and a bounded set of top-level backup include names;
 - rejects a symlinked server root and never follows symlinks while scanning/watching includes;
 - grants the named `plexonpanel-host` user **read** on regular files and **read/traverse** on included directories, never write;
-- grants only traverse on the server root itself;
+- grants **read/traverse** on the server root itself because Java backup and preflight walkers must enumerate its top-level entries, never write;
 - repairs ACLs after create, close-write, attribute-change, and atomic move-in events;
 - uses fixed `/usr/bin/setfacl` argv arrays, never a shell command;
 - has no network address families and a restricted systemd capability set.
@@ -64,11 +64,13 @@ sudo -u plexonpanel-host test -r /opt/plexoncraft/server/Survival_World/level.da
 echo "HOST_READ=$?"
 sudo -u plexonpanel-host test -w /opt/plexoncraft/server/Survival_World/level.dat
 echo "HOST_WRITE=$?"
+sudo -u plexonpanel-host ls -1 /opt/plexoncraft/server >/dev/null 2>&1
+echo "HOST_ROOT_ENUM=$?"
 ```
 
-Expected: `HOST_READ=0` and `HOST_WRITE=1`.
+Expected: `HOST_READ=0`, `HOST_WRITE=1`, and `HOST_ROOT_ENUM=0`.
 
-Then execute `save-all flush` from Paper repeatedly and repeat the checks. Also exercise representative plugin file churn. Finally run **Backup Diagnostics** from the Dashboard; `unreadableDurableCount` must remain zero for required durable data.
+Then execute `save-all flush` from Paper repeatedly and repeat the checks. Also exercise representative plugin file churn. Finally run **Backup Diagnostics** from the Dashboard; `unreadableDurableCount` must remain zero for required durable data and preflight must complete without an `AccessDeniedException` while enumerating `serverRoot`.
 
 Do not remove an existing working ACL guardian until these checks pass with this service.
 
