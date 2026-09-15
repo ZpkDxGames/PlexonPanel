@@ -223,6 +223,9 @@ public final class HostMain {
                   boolean skip = p.has("skipCountdown") && p.get("skipCountdown").getAsBoolean();
                   return Map.of("jobId", maintenance.restartNow(device, skip), "state", "QUEUED");
                 }
+                case "maintenance.recovery.resolve" -> {
+                  return maintenance.resolveRecovery(device);
+                }
                 case "provider.status" -> {
                   var result = new LinkedHashMap<>(fullBackups.providerStatus());
                   result.put("hostStartedAt", hostStartedAt.toString());

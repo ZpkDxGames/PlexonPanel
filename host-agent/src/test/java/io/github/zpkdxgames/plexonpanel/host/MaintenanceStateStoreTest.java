@@ -157,6 +157,26 @@ class MaintenanceStateStoreTest {
     assertNull(store.blocking());
   }
 
+
+  @Test
+  void failedRecoveryAcknowledgementPreservesOriginalErrorCode() throws Exception {
+    var store = new MaintenanceStateStore(temporary);
+    var job = store.begin("FULL_RESTORE_POINT", null, false, "QUEUED");
+    job = store.transition(job, "WAITING_FOR_STOP", null, 40, true, false, false, true);
+    job = store.recoverInterrupted();
+    String originalCode = job.errorCode();
+
+    store.markRecovered(job, "FAILED");
+
+    var resolved = store.active();
+    assertNotNull(resolved);
+    assertEquals("FAILED", resolved.phase());
+    assertEquals(originalCode, resolved.errorCode());
+    assertFalse(resolved.restartRecoveryRequired());
+    assertNull(store.recoveryRequired());
+    assertNull(store.blocking());
+  }
+
   @Test
   void completedJobClearsRecoveryGateAndAppendsHistory() throws Exception {
     var store = new MaintenanceStateStore(temporary);
