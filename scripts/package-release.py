@@ -128,7 +128,7 @@ manifest.write_text(
                 "dashboardRelay": "deployed Worker relay rollback path",
             },
             "runtimeCertification": RUNTIME_CERTIFICATION,
-            "securityReview": "PASS_ZERO_KNOWN_HIGH_CRITICAL_PRODUCT_BLOCKERS",
+            "securityReview": "PENDING_END_TO_END_CERTIFICATION",
             "workingTreeModified": dirty,
             "productionAcceptance": "see docs/PHASE2_RUNTIME_GATES.md",
         },
