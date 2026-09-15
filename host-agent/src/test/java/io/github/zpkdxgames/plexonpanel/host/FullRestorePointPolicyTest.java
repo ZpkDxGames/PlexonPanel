@@ -2,10 +2,13 @@ package io.github.zpkdxgames.plexonpanel.host;
 
 import static org.junit.jupiter.api.Assertions.*;
 
+import java.io.*;
 import java.lang.reflect.*;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.*;
 import java.util.*;
 import java.util.concurrent.locks.ReentrantLock;
+import java.util.zip.*;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -121,5 +124,49 @@ class FullRestorePointPolicyTest {
     InvocationTargetException error =
         assertThrows(InvocationTargetException.class, () -> scan.invoke(manager, tiny));
     assertEquals("BACKUP_SIZE_LIMIT", error.getCause().getMessage());
+  }
+
+  @Test
+  void corruptStagedArchiveIsNeverPublished() throws Exception {
+    Path staging = Files.createDirectory(temporary.resolve("staging"));
+    Path restorePoints = Files.createDirectory(temporary.resolve("restore-points"));
+    Path partial = staging.resolve("candidate.partial");
+    Path published = restorePoints.resolve("candidate.zip");
+    Files.writeString(partial, "not-a-zip");
+
+    IOException failure =
+        assertThrows(
+            IOException.class,
+            () ->
+                FullRestorePointManager.verifyAndPublish(
+                    partial, published, 1, 9, 1024 * 1024));
+
+    assertEquals("LOCAL_BACKUP_STRUCTURE_INVALID", failure.getMessage());
+    assertTrue(Files.exists(partial));
+    assertFalse(Files.exists(published));
+  }
+
+  @Test
+  void verifiedStagedArchiveIsPublishedAtomically() throws Exception {
+    Path staging = Files.createDirectory(temporary.resolve("staging"));
+    Path restorePoints = Files.createDirectory(temporary.resolve("restore-points"));
+    Path partial = staging.resolve("candidate.partial");
+    Path published = restorePoints.resolve("candidate.zip");
+    byte[] payload = "world-state".getBytes(StandardCharsets.UTF_8);
+    try (ZipOutputStream zip = new ZipOutputStream(Files.newOutputStream(partial))) {
+      zip.putNextEntry(new ZipEntry("world/level.dat"));
+      zip.write(payload);
+      zip.closeEntry();
+    }
+
+    FullRestorePointManager.VerifiedArchive result =
+        FullRestorePointManager.verifyAndPublish(
+            partial, published, 1, payload.length, 1024 * 1024);
+
+    assertFalse(Files.exists(partial));
+    assertTrue(Files.isRegularFile(published));
+    assertEquals(Files.size(published), result.archiveBytes());
+    assertEquals(1, result.verification().entryCount());
+    assertEquals(payload.length, result.verification().expandedBytes());
   }
 }
