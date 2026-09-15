@@ -26,41 +26,24 @@ jobs:
           path = Path('host-agent/src/main/java/io/github/zpkdxgames/plexonpanel/host/MaintenanceManager.java')
           text = path.read_text()
 
-          old = '''      boolean destructiveBoundary = stoppedByUs || stopBoundaryEntered.get();
-                fail(job, device, automatic, "backup.full.create", error, destructiveBoundary);
-                if (destructiveBoundary) tryStartAfterFailure();'''
-          new = '''      boolean destructiveBoundary = stoppedByUs || stopBoundaryEntered.get();
-                fail(job, device, automatic, "backup.full.create", error, destructiveBoundary);
-                if (shouldStartAfterFullBackupFailure(destructiveBoundary, job.localBackupVerified()))
-                  tryStartAfterFailure();'''
-          if old not in text:
-              raise SystemExit('full-backup failure block not found')
-          text = text.replace(old, new, 1)
+          needle = '      if (destructiveBoundary) tryStartAfterFailure();'
+          index = text.rfind(needle)
+          if index < 0:
+              raise SystemExit('full-backup recovery-start call not found')
+          replacement = '''      if (shouldStartAfterFullBackupFailure(destructiveBoundary, job.localBackupVerified()))
+                tryStartAfterFailure();'''
+          text = text[:index] + replacement + text[index + len(needle):]
 
-          marker = '''  private void tryStartAfterFailure() {
-            try {
-              if (service.stopped()) service.action("start");
-            } catch (Exception startFailure) {
-              System.err.println("PlexonPanel Host could not recover server start after maintenance failure");
-            }
-          }
-          '''
-          replacement = '''  static boolean shouldStartAfterFullBackupFailure(
+          marker = '  private void tryStartAfterFailure() {'
+          helper = '''  static boolean shouldStartAfterFullBackupFailure(
               boolean destructiveBoundary, boolean localBackupVerified) {
             return destructiveBoundary && localBackupVerified;
           }
 
-          private void tryStartAfterFailure() {
-            try {
-              if (service.stopped()) service.action("start");
-            } catch (Exception startFailure) {
-              System.err.println("PlexonPanel Host could not recover server start after maintenance failure");
-            }
-          }
-          '''
+'''
           if marker not in text:
               raise SystemExit('recovery-start method marker not found')
-          text = text.replace(marker, replacement, 1)
+          text = text.replace(marker, helper + marker, 1)
           path.write_text(text)
 
           test = Path('host-agent/src/test/java/io/github/zpkdxgames/plexonpanel/host/MaintenanceFullBackupFailurePolicyTest.java')
