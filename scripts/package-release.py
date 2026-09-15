@@ -55,7 +55,7 @@ examples = [
     root / "PRIVACY.md",
 ]
 with zipfile.ZipFile(archive, "w") as zip_file:
-    for path in examples:
+    for path in (candidate for candidate in examples if candidate.is_file()):
         info = zipfile.ZipInfo(path.relative_to(root).as_posix(), (1980, 1, 1, 0, 0, 0))
         info.external_attr = 0o100644 << 16
         info.compress_type = zipfile.ZIP_DEFLATED
