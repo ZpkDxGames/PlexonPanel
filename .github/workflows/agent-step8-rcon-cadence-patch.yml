@@ -23,101 +23,55 @@ jobs:
           from pathlib import Path
           import base64
 
-          def replace_once(path: str, old: str, new: str) -> None:
-              p = Path(path)
-              text = p.read_text()
+          host = Path("host-agent/src/main/java/io/github/zpkdxgames/plexonpanel/host/HostMain.java")
+          text = host.read_text()
+
+          def once(old: str, new: str) -> None:
+              global text
               count = text.count(old)
               if count != 1:
-                  raise SystemExit(f"{path}: expected one replacement target, found {count}: {old[:100]!r}")
-              p.write_text(text.replace(old, new, 1))
+                  raise SystemExit(f"HostMain: expected one target, found {count}: {old!r}")
+              text = text.replace(old, new, 1)
 
-          host = "host-agent/src/main/java/io/github/zpkdxgames/plexonpanel/host/HostMain.java"
-
-          replace_once(
-              host,
-              '''    MinecraftCommandChannel commands = new RconMinecraftCommandChannel(config.commandChannel());
-              AtomicBoolean paper = new AtomicBoolean();
-              ReentrantLock operationLock = new ReentrantLock();''',
-              '''    MinecraftCommandChannel commands = new RconMinecraftCommandChannel(config.commandChannel());
-              AtomicBoolean paper = new AtomicBoolean();
-              MinecraftReadinessCache minecraftReadiness = new MinecraftReadinessCache(commands);
-              ReentrantLock operationLock = new ReentrantLock();''',
+          once(
+              "    AtomicBoolean paper = new AtomicBoolean();",
+              "    AtomicBoolean paper = new AtomicBoolean();\n    MinecraftReadinessCache minecraftReadiness = new MinecraftReadinessCache(commands);",
+          )
+          once(
+              "() -> commands.readinessProbe().success(),",
+              "minecraftReadiness::probeNow,",
+          )
+          once(
+              '                  result.put("commandChannelConfigured", commands.enabled());',
+              '                  result.put("commandChannelConfigured", commands.enabled());\n'
+              '                  Map<String, Object> serviceStatus = service.status();\n'
+              '                  result.put(\n'
+              '                      "minecraftReady",\n'
+              '                      minecraftReadiness.refresh(\n'
+              '                          "active".equals(serviceStatus.get("state"))));',
           )
 
-          replace_once(
-              host,
-              '''            service,
-                          () -> commands.readinessProbe().success(),
-                          operationLock,''',
-              '''            service,
-                          minecraftReadiness::probeNow,
-                          operationLock,''',
+          ready_line = 'status.put("minecraftReady", commands.readinessProbe().success());'
+          ready_count = text.count(ready_line)
+          if ready_count != 2:
+              raise SystemExit(f"HostMain: expected two passive readiness probes, found {ready_count}")
+          text = text.replace(
+              ready_line,
+              'status.put(\n'
+              '                      "minecraftReady",\n'
+              '                      minecraftReadiness.observeServiceState(\n'
+              '                          "active".equals(status.get("state"))));',
           )
 
-          replace_once(
-              host,
-              '''                  result.put("commandChannelConfigured", commands.enabled());
-                          result.put("hostStartedAt", hostStartedAt.toString());''',
-              '''                  result.put("commandChannelConfigured", commands.enabled());
-                          Map<String, Object> serviceStatus = service.status();
-                          result.put(
-                              "minecraftReady",
-                              minecraftReadiness.refresh(
-                                  "active".equals(serviceStatus.get("state"))));
-                          result.put("hostStartedAt", hostStartedAt.toString());''',
+          once(
+              "                      waitStopped(service, commands, 180);",
+              "                      waitStopped(service, commands, 180);\n                      minecraftReadiness.markStopped();",
           )
-
-          replace_once(
-              host,
-              '''                  status.put("commandChannelConfigured", commands.enabled());
-                          status.put("minecraftReady", commands.readinessProbe().success());
-                          status.put("recoveryRequired", fullBackups.recoveryRequired());''',
-              '''                  status.put("commandChannelConfigured", commands.enabled());
-                          status.put(
-                              "minecraftReady",
-                              minecraftReadiness.observeServiceState(
-                                  "active".equals(status.get("state"))));
-                          status.put("recoveryRequired", fullBackups.recoveryRequired());''',
+          once(
+              "                          service, commands, config.commandChannel().readinessTimeoutSeconds());",
+              "                          service, commands, config.commandChannel().readinessTimeoutSeconds());\n                      minecraftReadiness.markStarted();",
           )
-
-          replace_once(
-              host,
-              '''                      service.action("stop");
-                              waitStopped(service, commands, 180);
-                            }
-                            if (!action.equals("server.stop")) {''',
-              '''                      service.action("stop");
-                              waitStopped(service, commands, 180);
-                              minecraftReadiness.markStopped();
-                            }
-                            if (!action.equals("server.stop")) {''',
-          )
-
-          replace_once(
-              host,
-              '''                      waitStarted(
-                                  service, commands, config.commandChannel().readinessTimeoutSeconds());
-                            }
-                            return Map.of(''',
-              '''                      waitStarted(
-                                  service, commands, config.commandChannel().readinessTimeoutSeconds());
-                              minecraftReadiness.markStarted();
-                            }
-                            return Map.of(''',
-          )
-
-          replace_once(
-              host,
-              '''            status.put("authorizationMirror", authorization.status());
-                        status.put("minecraftReady", commands.readinessProbe().success());
-                        status.put("recoveryRequired", fullBackups.recoveryRequired());''',
-              '''            status.put("authorizationMirror", authorization.status());
-                        status.put(
-                            "minecraftReady",
-                            minecraftReadiness.observeServiceState(
-                                "active".equals(status.get("state"))));
-                        status.put("recoveryRequired", fullBackups.recoveryRequired());''',
-          )
+          host.write_text(text)
 
           Path("host-agent/src/main/java/io/github/zpkdxgames/plexonpanel/host/MinecraftReadinessCache.java").write_bytes(base64.b64decode("cGFja2FnZSBpby5naXRodWIuenBrZHhnYW1lcy5wbGV4b25wYW5lbC5ob3N0OwoKaW1wb3J0IGphdmEudXRpbC5PYmplY3RzOwoKLyoqCiAqIENhY2hlcyBNaW5lY3JhZnQgUkNPTiByZWFkaW5lc3MgZm9yIHBhc3NpdmUgSG9zdCB0ZWxlbWV0cnkuCiAqCiAqIDxwPlBhc3NpdmUgc2VydmljZSBzbmFwc2hvdHMgcnVuIGZyZXF1ZW50bHksIHNvIHRoZXkgbXVzdCBub3QgY3JlYXRlIGFuIFJDT04gY29ubmVjdGlvbiBldmVyeQogKiB0aW1lLiBBIHJlYWwgcHJvYmUgaXMgcGVyZm9ybWVkIG9uY2Ugd2hlbiBzeXN0ZW1kIHRyYW5zaXRpb25zIGludG8gYWN0aXZlIHN0YXRlIGFuZCB3aGVuZXZlciBhbgogKiBvcGVyYXRpb24gZXhwbGljaXRseSByZXF1aXJlcyBmcmVzaCByZWFkaW5lc3MuIExpZmVjeWNsZSBvcGVyYXRpb25zIGNhbiBtYXJrIGEgcmVhZGluZXNzIHJlc3VsdAogKiB0aGF0IHRoZXkgaGF2ZSBhbHJlYWR5IHZlcmlmaWVkLgogKi8KZmluYWwgY2xhc3MgTWluZWNyYWZ0UmVhZGluZXNzQ2FjaGUgewogIHByaXZhdGUgZmluYWwgTWluZWNyYWZ0Q29tbWFuZENoYW5uZWwgY2hhbm5lbDsKICBwcml2YXRlIGJvb2xlYW4gc2VydmljZUFjdGl2ZTsKICBwcml2YXRlIGJvb2xlYW4gcmVhZHk7CgogIE1pbmVjcmFmdFJlYWRpbmVzc0NhY2hlKE1pbmVjcmFmdENvbW1hbmRDaGFubmVsIGNoYW5uZWwpIHsKICAgIHRoaXMuY2hhbm5lbCA9IE9iamVjdHMucmVxdWlyZU5vbk51bGwoY2hhbm5lbCk7CiAgfQoKICBzeW5jaHJvbml6ZWQgYm9vbGVhbiBvYnNlcnZlU2VydmljZVN0YXRlKGJvb2xlYW4gYWN0aXZlKSB7CiAgICBib29sZWFuIHRyYW5zaXRpb25lZFRvQWN0aXZlID0gYWN0aXZlICYmICFzZXJ2aWNlQWN0aXZlOwogICAgc2VydmljZUFjdGl2ZSA9IGFjdGl2ZTsKICAgIGlmICghYWN0aXZlKSB7CiAgICAgIHJlYWR5ID0gZmFsc2U7CiAgICAgIHJldHVybiBmYWxzZTsKICAgIH0KICAgIGlmICh0cmFuc2l0aW9uZWRUb0FjdGl2ZSkgcmVhZHkgPSBwcm9iZUNoYW5uZWwoKTsKICAgIHJldHVybiByZWFkeTsKICB9CgogIHN5bmNocm9uaXplZCBib29sZWFuIHJlZnJlc2goYm9vbGVhbiBhY3RpdmUpIHsKICAgIHNlcnZpY2VBY3RpdmUgPSBhY3RpdmU7CiAgICBpZiAoIWFjdGl2ZSkgewogICAgICByZWFkeSA9IGZhbHNlOwogICAgICByZXR1cm4gZmFsc2U7CiAgICB9CiAgICByZWFkeSA9IHByb2JlQ2hhbm5lbCgpOwogICAgcmV0dXJuIHJlYWR5OwogIH0KCiAgc3luY2hyb25pemVkIGJvb2xlYW4gcHJvYmVOb3coKSB7CiAgICByZWFkeSA9IHByb2JlQ2hhbm5lbCgpOwogICAgcmV0dXJuIHJlYWR5OwogIH0KCiAgc3luY2hyb25pemVkIHZvaWQgbWFya1N0YXJ0ZWQoKSB7CiAgICBzZXJ2aWNlQWN0aXZlID0gdHJ1ZTsKICAgIHJlYWR5ID0gdHJ1ZTsKICB9CgogIHN5bmNocm9uaXplZCB2b2lkIG1hcmtTdG9wcGVkKCkgewogICAgc2VydmljZUFjdGl2ZSA9IGZhbHNlOwogICAgcmVhZHkgPSBmYWxzZTsKICB9CgogIHByaXZhdGUgYm9vbGVhbiBwcm9iZUNoYW5uZWwoKSB7CiAgICByZXR1cm4gY2hhbm5lbC5lbmFibGVkKCkgJiYgY2hhbm5lbC5yZWFkaW5lc3NQcm9iZSgpLnN1Y2Nlc3MoKTsKICB9Cn0K"))
           Path("host-agent/src/test/java/io/github/zpkdxgames/plexonpanel/host/MinecraftReadinessCacheTest.java").write_bytes(base64.b64decode("cGFja2FnZSBpby5naXRodWIuenBrZHhnYW1lcy5wbGV4b25wYW5lbC5ob3N0OwoKaW1wb3J0IHN0YXRpYyBvcmcuanVuaXQuanVwaXRlci5hcGkuQXNzZXJ0aW9ucy4qOwoKaW1wb3J0IG9yZy5qdW5pdC5qdXBpdGVyLmFwaS5UZXN0OwoKY2xhc3MgTWluZWNyYWZ0UmVhZGluZXNzQ2FjaGVUZXN0IHsKICBAVGVzdAogIHZvaWQgcGFzc2l2ZVNuYXBzaG90c1Byb2JlT25seU9uVHJhbnNpdGlvblRvQWN0aXZlKCkgewogICAgQ291bnRpbmdDaGFubmVsIGNoYW5uZWwgPSBuZXcgQ291bnRpbmdDaGFubmVsKCk7CiAgICBNaW5lY3JhZnRSZWFkaW5lc3NDYWNoZSBjYWNoZSA9IG5ldyBNaW5lY3JhZnRSZWFkaW5lc3NDYWNoZShjaGFubmVsKTsKCiAgICBhc3NlcnRUcnVlKGNhY2hlLm9ic2VydmVTZXJ2aWNlU3RhdGUodHJ1ZSkpOwogICAgYXNzZXJ0RXF1YWxzKDEsIGNoYW5uZWwucHJvYmVzKTsKICAgIGFzc2VydFRydWUoY2FjaGUub2JzZXJ2ZVNlcnZpY2VTdGF0ZSh0cnVlKSk7CiAgICBhc3NlcnRUcnVlKGNhY2hlLm9ic2VydmVTZXJ2aWNlU3RhdGUodHJ1ZSkpOwogICAgYXNzZXJ0RXF1YWxzKDEsIGNoYW5uZWwucHJvYmVzLCAic3RlYWR5LXN0YXRlIHRlbGVtZXRyeSBtdXN0IHJldXNlIGNhY2hlZCByZWFkaW5lc3MiKTsKCiAgICBhc3NlcnRGYWxzZShjYWNoZS5vYnNlcnZlU2VydmljZVN0YXRlKGZhbHNlKSk7CiAgICBhc3NlcnRFcXVhbHMoMSwgY2hhbm5lbC5wcm9iZXMsICJpbmFjdGl2ZSBzZXJ2aWNlIG11c3Qgbm90IG9wZW4gUkNPTiIpOwogICAgYXNzZXJ0VHJ1ZShjYWNoZS5vYnNlcnZlU2VydmljZVN0YXRlKHRydWUpKTsKICAgIGFzc2VydEVxdWFscygyLCBjaGFubmVsLnByb2JlcywgIm5ldyBhY3RpdmUgdHJhbnNpdGlvbiBnZXRzIG9uZSBmcmVzaCByZWFkaW5lc3MgcHJvYmUiKTsKICB9CgogIEBUZXN0CiAgdm9pZCBleHBsaWNpdFJlZnJlc2hBbmRPcGVyYXRpb25zQ2FuRGVtYW5kRnJlc2hSZWFkaW5lc3MoKSB7CiAgICBDb3VudGluZ0NoYW5uZWwgY2hhbm5lbCA9IG5ldyBDb3VudGluZ0NoYW5uZWwoKTsKICAgIE1pbmVjcmFmdFJlYWRpbmVzc0NhY2hlIGNhY2hlID0gbmV3IE1pbmVjcmFmdFJlYWRpbmVzc0NhY2hlKGNoYW5uZWwpOwoKICAgIGFzc2VydFRydWUoY2FjaGUucmVmcmVzaCh0cnVlKSk7CiAgICBhc3NlcnRFcXVhbHMoMSwgY2hhbm5lbC5wcm9iZXMpOwogICAgYXNzZXJ0VHJ1ZShjYWNoZS5wcm9iZU5vdygpKTsKICAgIGFzc2VydEVxdWFscygyLCBjaGFubmVsLnByb2Jlcyk7CgogICAgY2FjaGUubWFya1N0b3BwZWQoKTsKICAgIGFzc2VydEZhbHNlKGNhY2hlLm9ic2VydmVTZXJ2aWNlU3RhdGUoZmFsc2UpKTsKICAgIGFzc2VydEVxdWFscygyLCBjaGFubmVsLnByb2Jlcyk7CiAgICBjYWNoZS5tYXJrU3RhcnRlZCgpOwogICAgYXNzZXJ0VHJ1ZShjYWNoZS5vYnNlcnZlU2VydmljZVN0YXRlKHRydWUpKTsKICAgIGFzc2VydEVxdWFscygKICAgICAgICAyLAogICAgICAgIGNoYW5uZWwucHJvYmVzLAogICAgICAgICJ2ZXJpZmllZCBsaWZlY3ljbGUgc3RhcnQgc2hvdWxkIG5vdCBiZSBwcm9iZWQgYWdhaW4gaW1tZWRpYXRlbHkiKTsKICB9CgogIEBUZXN0CiAgdm9pZCBkaXNhYmxlZE9yRmFpbGVkQ2hhbm5lbEZhaWxzQ2xvc2VkKCkgewogICAgQ291bnRpbmdDaGFubmVsIGRpc2FibGVkID0gbmV3IENvdW50aW5nQ2hhbm5lbCgpOwogICAgZGlzYWJsZWQuZW5hYmxlZCA9IGZhbHNlOwogICAgTWluZWNyYWZ0UmVhZGluZXNzQ2FjaGUgZGlzYWJsZWRDYWNoZSA9IG5ldyBNaW5lY3JhZnRSZWFkaW5lc3NDYWNoZShkaXNhYmxlZCk7CiAgICBhc3NlcnRGYWxzZShkaXNhYmxlZENhY2hlLm9ic2VydmVTZXJ2aWNlU3RhdGUodHJ1ZSkpOwogICAgYXNzZXJ0RXF1YWxzKDAsIGRpc2FibGVkLnByb2Jlcyk7CgogICAgQ291bnRpbmdDaGFubmVsIGZhaWxlZCA9IG5ldyBDb3VudGluZ0NoYW5uZWwoKTsKICAgIGZhaWxlZC5yZXN1bHQgPSBNaW5lY3JhZnRDb21tYW5kQ2hhbm5lbC5SZXN1bHQuZmFpbGVkKCJSQ09OX1VOQVZBSUxBQkxFIik7CiAgICBNaW5lY3JhZnRSZWFkaW5lc3NDYWNoZSBmYWlsZWRDYWNoZSA9IG5ldyBNaW5lY3JhZnRSZWFkaW5lc3NDYWNoZShmYWlsZWQpOwogICAgYXNzZXJ0RmFsc2UoZmFpbGVkQ2FjaGUub2JzZXJ2ZVNlcnZpY2VTdGF0ZSh0cnVlKSk7CiAgICBhc3NlcnRFcXVhbHMoMSwgZmFpbGVkLnByb2Jlcyk7CiAgfQoKICBwcml2YXRlIHN0YXRpYyBmaW5hbCBjbGFzcyBDb3VudGluZ0NoYW5uZWwgaW1wbGVtZW50cyBNaW5lY3JhZnRDb21tYW5kQ2hhbm5lbCB7CiAgICBpbnQgcHJvYmVzOwogICAgYm9vbGVhbiBlbmFibGVkID0gdHJ1ZTsKICAgIFJlc3VsdCByZXN1bHQgPSBSZXN1bHQub2soKTsKCiAgICBAT3ZlcnJpZGUKICAgIHB1YmxpYyBib29sZWFuIGVuYWJsZWQoKSB7CiAgICAgIHJldHVybiBlbmFibGVkOwogICAgfQoKICAgIEBPdmVycmlkZQogICAgcHVibGljIFJlc3VsdCBtYWludGVuYW5jZU5vdGljZShNYWludGVuYW5jZU9wZXJhdGlvbiBvcGVyYXRpb24sIGludCByZW1haW5pbmdTZWNvbmRzKSB7CiAgICAgIHJldHVybiBSZXN1bHQub2soKTsKICAgIH0KCiAgICBAT3ZlcnJpZGUKICAgIHB1YmxpYyBSZXN1bHQgc2F2ZUFsbEZsdXNoKCkgewogICAgICByZXR1cm4gUmVzdWx0Lm9rKCk7CiAgICB9CgogICAgQE92ZXJyaWRlCiAgICBwdWJsaWMgUmVzdWx0IHJlYWRpbmVzc1Byb2JlKCkgewogICAgICBwcm9iZXMrKzsKICAgICAgcmV0dXJuIHJlc3VsdDsKICAgIH0KICB9Cn0K"))
