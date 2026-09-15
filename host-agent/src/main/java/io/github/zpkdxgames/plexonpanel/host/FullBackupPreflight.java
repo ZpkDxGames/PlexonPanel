@@ -1,6 +1,5 @@
 package io.github.zpkdxgames.plexonpanel.host;
 
-import io.github.zpkdxgames.plexonpanel.control.OperationFailure;
 import java.io.File;
 import java.io.IOException;
 import java.nio.file.*;
@@ -44,12 +43,7 @@ final class FullBackupPreflight {
     if (usable < required) throw new IOException("BACKUP_DISK_SPACE_INSUFFICIENT");
 
     int providerTimeout = Math.max(5, Math.min(15, settings.uploadTimeoutSeconds()));
-    Map<String, Object> connectivity;
-    try {
-      connectivity = backups.testProvider(providerTimeout);
-    } catch (OperationFailure failure) {
-      throw new IOException(failure.code(), failure);
-    }
+    Map<String, Object> connectivity = backups.testProvider(providerTimeout);
 
     Map<String, Object> result = new LinkedHashMap<>();
     result.put("sourceBytes", scan.bytes());
