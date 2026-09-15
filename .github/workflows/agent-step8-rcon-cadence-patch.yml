@@ -1,0 +1,280 @@
+name: Agent Step 8 RCON cadence remediation
+
+on:
+  push:
+    branches:
+      - fix/step8-rcon-readiness-cadence
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: ${{ !contains(github.event.head_commit.message, '[agent-patch]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Apply cached readiness implementation
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def replace_once(path: str, old: str, new: str) -> None:
+              p = Path(path)
+              text = p.read_text()
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f"{path}: expected one replacement target, found {count}: {old[:100]!r}")
+              p.write_text(text.replace(old, new, 1))
+
+          host = "host-agent/src/main/java/io/github/zpkdxgames/plexonpanel/host/HostMain.java"
+
+          replace_once(
+              host,
+              '''    MinecraftCommandChannel commands = new RconMinecraftCommandChannel(config.commandChannel());
+              AtomicBoolean paper = new AtomicBoolean();
+              ReentrantLock operationLock = new ReentrantLock();''',
+              '''    MinecraftCommandChannel commands = new RconMinecraftCommandChannel(config.commandChannel());
+              AtomicBoolean paper = new AtomicBoolean();
+              MinecraftReadinessCache minecraftReadiness = new MinecraftReadinessCache(commands);
+              ReentrantLock operationLock = new ReentrantLock();''',
+          )
+
+          replace_once(
+              host,
+              '''            service,
+                          () -> commands.readinessProbe().success(),
+                          operationLock,''',
+              '''            service,
+                          minecraftReadiness::probeNow,
+                          operationLock,''',
+          )
+
+          replace_once(
+              host,
+              '''                  result.put("commandChannelConfigured", commands.enabled());
+                          result.put("hostStartedAt", hostStartedAt.toString());''',
+              '''                  result.put("commandChannelConfigured", commands.enabled());
+                          Map<String, Object> serviceStatus = service.status();
+                          result.put(
+                              "minecraftReady",
+                              minecraftReadiness.refresh(
+                                  "active".equals(serviceStatus.get("state"))));
+                          result.put("hostStartedAt", hostStartedAt.toString());''',
+          )
+
+          replace_once(
+              host,
+              '''                  status.put("commandChannelConfigured", commands.enabled());
+                          status.put("minecraftReady", commands.readinessProbe().success());
+                          status.put("recoveryRequired", fullBackups.recoveryRequired());''',
+              '''                  status.put("commandChannelConfigured", commands.enabled());
+                          status.put(
+                              "minecraftReady",
+                              minecraftReadiness.observeServiceState(
+                                  "active".equals(status.get("state"))));
+                          status.put("recoveryRequired", fullBackups.recoveryRequired());''',
+          )
+
+          replace_once(
+              host,
+              '''                      service.action("stop");
+                              waitStopped(service, commands, 180);
+                            }
+                            if (!action.equals("server.stop")) {''',
+              '''                      service.action("stop");
+                              waitStopped(service, commands, 180);
+                              minecraftReadiness.markStopped();
+                            }
+                            if (!action.equals("server.stop")) {''',
+          )
+
+          replace_once(
+              host,
+              '''                      waitStarted(
+                                  service, commands, config.commandChannel().readinessTimeoutSeconds());
+                            }
+                            return Map.of(''',
+              '''                      waitStarted(
+                                  service, commands, config.commandChannel().readinessTimeoutSeconds());
+                              minecraftReadiness.markStarted();
+                            }
+                            return Map.of(''',
+          )
+
+          replace_once(
+              host,
+              '''            status.put("authorizationMirror", authorization.status());
+                        status.put("minecraftReady", commands.readinessProbe().success());
+                        status.put("recoveryRequired", fullBackups.recoveryRequired());''',
+              '''            status.put("authorizationMirror", authorization.status());
+                        status.put(
+                            "minecraftReady",
+                            minecraftReadiness.observeServiceState(
+                                "active".equals(status.get("state"))));
+                        status.put("recoveryRequired", fullBackups.recoveryRequired());''',
+          )
+
+          Path("host-agent/src/main/java/io/github/zpkdxgames/plexonpanel/host/MinecraftReadinessCache.java").write_text('''package io.github.zpkdxgames.plexonpanel.host;
+
+import java.util.Objects;
+
+/**
+ * Caches Minecraft RCON readiness for passive Host telemetry.
+ *
+ * <p>Passive service snapshots run frequently, so they must not create an RCON connection every
+ * time. A real probe is performed once when systemd transitions into active state and whenever an
+ * operation explicitly requires fresh readiness. Lifecycle operations can mark a readiness result
+ * that they have already verified.
+ */
+final class MinecraftReadinessCache {
+  private final MinecraftCommandChannel channel;
+  private boolean serviceActive;
+  private boolean ready;
+
+  MinecraftReadinessCache(MinecraftCommandChannel channel) {
+    this.channel = Objects.requireNonNull(channel);
+  }
+
+  synchronized boolean observeServiceState(boolean active) {
+    boolean transitionedToActive = active && !serviceActive;
+    serviceActive = active;
+    if (!active) {
+      ready = false;
+      return false;
+    }
+    if (transitionedToActive) ready = probeChannel();
+    return ready;
+  }
+
+  synchronized boolean refresh(boolean active) {
+    serviceActive = active;
+    if (!active) {
+      ready = false;
+      return false;
+    }
+    ready = probeChannel();
+    return ready;
+  }
+
+  synchronized boolean probeNow() {
+    ready = probeChannel();
+    return ready;
+  }
+
+  synchronized void markStarted() {
+    serviceActive = true;
+    ready = true;
+  }
+
+  synchronized void markStopped() {
+    serviceActive = false;
+    ready = false;
+  }
+
+  private boolean probeChannel() {
+    return channel.enabled() && channel.readinessProbe().success();
+  }
+}
+''')
+
+          Path("host-agent/src/test/java/io/github/zpkdxgames/plexonpanel/host/MinecraftReadinessCacheTest.java").write_text('''package io.github.zpkdxgames.plexonpanel.host;
+
+import static org.junit.jupiter.api.Assertions.*;
+
+import org.junit.jupiter.api.Test;
+
+class MinecraftReadinessCacheTest {
+  @Test
+  void passiveSnapshotsProbeOnlyOnTransitionToActive() {
+    CountingChannel channel = new CountingChannel();
+    MinecraftReadinessCache cache = new MinecraftReadinessCache(channel);
+
+    assertTrue(cache.observeServiceState(true));
+    assertEquals(1, channel.probes);
+    assertTrue(cache.observeServiceState(true));
+    assertTrue(cache.observeServiceState(true));
+    assertEquals(1, channel.probes, "steady-state telemetry must reuse cached readiness");
+
+    assertFalse(cache.observeServiceState(false));
+    assertEquals(1, channel.probes, "inactive service must not open RCON");
+    assertTrue(cache.observeServiceState(true));
+    assertEquals(2, channel.probes, "new active transition gets one fresh readiness probe");
+  }
+
+  @Test
+  void explicitRefreshAndOperationsCanDemandFreshReadiness() {
+    CountingChannel channel = new CountingChannel();
+    MinecraftReadinessCache cache = new MinecraftReadinessCache(channel);
+
+    assertTrue(cache.refresh(true));
+    assertEquals(1, channel.probes);
+    assertTrue(cache.probeNow());
+    assertEquals(2, channel.probes);
+
+    cache.markStopped();
+    assertFalse(cache.observeServiceState(false));
+    assertEquals(2, channel.probes);
+    cache.markStarted();
+    assertTrue(cache.observeServiceState(true));
+    assertEquals(2, channel.probes, "verified lifecycle start should not be probed again immediately");
+  }
+
+  @Test
+  void disabledOrFailedChannelFailsClosed() {
+    CountingChannel disabled = new CountingChannel();
+    disabled.enabled = false;
+    MinecraftReadinessCache disabledCache = new MinecraftReadinessCache(disabled);
+    assertFalse(disabledCache.observeServiceState(true));
+    assertEquals(0, disabled.probes);
+
+    CountingChannel failed = new CountingChannel();
+    failed.result = MinecraftCommandChannel.Result.failed("RCON_UNAVAILABLE");
+    MinecraftReadinessCache failedCache = new MinecraftReadinessCache(failed);
+    assertFalse(failedCache.observeServiceState(true));
+    assertEquals(1, failed.probes);
+  }
+
+  private static final class CountingChannel implements MinecraftCommandChannel {
+    int probes;
+    boolean enabled = true;
+    Result result = Result.ok();
+
+    @Override
+    public boolean enabled() {
+      return enabled;
+    }
+
+    @Override
+    public Result maintenanceNotice(MaintenanceOperation operation, int remainingSeconds) {
+      return Result.ok();
+    }
+
+    @Override
+    public Result saveAllFlush() {
+      return Result.ok();
+    }
+
+    @Override
+    public Result readinessProbe() {
+      probes++;
+      return result;
+    }
+  }
+}
+''')
+          PY
+      - name: Commit remediation for normal Build CI
+        shell: bash
+        run: |
+          git config user.name "PlexonPanel Agent"
+          git config user.email "99552287+ZpkDxGames@users.noreply.github.com"
+          git add host-agent/src/main/java/io/github/zpkdxgames/plexonpanel/host/HostMain.java \
+                  host-agent/src/main/java/io/github/zpkdxgames/plexonpanel/host/MinecraftReadinessCache.java \
+                  host-agent/src/test/java/io/github/zpkdxgames/plexonpanel/host/MinecraftReadinessCacheTest.java
+          git diff --cached --check
+          git commit -m "[agent-patch] Cache passive RCON readiness"
+          git push origin HEAD:${GITHUB_REF_NAME}
