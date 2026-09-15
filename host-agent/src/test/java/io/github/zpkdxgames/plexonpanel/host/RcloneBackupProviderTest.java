@@ -2,6 +2,7 @@ package io.github.zpkdxgames.plexonpanel.host;
 
 import static org.junit.jupiter.api.Assertions.*;
 
+import io.github.zpkdxgames.plexonpanel.control.OperationFailure;
 import java.io.IOException;
 import java.nio.file.*;
 import java.util.*;
@@ -38,6 +39,43 @@ class RcloneBackupProviderTest {
     assertEquals("2026-09-14T01:00:00Z", status.get("lastTestAt"));
     assertEquals("ERROR", status.get("lastTestState"));
     assertEquals("2026-09-14T00:00:00Z", status.get("lastSuccessfulVerificationAt"));
+  }
+
+  @Test
+  void providerTestCommandFailureReturnsTypedSafeFailure() {
+    var provider =
+        new RcloneBackupProvider(
+            config(),
+            (arguments, timeoutSeconds) ->
+                new RcloneBackupProvider.ProcessResult(
+                    1, "token=super-secret-value authentication failed"));
+
+    OperationFailure failure = assertThrows(OperationFailure.class, () -> provider.test(15));
+
+    assertEquals("RCLONE_TEST_FAILED", failure.code());
+    assertEquals("PROVIDER_TEST", failure.phase());
+    assertTrue(failure.retryable());
+    assertEquals("PROVIDER_TEST", failure.safeData().get("phase"));
+    assertEquals(true, failure.safeData().get("retryable"));
+    assertFalse(failure.toString().contains("super-secret-value"));
+  }
+
+  @Test
+  void providerTestTimeoutReturnsTypedSafeFailure() {
+    var provider =
+        new RcloneBackupProvider(
+            config(),
+            (arguments, timeoutSeconds) -> {
+              throw new IOException("RCLONE_COMMAND_TIMEOUT");
+            });
+
+    OperationFailure failure = assertThrows(OperationFailure.class, () -> provider.test(15));
+
+    assertEquals("RCLONE_TEST_FAILED", failure.code());
+    assertEquals("PROVIDER_TEST", failure.phase());
+    assertTrue(failure.retryable());
+    assertEquals("PROVIDER_TEST", failure.safeData().get("phase"));
+    assertEquals(true, failure.safeData().get("retryable"));
   }
 
   @Test
