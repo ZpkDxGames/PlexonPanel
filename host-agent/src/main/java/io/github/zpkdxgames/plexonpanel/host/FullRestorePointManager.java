@@ -217,15 +217,17 @@ public final class FullRestorePointManager {
       try (FileChannel channel = FileChannel.open(partial, StandardOpenOption.WRITE)) {
         channel.force(true);
       }
-      Files.move(partial, finalArchive, StandardCopyOption.ATOMIC_MOVE);
-      long archiveBytes = Files.size(finalArchive);
-      if (archiveBytes > settings.maximumBytes()) throw new IOException("BACKUP_SIZE_LIMIT");
-      emit(jobId, backupId, "HASHING", archiveBytes, scan.bytes, entries[0]);
-      String hash = BackupManager.fileHash(finalArchive);
-      LocalBackupVerifier.Result verified =
-          LocalBackupVerifier.verify(finalArchive, hash, entries[0], settings.maximumBytes());
-      if (verified.expandedBytes() != bytes[0])
-        throw new IOException("LOCAL_BACKUP_SIZE_MISMATCH");
+      long stagedArchiveBytes = Files.size(partial);
+      emit(jobId, backupId, "HASHING", stagedArchiveBytes, scan.bytes, entries[0]);
+      VerifiedArchive published =
+          verifyAndPublish(
+              partial,
+              finalArchive,
+              entries[0],
+              bytes[0],
+              settings.maximumBytes());
+      long archiveBytes = published.archiveBytes();
+      LocalBackupVerifier.Result verified = published.verification();
       Metadata local =
           new Metadata(
               backupId,
@@ -731,6 +733,24 @@ public final class FullRestorePointManager {
     progress.accept(event);
   }
 
+  static VerifiedArchive verifyAndPublish(
+      Path partial,
+      Path finalArchive,
+      int expectedEntries,
+      long expectedSourceBytes,
+      long maximumBytes)
+      throws IOException {
+    long archiveBytes = Files.size(partial);
+    if (archiveBytes > maximumBytes) throw new IOException("BACKUP_SIZE_LIMIT");
+    String hash = BackupManager.fileHash(partial);
+    LocalBackupVerifier.Result verified =
+        LocalBackupVerifier.verify(partial, hash, expectedEntries, maximumBytes);
+    if (verified.expandedBytes() != expectedSourceBytes)
+      throw new IOException("LOCAL_BACKUP_SIZE_MISMATCH");
+    Files.move(partial, finalArchive, StandardCopyOption.ATOMIC_MOVE);
+    return new VerifiedArchive(archiveBytes, verified);
+  }
+
   private static void validateArchiveName(String name) throws IOException {
     if (name == null
         || name.isBlank()
@@ -778,6 +798,8 @@ public final class FullRestorePointManager {
           }
         });
   }
+
+  record VerifiedArchive(long archiveBytes, LocalBackupVerifier.Result verification) {}
 
   private record Scan(long bytes, int entries) {}
 }
