@@ -619,7 +619,8 @@ public final class MaintenanceManager implements AutoCloseable {
       }
       boolean destructiveBoundary = stoppedByUs || stopBoundaryEntered.get();
       fail(job, device, automatic, "backup.full.create", error, destructiveBoundary);
-      if (destructiveBoundary) tryStartAfterFailure();
+      if (shouldStartAfterFullBackupFailure(destructiveBoundary, job.localBackupVerified()))
+        tryStartAfterFailure();
     } finally {
       if (locked) operationLock.unlock();
     }
@@ -729,6 +730,11 @@ public final class MaintenanceManager implements AutoCloseable {
 
   private static void requireSuccess(MinecraftCommandChannel.Result result) throws IOException {
     if (!result.success()) throw new IOException(result.code());
+  }
+
+  static boolean shouldStartAfterFullBackupFailure(
+      boolean destructiveBoundary, boolean localBackupVerified) {
+    return destructiveBoundary && localBackupVerified;
   }
 
   private void tryStartAfterFailure() {
