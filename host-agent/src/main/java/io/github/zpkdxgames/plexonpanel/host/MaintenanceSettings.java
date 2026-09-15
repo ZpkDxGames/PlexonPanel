@@ -17,6 +17,15 @@ import java.util.*;
 public record MaintenanceSettings(
     int schemaVersion, String timezone, Restart restart, FullRestorePoint fullRestorePoint) {
   private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
+  static final List<String> REQUIRED_FULL_BACKUP_EXCLUDES =
+      List.of(
+          "logs",
+          "crash-reports",
+          "cache",
+          ".cache",
+          "plugins/PlexonPanel/audit",
+          "plugins/PlexonPanel/identity",
+          "plugins/spark/tmp");
 
   public record Schedule(boolean enabled, String type, List<String> weekdays, String time) {
     public Schedule {
@@ -49,7 +58,10 @@ public record MaintenanceSettings(
       // JSON field for rolling-upgrade compatibility, but normalize false to true so an older
       // maintenance-settings.json cannot silently preserve the server-offline behavior.
       restartAfter = true;
-      excludes = excludes == null ? List.of() : List.copyOf(excludes);
+      LinkedHashSet<String> normalizedExcludes =
+          new LinkedHashSet<>(MaintenanceSettings.REQUIRED_FULL_BACKUP_EXCLUDES);
+      if (excludes != null) normalizedExcludes.addAll(excludes);
+      excludes = List.copyOf(normalizedExcludes);
     }
   }
 
@@ -67,7 +79,7 @@ public record MaintenanceSettings(
             1800,
             "SIZE_AND_HASH_WHEN_AVAILABLE",
             1_099_511_627_776L,
-            List.of("logs", "crash-reports", "cache", ".cache")));
+            List.of()));
   }
 
   public static MaintenanceSettings load(Path path) throws IOException {
@@ -118,6 +130,8 @@ public record MaintenanceSettings(
         || full.maximumBytes > 2_199_023_255_552L
         || full.excludes.size() > 64)
       throw new IllegalArgumentException("Invalid full restore-point settings");
+    if (!full.excludes.containsAll(REQUIRED_FULL_BACKUP_EXCLUDES))
+      throw new IllegalArgumentException("Mandatory full-backup exclusions are missing");
     for (String exclude : full.excludes)
       if (exclude == null
           || exclude.isBlank()
