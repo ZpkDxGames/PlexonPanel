@@ -145,8 +145,17 @@ public final class HostMain {
                   return Map.copyOf(result);
                 }
                 case "backup.create", "maintenance.full-backup.create" -> {
+                  int countdownSeconds =
+                      p.has("countdownSeconds")
+                          ? (int) integer(p, "countdownSeconds", -1, 300, 1800)
+                          : MaintenanceCountdown.DEFAULT_FULL_BACKUP_COUNTDOWN_SECONDS;
                   return Map.of(
-                      "jobId", maintenance.fullRestorePointNow(device, false), "state", "QUEUED");
+                      "jobId",
+                      maintenance.fullRestorePointNow(device, countdownSeconds),
+                      "state",
+                      "QUEUED",
+                      "countdownSeconds",
+                      countdownSeconds);
                 }
                 case "backup.delete", "backup.full.delete" -> {
                   fullBackups.delete(text(p, "backupId", 36));
