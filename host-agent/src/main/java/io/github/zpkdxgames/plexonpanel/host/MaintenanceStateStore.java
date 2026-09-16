@@ -32,10 +32,14 @@ public final class MaintenanceStateStore {
       boolean restartRecoveryRequired) {}
 
   /** Durable countdown state kept separately so the public job contract remains stable. */
-  public record Countdown(String jobId, String deadline, List<Integer> consumedWarnings) {
+  public record Countdown(
+      String jobId,
+      String deadline,
+      List<Integer> warningSeconds,
+      List<Integer> consumedWarnings) {
     public Countdown {
-      consumedWarnings =
-          consumedWarnings == null ? List.of() : List.copyOf(consumedWarnings);
+      warningSeconds = warningSeconds == null ? List.of() : List.copyOf(warningSeconds);
+      consumedWarnings = consumedWarnings == null ? List.of() : List.copyOf(consumedWarnings);
     }
   }
 
@@ -125,12 +129,18 @@ public final class MaintenanceStateStore {
 
   public synchronized Countdown beginCountdown(Job job, int durationSeconds, Instant now)
       throws IOException {
-    if (durationSeconds < 0 || durationSeconds > 86_400)
-      throw new IllegalArgumentException("Invalid countdown duration");
+    return beginCountdown(job, List.of(durationSeconds), now);
+  }
+
+  public synchronized Countdown beginCountdown(
+      Job job, List<Integer> warningSeconds, Instant now) throws IOException {
+    List<Integer> warnings = MaintenanceCountdown.normalized(warningSeconds);
+    int durationSeconds = MaintenanceCountdown.durationSeconds(warnings);
     requireCurrent(job);
     if (!"COUNTDOWN".equals(job.phase())) throw new IOException("COUNTDOWN_STATE_INVALID");
     Countdown countdown =
-        new Countdown(job.jobId(), now.plusSeconds(durationSeconds).toString(), List.of());
+        new Countdown(
+            job.jobId(), now.plusSeconds(durationSeconds).toString(), warnings, List.of());
     AtomicFiles.writeUtf8(countdownFile, GSON.toJson(countdown));
     return countdown;
   }
@@ -146,6 +156,11 @@ public final class MaintenanceStateStore {
     if (countdown == null || !job.jobId().equals(countdown.jobId()))
       throw new IOException("COUNTDOWN_STATE_INVALID");
     Instant.parse(countdown.deadline());
+    try {
+      MaintenanceCountdown.normalized(countdown.warningSeconds());
+    } catch (IllegalArgumentException invalid) {
+      throw new IOException("COUNTDOWN_STATE_INVALID", invalid);
+    }
     for (Integer warning : countdown.consumedWarnings())
       if (warning == null || warning < 0 || warning > 86_400)
         throw new IOException("COUNTDOWN_STATE_INVALID");
@@ -156,7 +171,12 @@ public final class MaintenanceStateStore {
     Countdown current = countdown(job);
     LinkedHashSet<Integer> consumed = new LinkedHashSet<>(current.consumedWarnings());
     consumed.add(warningSeconds);
-    Countdown next = new Countdown(job.jobId(), current.deadline(), List.copyOf(consumed));
+    Countdown next =
+        new Countdown(
+            job.jobId(),
+            current.deadline(),
+            current.warningSeconds(),
+            List.copyOf(consumed));
     AtomicFiles.writeUtf8(countdownFile, GSON.toJson(next));
     return next;
   }
