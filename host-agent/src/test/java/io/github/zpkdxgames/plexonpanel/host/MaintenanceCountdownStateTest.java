@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.*;
 
 import java.nio.file.Path;
 import java.time.Instant;
+import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -15,7 +16,7 @@ class MaintenanceCountdownStateTest {
     Instant started = Instant.parse("2026-09-14T12:00:00Z");
     var first = new MaintenanceStateStore(temporary);
     var job = first.begin("FULL_RESTORE_POINT", null, false, "COUNTDOWN");
-    first.beginCountdown(job, 1800, started);
+    first.beginCountdown(job, MaintenanceCountdown.fullBackupWarnings(1800), started);
     first.consumeWarning(job, 1800);
     first.consumeWarning(job, 900);
 
@@ -26,7 +27,8 @@ class MaintenanceCountdownStateTest {
     assertEquals("COUNTDOWN", active.phase());
     var countdown = restarted.countdown(active);
     assertEquals(started.plusSeconds(1800).toString(), countdown.deadline());
-    assertEquals(java.util.List.of(1800, 900), countdown.consumedWarnings());
+    assertEquals(List.of(1800, 900, 60, 30, 15, 5), countdown.warningSeconds());
+    assertEquals(List.of(1800, 900), countdown.consumedWarnings());
     assertNotNull(restarted.blocking());
   }
 
@@ -39,6 +41,21 @@ class MaintenanceCountdownStateTest {
 
     Exception error = assertThrows(Exception.class, () -> store.countdown(finalSave));
     assertEquals("COUNTDOWN_STATE_INVALID", error.getMessage());
+  }
+
+  @Test
+  void selectedTenMinutePlanSurvivesHostRestart() throws Exception {
+    Instant started = Instant.parse("2026-09-14T12:00:00Z");
+    var first = new MaintenanceStateStore(temporary);
+    var job = first.begin("FULL_RESTORE_POINT", null, false, "COUNTDOWN");
+    first.beginCountdown(job, MaintenanceCountdown.fullBackupWarnings(600), started);
+    first.consumeWarning(job, 600);
+
+    var restarted = new MaintenanceStateStore(temporary);
+    var countdown = restarted.countdown(restarted.active());
+    assertEquals(started.plusSeconds(600).toString(), countdown.deadline());
+    assertEquals(List.of(600, 60, 30, 15, 5), countdown.warningSeconds());
+    assertEquals(List.of(600), countdown.consumedWarnings());
   }
 
   @Test
