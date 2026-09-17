@@ -1,6 +1,6 @@
 # Full local capability deployment
 
-PlexonPanel 3.0.1 adds explicit full-control examples for the intended PlexonCraft deployment without changing signed wire protocol 3 or weakening the local authorization model.
+PlexonPanel 3.5.0 provides explicit full-control examples for the intended PlexonCraft deployment without changing signed wire protocol 3 or weakening the local authorization model. The stable Host now keeps the live Minecraft tree read-only while retaining Host-owned lifecycle, console, backup, Google Drive, and maintenance authority.
 
 Use:
 
@@ -31,8 +31,8 @@ Owner receives the canonical `Scopes.ALL` set only when a new Owner grant is iss
 | Chat | enabled by Paper policy | not a Host capability |
 | Player actions | enabled by Paper policy | not a Host capability |
 | Plugins | enabled by Paper policy | not a Host capability |
-| Files | SafeFiles under configured Paper roots | SafeFiles under `serverRoot` |
-| Backups | `backup.create` save/flush coordination only | full backup family |
+| Files | SafeFiles under configured Paper roots | read/list/download beneath read-only `serverRoot`; mutations retired |
+| Backups | legacy `backup.create` coordination metadata only | manual full backup, verify, retry-upload, download, delete and retention; remote restore retired |
 | Server status | enabled | enabled |
 | Server start/stop/restart | not Paper authority | enabled by Host policy |
 | Audit/devices/settings | enabled where implemented | enabled where implemented |
@@ -51,13 +51,13 @@ Paper file access remains confined by `SafeFiles`/`PathPolicy`: canonical roots,
 
 ## Host full-control policy
 
-The Host preset enables telemetry, server status/start/stop/restart, all currently implemented file operations, the complete backup family, audit, devices and settings.
+The Host preset enables telemetry, Host-owned console viewing, server status/start/stop/restart, read-only server-tree inspection, manual full-backup creation/verification/retry-upload/download/delete/retention, audit and settings. Host-side device mutation, server-tree mutation and remote restore are forced off even if legacy configuration requests them.
 
 Host configuration still rejects Paper-only scope families such as players, console, chat, player actions and plugins. Lifecycle operations still use the validated exact systemd service name; the daemon must run as a dedicated non-root Linux user with permission to manage that configured unit.
 
-Backup capability remains defense-in-depth gated. A configured backup scope is effective only while `backups.enabled` is true; restore additionally requires `backups.restoreEnabled`.
+Backup capability remains defense-in-depth gated. A configured backup scope is effective only while `backups.enabled` is true. Legacy `backups.restoreEnabled` is parsed for rolling-upgrade compatibility but cannot make `backup.restore` effective in the 3.5.0 stable Host.
 
-Host files remain confined beneath `serverRoot`. Full Plexon server control is not unrestricted Linux filesystem or shell access.
+The Host service mounts `serverRoot` read-only. Listing, bounded reads and downloads remain confined beneath that root; create/write/upload/rename/delete are retired from the stable Host capability contract. Full Plexon server control is not unrestricted Linux filesystem or shell access.
 
 ## Existing devices and re-pairing
 
@@ -65,12 +65,12 @@ After enabling a local capability, the Access page can still show `This Device: 
 
 ## High-risk actions
 
-Confirmation and audit remain mandatory for player ban/kill, op/deop, file delete, backup delete/restore, server stop/restart and device revoke. Full local capability never means bypassing those controls.
+Confirmation and audit remain mandatory for active high-risk actions such as player ban/kill, op/deop, Paper file delete, backup delete, server stop/restart and device revoke. Compatibility metadata for retired Host mutations does not make those actions executable. Full local capability never means bypassing these controls.
 
-## Dashboard 3.0 note
+## Dashboard 3.5 note
 
-The Dashboard 3.0 UI intentionally hides Files and Backups workspaces for now. Their backend capabilities may still be enabled by these presets for readiness and Host operations. The browser-local Display Update Rate setting does not require a new `settings.write` scope.
+Dashboard 3.5 keeps Files dormant and promotes Backups & Maintenance as an active Host-authoritative control room. It exposes selectable 30/15/10/5-minute manual-backup countdowns, durable job progress, Google Drive verification/retry, and restart scheduling without exposing retired Host file mutation or remote restore controls. The browser-local Display Update Rate setting does not require a new `settings.write` scope.
 
 ## Validation before production
 
-Run the normal Gradle test/build/package pipeline, then validate the presets in a disposable environment. Pair a new Owner, inspect the Access matrix, exercise representative safe Paper and Host actions, and separately test high-risk confirmation. Destructive file, backup restore and lifecycle validation must not target irreplaceable production data.
+Run the normal Gradle test/build/package pipeline, then validate the presets in a disposable environment. Pair a new Owner, inspect the Access matrix, exercise representative safe Paper and Host actions, and separately test high-risk confirmation. Record a real save-all → stop proof → cold archive → local verification → Google Drive promotion/verification → automatic restart run, plus degraded retry-upload and restart-schedule evidence, before stable publication. Lifecycle validation must not target irreplaceable production data.

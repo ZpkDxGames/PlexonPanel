@@ -111,7 +111,7 @@ public final class MaintenanceManager implements AutoCloseable {
           state.countdown(active);
           state.recordCountdownRecovery(active, "COUNTDOWN_RESUMED", 0);
           MaintenanceStateStore.Job resumed = active;
-          worker.execute(() -> run(resumed, null, resumed.automatic(), false, true));
+          worker.execute(() -> run(resumed, null, resumed.automatic(), false, true, null));
           resumedCountdown = true;
           publishPhase(resumed, Map.of("resumed", true));
         } catch (IOException invalidCountdown) {
@@ -171,7 +171,7 @@ public final class MaintenanceManager implements AutoCloseable {
     result.put("timezone", current.timezone());
     result.put("nextRestart", restart == null ? "" : restart.toString());
     result.put("fullBackupMode", "MANUAL_ONLY");
-    result.put("jobStateContractVersion", 3);
+    result.put("jobStateContractVersion", 4);
     result.put("currentOperation", active == null ? Map.of() : active);
     result.put("provider", fullBackups.providerStatus());
     result.put("restoreRecoveryRequired", fullBackups.recoveryRequired());
@@ -187,6 +187,9 @@ public final class MaintenanceManager implements AutoCloseable {
         result.put("countdownDeadline", countdown.deadline());
         result.put("countdownRemainingSeconds", remainingSeconds);
         result.put("countdownWarningsSent", countdown.consumedWarnings());
+        List<Integer> warningSeconds = durableWarnings(active, countdown);
+        result.put("countdownInitialSeconds", MaintenanceCountdown.durationSeconds(warningSeconds));
+        result.put("countdownWarningSeconds", warningSeconds);
         result.put("countdownState", "ACTIVE");
       } catch (IOException | DateTimeException invalidCountdown) {
         // Never invent a deadline in the public status contract. Recovery logic will classify an
@@ -198,13 +201,23 @@ public final class MaintenanceManager implements AutoCloseable {
   }
 
   public String restartNow(DeviceRegistry.Device device, boolean skipCountdown) throws Exception {
-    return queue("RESTART", null, device, false, skipCountdown);
+    return queue("RESTART", null, device, false, skipCountdown, null);
   }
 
-  /** Manual full backups always use the mandatory Host-owned countdown while Minecraft is online. */
-  public String fullRestorePointNow(DeviceRegistry.Device device, boolean ignoredSkipCountdown)
+  /** Manual full backups use one validated Host-owned countdown while Minecraft is online. */
+  public String fullRestorePointNow(DeviceRegistry.Device device, int countdownSeconds)
       throws Exception {
-    return queue("FULL_RESTORE_POINT", null, device, false, false);
+    try {
+      MaintenanceCountdown.fullBackupWarnings(countdownSeconds);
+    } catch (IllegalArgumentException invalid) {
+      throw new OperationFailure(
+          "COUNTDOWN_INVALID",
+          "QUEUED",
+          "Choose a supported full-backup countdown: 30, 15, 10 or 5 minutes.",
+          false,
+          Map.of("supportedCountdownSeconds", "1800,900,600,300"));
+    }
+    return queue("FULL_RESTORE_POINT", null, device, false, false, countdownSeconds);
   }
 
   /**
@@ -270,7 +283,8 @@ public final class MaintenanceManager implements AutoCloseable {
       Instant occurrence,
       DeviceRegistry.Device device,
       boolean automatic,
-      boolean skipCountdown)
+      boolean skipCountdown,
+      Integer fullBackupCountdownSeconds)
       throws Exception {
     if (closed.get()) throw new IllegalStateException("HOST_OFFLINE");
     if ("FULL_RESTORE_POINT".equals(kind) && automatic)
@@ -305,7 +319,8 @@ public final class MaintenanceManager implements AutoCloseable {
             requesterDeviceName(device, automatic));
     publishPhase(job, Map.of());
     try {
-      worker.execute(() -> run(job, device, automatic, skipCountdown, false));
+      worker.execute(
+          () -> run(job, device, automatic, skipCountdown, false, fullBackupCountdownSeconds));
     } catch (RejectedExecutionException busy) {
       state.finish(job, "FAILED", "BUSY", "The Host maintenance worker queue is full.");
       throw new OperationFailure(
@@ -323,11 +338,18 @@ public final class MaintenanceManager implements AutoCloseable {
       DeviceRegistry.Device device,
       boolean automatic,
       boolean skipCountdown,
-      boolean recoveringCountdown) {
+      boolean recoveringCountdown,
+      Integer fullBackupCountdownSeconds) {
     if ("RESTART".equals(job.kind()))
       runRestart(job, device, automatic, skipCountdown, recoveringCountdown);
     else if ("FULL_RESTORE_POINT".equals(job.kind()))
-      runFull(job, device, automatic, skipCountdown, recoveringCountdown);
+      runFull(
+          job,
+          device,
+          automatic,
+          skipCountdown,
+          recoveringCountdown,
+          fullBackupCountdownSeconds);
     else
       fail(
           job,
@@ -353,7 +375,7 @@ public final class MaintenanceManager implements AutoCloseable {
     Instant now = timeSource.instant(), windowStart = now.minus(Duration.ofMinutes(10));
     Due restart = due("restart", current.restart().schedule(), zone, windowStart, now);
     if (restart != null && state.claim(restart.scheduleId, restart.occurrence))
-      queue("RESTART", restart.occurrence, null, true, false);
+      queue("RESTART", restart.occurrence, null, true, false, null);
   }
 
   private Due due(
@@ -416,8 +438,7 @@ public final class MaintenanceManager implements AutoCloseable {
         List<Integer> warningSeconds = settings.restart().warningSeconds();
         if (!recoveringCountdown) {
           job = transition(job, "COUNTDOWN", null, 10, null, null, null, null, Map.of());
-          state.beginCountdown(
-              job, MaintenanceCountdown.durationSeconds(warningSeconds), timeSource.instant());
+          state.beginCountdown(job, warningSeconds, timeSource.instant());
         }
         countdown(job, MinecraftCommandChannel.MaintenanceOperation.RESTART, warningSeconds);
       }
@@ -480,7 +501,8 @@ public final class MaintenanceManager implements AutoCloseable {
       DeviceRegistry.Device device,
       boolean automatic,
       boolean skipCountdown,
-      boolean recoveringCountdown) {
+      boolean recoveringCountdown,
+      Integer fullBackupCountdownSeconds) {
     MaintenanceStateStore.Job job = original;
     boolean locked = false, stoppedByUs = false;
     AtomicBoolean stopBoundaryEntered = new AtomicBoolean();
@@ -510,18 +532,32 @@ public final class MaintenanceManager implements AutoCloseable {
               "countdownResumed", recoveringCountdown));
       if (startedOnline) {
         requireCommandChannel();
+        List<Integer> warningSeconds =
+            MaintenanceCountdown.fullBackupWarnings(
+                fullBackupCountdownSeconds == null
+                    ? MaintenanceCountdown.DEFAULT_FULL_BACKUP_COUNTDOWN_SECONDS
+                    : fullBackupCountdownSeconds);
         if (!skipCountdown) {
           if (!recoveringCountdown) {
-            job = transition(job, "COUNTDOWN", null, 10, null, null, null, null, Map.of());
-            state.beginCountdown(
-                job,
-                MaintenanceCountdown.durationSeconds(MaintenanceCountdown.FULL_BACKUP_WARNINGS),
-                timeSource.instant());
+            job =
+                transition(
+                    job,
+                    "COUNTDOWN",
+                    null,
+                    10,
+                    null,
+                    null,
+                    null,
+                    null,
+                    Map.of(
+                        "countdownInitialSeconds",
+                        MaintenanceCountdown.durationSeconds(warningSeconds)));
+            state.beginCountdown(job, warningSeconds, timeSource.instant());
           }
           countdown(
               job,
               MinecraftCommandChannel.MaintenanceOperation.FULL_BACKUP,
-              MaintenanceCountdown.FULL_BACKUP_WARNINGS);
+              warningSeconds);
         }
         job = transition(job, "FINAL_SAVE", null, 25, null, null, null, null, Map.of());
         MaintenanceStateStore.Job beforeStop = job;
@@ -718,8 +754,12 @@ public final class MaintenanceManager implements AutoCloseable {
     while (!closed.get()) {
       MaintenanceStateStore.Countdown countdown = state.countdown(job);
       Set<Integer> consumed = new LinkedHashSet<>(countdown.consumedWarnings());
+      List<Integer> durableWarnings =
+          countdown.warningSeconds().isEmpty()
+              ? MaintenanceCountdown.normalized(warnings)
+              : MaintenanceCountdown.normalized(countdown.warningSeconds());
       MaintenanceCountdown.Decision decision =
-          planner.next(Instant.parse(countdown.deadline()), warnings, consumed);
+          planner.next(Instant.parse(countdown.deadline()), durableWarnings, consumed);
       switch (decision.action()) {
         case DONE -> {
           return;
@@ -760,6 +800,16 @@ public final class MaintenanceManager implements AutoCloseable {
       Thread.sleep(Math.max(1L, Math.min(millis, 15_000L)));
     }
     throw new InterruptedException("Host closing");
+  }
+
+  private List<Integer> durableWarnings(
+      MaintenanceStateStore.Job job, MaintenanceStateStore.Countdown countdown) {
+    if (!countdown.warningSeconds().isEmpty())
+      return MaintenanceCountdown.normalized(countdown.warningSeconds());
+    if ("FULL_RESTORE_POINT".equals(job.kind()))
+      return MaintenanceCountdown.fullBackupWarnings(
+          MaintenanceCountdown.DEFAULT_FULL_BACKUP_COUNTDOWN_SECONDS);
+    return MaintenanceCountdown.normalized(settings.restart().warningSeconds());
   }
 
   private void waitStopped(int seconds) throws Exception {

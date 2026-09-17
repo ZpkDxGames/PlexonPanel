@@ -11,9 +11,9 @@ Automatic backups and live snapshots are retired product behavior.
 A normal **Fully Backup Now** operation is:
 
 1. Dashboard requests Host `backup.preflight` and displays the authoritative result.
-2. Operator explicitly confirms **Fully Backup Now**.
+2. Operator chooses a 30-, 15-, 10-, or 5-minute initial player countdown and explicitly confirms **Fully Backup Now**.
 3. Host creates a durable manual `FULL_RESTORE_POINT` job.
-4. If Minecraft is online, Host begins the mandatory 30-minute countdown and sends warnings at 30m / 15m / 1m / 30s / 15s / 5s through the Host-local command channel/RCON.
+4. If Minecraft is online, Host validates and persists the selected warning plan, then sends its notices through the Host-local command channel/RCON. The selected duration is announced immediately; the 1m / 30s / 15s / 5s safety boundaries follow when they fit. The 30-minute plan also includes 15m.
 5. Host requires an affirmative `save-all flush` result.
 6. Host stops the configured Minecraft systemd service.
 7. Host independently proves the service is stopped before archive work begins.
@@ -24,7 +24,7 @@ A normal **Fully Backup Now** operation is:
 12. If this workflow stopped Minecraft, Host starts it unconditionally and verifies readiness.
 13. The durable job becomes `COMPLETED`, `DEGRADED`, `FAILED`, or `RECOVERY_REQUIRED` as appropriate.
 
-Browser refresh/disconnect never cancels the Host job. `maintenance.status` exposes the durable current operation. During `COUNTDOWN`, it also exposes the durable countdown deadline and remaining seconds; the browser must not create its own authoritative countdown.
+Browser refresh/disconnect never cancels the Host job. `maintenance.status` exposes the durable current operation. During `COUNTDOWN`, it also exposes the durable initial duration, warning plan, deadline, consumed warnings, and remaining seconds; the browser must not create its own authoritative countdown.
 
 ## Manual-only policy
 
@@ -33,7 +33,7 @@ The Host scheduler retains restart-only scheduling. It does not schedule full ba
 Legacy full-backup schedule and `restartAfter` fields can remain serialized for rolling-upgrade compatibility, but:
 
 - automatic full-backup execution is rejected;
-- Dashboard writes keep the legacy full-backup schedule disabled;
+- legacy full-backup schedule members are ignored by the Host settings model;
 - legacy `restartAfter: false` is normalized to `true`;
 - the manual full-backup orchestration path restarts Minecraft whenever that operation stopped it, regardless of serialized `restartAfter`.
 
@@ -164,11 +164,11 @@ If the local archive is verified but remote upload/verification fails:
 - mark the operation degraded/retryable;
 - expose Retry Upload without another shutdown.
 
-## Restore
+## Restore and recovery
 
-Restore is a separate Owner/elevated destructive workflow. The Host verifies the selected restore point, creates an emergency pre-restore backup, stages extraction with traversal/symlink/expansion protections, maintains a rollback journal and optionally starts/verifies Minecraft after replacement.
+Direct remote restore is not part of the stable Host capability contract. The always-on Host mounts the Minecraft tree read-only and forces `backup.restore` off even when a rolling-upgrade configuration still contains the legacy key. Perform a planned restore locally under the server operator's recovery procedure, outside the network-reachable Host process.
 
-Do not merge restore semantics into **Fully Backup Now** and do not delete recovery journals to bypass safety.
+Historical interrupted-restore journals remain recognized so an upgrade cannot bypass an existing safety gate. Do not merge restore semantics into **Fully Backup Now** and do not delete recovery journals to bypass safety.
 
 For interrupted restore recovery, keep Minecraft stopped and run the matched Host artifact:
 
@@ -181,7 +181,7 @@ sudo -u plexonpanel-host /usr/bin/java \
 
 ## Host permissions
 
-Run `plexonpanel-host` as a dedicated non-root identity. Grant only the access required to:
+Run `plexonpanel-host` as a dedicated non-root identity. Mount `serverRoot` read-only and grant only the access required to:
 
 - read the configured Minecraft server root;
 - write the Host data/backup directory;

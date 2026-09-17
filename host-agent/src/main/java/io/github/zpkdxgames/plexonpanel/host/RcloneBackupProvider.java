@@ -92,7 +92,6 @@ public final class RcloneBackupProvider {
           timeoutSeconds);
       lastTestAt = checkedAt;
       lastTestState = "CONNECTED";
-      lastSuccessfulVerificationAt = checkedAt;
       return Map.of(
           "provider",
           "RCLONE",

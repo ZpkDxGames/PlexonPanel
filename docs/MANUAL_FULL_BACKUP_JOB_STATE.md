@@ -9,11 +9,12 @@ The existing dashboard action remains:
 - action: `maintenance.full-backup.create`
 - authoritative target: `HOST`
 - required scope: `maintenance.run`
-- successful enqueue response: `{ "jobId": "<uuid>", "state": "QUEUED" }`
+- parameters: optional `countdownSeconds` preset (`1800`, `900`, `600`, or `300`; default `1800`)
+- successful enqueue response: `{ "jobId": "<uuid>", "state": "QUEUED", "countdownSeconds": 1800 }`
 
 The dashboard does not own an operation timer or job lifecycle. Once the Host accepts the request it writes the job to `<host data>/maintenance/active-job.json` before submitting execution to the maintenance worker. A second destructive request observes the non-terminal journal and is rejected with `BUSY` rather than creating another job.
 
-`maintenance.status` remains the reconnect/read contract in this step. Its `currentOperation` field contains the complete durable job record. `jobStateContractVersion` is `2`. The legacy `nextFullRestorePoint` field is retained only for migration compatibility and `fullBackupScheduleDeprecated` is `true`; Step 5 removes the obsolete scheduled full-backup behavior.
+`maintenance.status` is the reconnect/read contract. Its `currentOperation` field contains the complete durable job record. `jobStateContractVersion` is `4`; an active countdown additionally reports the persisted initial duration, complete warning plan, deadline, consumed boundaries, and remaining seconds. Scheduled full-backup behavior is retired.
 
 ## Durable job fields
 
@@ -57,6 +58,6 @@ This classification is deliberately conservative. It preserves service safety wi
 
 The change does not widen Host authority beyond existing capabilities. The Host remains a dedicated non-root process, destructive work is serialized by the existing `ReentrantLock`, no arbitrary shell command is accepted from the browser, rclone credentials remain Host-local, and job payloads contain neither credentials nor raw command output.
 
-## Transitional limitations
+## Current authority
 
-Step 1 establishes state ownership only. The current countdown/final-save transport can still depend on the Paper connection, the old recurring full-restore-point schedule still exists in compatibility mode, and startup verification still observes the Paper reconnect revision. These are not considered final architecture and are intentionally removed or replaced in later roadmap steps.
+The final-save and warning path uses the Host-local command channel/RCON and does not depend on Paper. Full backups are manual-only, and startup verification uses Host-owned systemd plus the fixed readiness probe. The browser can reconnect to the same durable Host job but never owns its countdown or lifecycle.

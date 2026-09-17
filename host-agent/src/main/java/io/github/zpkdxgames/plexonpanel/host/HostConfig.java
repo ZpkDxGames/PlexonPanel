@@ -20,6 +20,21 @@ public record HostConfig(
     BackupConfig backups,
     ConsoleConfig console,
     CommandChannelConfig commandChannel) {
+  /**
+   * Network-reachable Host capabilities that would require write authority inside serverRoot.
+   *
+   * <p>The stable Host runs with serverRoot mounted read-only. These legacy configuration keys are
+   * still accepted for rolling upgrades, but they can no longer become effective capabilities.
+   */
+  static final Set<String> RETIRED_SERVER_TREE_MUTATIONS =
+      Set.of(
+          "files.write",
+          "files.create",
+          "files.rename",
+          "files.delete",
+          "files.upload",
+          "backup.restore");
+
   public HostConfig(
       String serverId,
       String serverName,
@@ -352,6 +367,7 @@ public record HostConfig(
               && (!s.equals("backup.restore") || backups.restoreEnabled));
     for (String s : List.of("console.view.errors", "console.view.full"))
       result.put(s, Boolean.TRUE.equals(result.get(s)) && console.enabled);
+    for (String scope : RETIRED_SERVER_TREE_MUTATIONS) result.put(scope, false);
     result.put("console.execute.allowed", false);
     return Map.copyOf(result);
   }

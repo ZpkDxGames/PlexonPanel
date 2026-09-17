@@ -1,26 +1,29 @@
-# PlexonPanel 3.4.1 — Step 8 production certification gates
+# PlexonPanel 3.5.0 — Step 8 production certification gates
 
-PlexonPanel 3.4.1 source integration is complete only when the matched Paper plugin, Host Companion, Dashboard/relay, Google Drive provider, systemd lifecycle, and **Fully Backup Now** workflow have been exercised end-to-end on the authorized PlexonCraft host.
+PlexonPanel 3.5.0 source integration is complete only when the matched Paper plugin, Host Companion, Dashboard/relay, Google Drive provider, systemd lifecycle, and **Fully Backup Now** workflow have been exercised end-to-end on the authorized PlexonCraft host.
 
 Repository CI is required evidence, but it is not runtime certification. Never convert a green unit/build result into a live PASS for a gate that was not actually executed.
 
-## Step 8 accepted source baseline
+## 3.5.0 candidate provenance
 
-At this Step 8 documentation refresh:
+Current matched control-plane evidence:
 
-- backend/Paper/Host `main` contains the Step 8 merge `3a00bc75f8ad0fb2a953845fee4efa6e5d065d55`;
-- Dashboard/relay accepted `main` is `c051d59010ec1d09f6a5a624246a6b108b85ae12`;
-- Dashboard final-main CI run `34905567114` passed application checks, Worker/standalone relay tests, both relay smoke suites, standalone packaging, and the production Next.js build;
-- backend candidate CI run `34905789066` passed on Linux x64 and Linux ARM64;
-- the candidate PR merge ref `a438185b0719c497d8d7b4f4edce8d0cdfef78f6` and backend merge `3a00bc75f8ad0fb2a953845fee4efa6e5d065d55` share Git tree `6af00a2bcf4b72214c87133b14117b78ac7f2173`;
-- Paper JAR SHA-256 from the matched x64/ARM64 candidate artifacts is `84f3189212aa181dce651cd83e05e23c826246661fb44bfecedbec954df7d219`;
-- Host JAR SHA-256 is `8516ad2d68e090bb3672fbd39050bceb1a0df325a5fa7776f277982dcea375e5`;
-- protocol remains `3` and Java remains `25`;
-- runtime certification remains `NOT_EXECUTED` until the live gates below are completed.
+- Dashboard/relay `main`: `72d1f36b99e07ba1d319f18a2e574e5d7ca0a493`;
+- Dashboard CI: run `35171476557` (`Dashboard and relay checks`, PASS);
+- production relay deployment: run `35171476559` (PASS);
+- production relay `/healthz`: version `3.5.0`, Protocol `3`, `cloudflare-worker`, commit `72d1f36b99e07ba1d319f18a2e574e5d7ca0a493` (verified 2026-09-17 UTC);
+- Vercel status for the merged Dashboard commit: PASS.
 
-The GitHub production-relay workflow has not deployed this accepted dashboard revision: source validation passed, but deployment configuration was absent (`CLOUDFLARE_API_TOKEN`; the workflow environment also showed `CLOUDFLARE_ACCOUNT_ID` and `PRODUCTION_RELAY_URL` unset). Vercel production identity also remains a separate deployment check.
+Record the remaining exact values after the backend pull request merges and its required CI completes:
 
-If any repository changes after this document, the acceptance record must use the exact deployed `main` commit. Do not silently treat the source baseline above as the final deployed SHA.
+- backend/Paper/Host `main` commit;
+- backend x64 and ARM64 CI run;
+- Paper and Host JAR SHA-256 values;
+- deployed Dashboard and relay identities.
+
+Protocol remains `3` and Java remains `25`. Runtime certification remains `NOT_EXECUTED` until every required live gate below is completed. A green source build is not a substitute for deployment or production evidence.
+
+Production relay deployment configuration is now present and the matched 3.5.0 relay identity has been verified. Keep all protected token/account values in GitHub configuration; never place them in this document.
 
 ## Final backup contract
 
@@ -35,8 +38,8 @@ The production flow to certify is:
 → explicit confirmation
 → Host `backup.preflight`
 → durable Host job
-→ mandatory 30-minute warning countdown
-→ Host-local warning delivery at 30m / 15m / 1m / 30s / 15s / 5s
+→ operator-selected 30m / 15m / 10m / 5m warning countdown
+→ Host-local delivery of the selected initial notice plus the safety boundaries that fit
 → affirmative `save-all flush`
 → Host stops the configured Minecraft systemd unit
 → Host independently proves Minecraft is stopped
@@ -119,18 +122,18 @@ systemctl show plexoncraft.service -p ActiveState -p SubState -p MainPID
 
 ## Gate 2 — Warning channel and durable countdown
 
-Run an authorized **Fully Backup Now** operation and observe the real countdown.
+Run authorized **Fully Backup Now** operations covering each selectable initial duration: 30, 15, 10, and 5 minutes.
 
-PASS requires warnings at:
+PASS requires:
 
-- 30 minutes;
-- 15 minutes;
-- 1 minute;
-- 30 seconds;
-- 15 seconds;
-- 5 seconds.
-
-Confirm warnings are delivered through the Host-local command channel/RCON, not Paper backup coordination. Refresh/reconnect the Dashboard during countdown and verify it reconstructs the Host-owned deadline/remaining state rather than creating a browser timer.
+- the selected initial warning is delivered immediately;
+- 30 minutes retains 15m / 1m / 30s / 15s / 5s;
+- 15 minutes retains 1m / 30s / 15s / 5s;
+- 10 minutes retains 1m / 30s / 15s / 5s;
+- 5 minutes retains 1m / 30s / 15s / 5s;
+- warnings are delivered through the Host-local command channel/RCON, not Paper backup coordination;
+- refresh/reconnect reconstructs the Host-owned initial duration, warning plan, deadline, consumed boundaries, and remaining time rather than creating a browser timer;
+- a controlled Host restart during a shorter countdown resumes that selected plan and does not revert to 30 minutes.
 
 ## Gate 3 — Final save boundary
 
@@ -303,7 +306,7 @@ GitHub Actions variable: PRODUCTION_RELAY_URL
 
 ## Stable-promotion rule
 
-Do **not** create or move `v3.4.1`, publish a stable GitHub release, or mark runtime certification PASS while a required production gate is FAIL or NOT_EXECUTED, except that an explicitly unauthorized destructive degraded-provider fault-injection gate may remain the sole documented `NOT_EXECUTED` exception if the release owner accepts that limitation.
+Do **not** create or move `v3.5.0`, publish a stable GitHub release, or mark runtime certification PASS while a required production gate is FAIL or NOT_EXECUTED, except that an explicitly unauthorized destructive degraded-provider fault-injection gate may remain the sole documented `NOT_EXECUTED` exception if the release owner accepts that limitation.
 
 After the required gates pass:
 
@@ -313,6 +316,6 @@ After the required gates pass:
 4. package from the exact accepted source commit so `release-manifest.json` names that commit;
 5. update the manifest to runtime certification PASS only from real evidence;
 6. verify Protocol 3, Java 25, accepted Dashboard SHA/CI, architecture support, and checksums;
-7. only then create immutable tag `v3.4.1` and publish stable release artifacts.
+7. only then create immutable tag `v3.5.0` and publish stable release artifacts.
 
 Until then, source may be repository-green, but production certification remains `NOT_EXECUTED`.

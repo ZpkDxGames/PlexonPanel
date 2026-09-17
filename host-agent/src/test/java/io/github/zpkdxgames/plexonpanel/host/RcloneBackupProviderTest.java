@@ -42,6 +42,22 @@ class RcloneBackupProviderTest {
   }
 
   @Test
+  void connectivityTestDoesNotPretendAFullBackupWasRemotelyVerified() {
+    var provider =
+        new RcloneBackupProvider(
+            config(),
+            (arguments, timeoutSeconds) -> new RcloneBackupProvider.ProcessResult(0, "[]"));
+
+    var result = provider.test(15);
+    var status = provider.status();
+
+    assertEquals("CONNECTED", result.get("status"));
+    assertEquals("CONNECTED", status.get("status"));
+    assertNotEquals("", status.get("lastTestAt"));
+    assertEquals("", status.get("lastSuccessfulVerificationAt"));
+  }
+
+  @Test
   void providerTestCommandFailureReturnsTypedSafeFailure() {
     var provider =
         new RcloneBackupProvider(

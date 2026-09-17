@@ -50,18 +50,25 @@ PlexonPanel maintenance uses a narrow Host-local RCON client for player warnings
 
 ## Maintenance behavior
 
-A full backup countdown is Host-owned and uses exactly these boundaries:
+A full-backup countdown is Host-owned. The action accepts exactly one initial-duration preset:
 
 - 30 minutes
 - 15 minutes
-- 1 minute
-- 30 seconds
-- 15 seconds
-- 5 seconds
+- 10 minutes
+- 5 minutes
 
-The Host action router enforces this full-backup countdown and does not honor a dashboard-supplied countdown-skip hint for `maintenance.full-backup.create`.
+The selected duration is the immediate first notice. The Host then retains the established safety boundaries that fit within the selection:
 
-The 30-minute warning is due immediately when the countdown is created. The countdown deadline and consumed warning boundaries are persisted under the Host data directory. If the Host restarts during the countdown, it resumes from that durable deadline, does not replay consumed warnings, records boundaries missed while offline, and continues with the next valid boundary.
+- 30-minute plan: 30m / 15m / 1m / 30s / 15s / 5s
+- 15-minute plan: 15m / 1m / 30s / 15s / 5s
+- 10-minute plan: 10m / 1m / 30s / 15s / 5s
+- 5-minute plan: 5m / 1m / 30s / 15s / 5s
+
+The Host action router validates `countdownSeconds` as `1800`, `900`, `600`, or `300`. An omitted value defaults to 30 minutes. A dashboard-supplied countdown-skip hint is never honored for `maintenance.full-backup.create`.
+
+The selected initial warning is due immediately when the countdown is created. The complete warning plan, countdown deadline, and consumed warning boundaries are persisted under the Host data directory. If the Host restarts during the countdown, it resumes the selected plan from that durable deadline, does not replay consumed warnings, records boundaries missed while offline, and continues with the next valid boundary.
+
+Restart-only maintenance stores its configured warning plan through the same durable countdown journal. The Dashboard presents 30/15/10/5-minute presets for that schedule without coupling the restart scheduler to full-backup creation.
 
 Immediately before shutdown, the Host executes `save-all flush`. A timeout, authentication failure, malformed RCON response, inaccessible secret, blank response, explicit command rejection, or other negative command result fails the maintenance job before the stop continuation can execute. A protocol-valid RCON packet alone is not sufficient to affirm the final save. The server is left running in that case.
 

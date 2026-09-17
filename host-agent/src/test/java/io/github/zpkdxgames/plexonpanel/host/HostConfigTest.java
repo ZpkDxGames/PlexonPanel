@@ -64,16 +64,10 @@ class HostConfigTest {
         "files.list",
         "files.read",
         "files.download",
-        "files.write",
-        "files.create",
-        "files.rename",
-        "files.delete",
-        "files.upload",
         "backup.view",
         "backup.create",
         "backup.download",
-        "backup.delete",
-        "backup.restore");
+        "backup.delete");
   }
 
   JsonObject fullControlConfig() throws Exception {
@@ -92,6 +86,20 @@ class HostConfigTest {
     Map<String, Boolean> capabilities = loaded.effectiveCapabilities();
     for (String scope : hostSupported())
       assertTrue(capabilities.get(scope), () -> "Expected Host capability: " + scope);
+  }
+
+  @Test
+  void stableHostNeverAdvertisesServerTreeMutationAuthority() throws Exception {
+    JsonObject configured = fullControlConfig();
+    JsonObject capabilities = configured.getAsJsonObject("capabilities");
+    for (String scope : HostConfig.RETIRED_SERVER_TREE_MUTATIONS)
+      capabilities.addProperty(scope, true);
+    configured.getAsJsonObject("backups").addProperty("restoreEnabled", true);
+
+    Map<String, Boolean> effective = load(configured).effectiveCapabilities();
+
+    for (String scope : HostConfig.RETIRED_SERVER_TREE_MUTATIONS)
+      assertFalse(effective.get(scope), () -> "Host must remain read-only: " + scope);
   }
 
   @Test

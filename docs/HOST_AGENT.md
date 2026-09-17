@@ -15,7 +15,7 @@ Use a disposable server first. Adjust the example user, paths and `plexoncraft.s
 7. Initialize as the host user:
 
 ```sh
-sudo -u plexonpanel-host /usr/bin/java -jar /opt/plexonpanel-host/plexonpanel-host-3.0.1.jar --init /var/lib/plexonpanel-host
+sudo -u plexonpanel-host /usr/bin/java -jar /opt/plexonpanel-host/plexonpanel-host-3.5.0.jar --init /var/lib/plexonpanel-host
 ```
 
 Copy only its printed public key to Paper `host.public-key`; copy the existing Paper UUID to host config. Both use the relay public key and WSS `/v1/agent` URL. Reload Paper locally.
@@ -25,7 +25,7 @@ Copy only its printed public key to Paper `host.public-key`; copy the existing P
 
 ## Full local Host capabilities
 
-The full-control example enables telemetry, server status/start/stop/restart, implemented file operations, backup operations, audit, settings, and Host-owned console viewing when explicitly enabled. Device pairing, grant changes, revocation, and generation/revision ownership remain Paper-authoritative even if legacy Host configuration still lists `devices.*`; Host effective capabilities force those mutation scopes off, so an explicitly Host-targeted access change fails closed. Already paired credentials continue to authorize Host-backed actions from the private mirror while Paper is offline. Effective backup capability still requires `backups.enabled`; restore additionally requires `restoreEnabled`. Effective console viewing requires Host `console.enabled` plus the corresponding `console.view.errors` or `console.view.full` capability. HostConfig continues rejecting Paper-only scope families. File operations remain confined under `serverRoot`, and lifecycle actions remain bound to the validated exact systemd service name.
+The full-control example enables telemetry, server status/start/stop/restart, bounded read-only file inspection, manual backup operations, audit, settings, and Host-owned console viewing when explicitly enabled. Device pairing, grant changes, revocation, and generation/revision ownership remain Paper-authoritative even if legacy Host configuration still lists `devices.*`; Host effective capabilities force those mutation scopes off, so an explicitly Host-targeted access change fails closed. Already paired credentials continue to authorize Host-backed actions from the private mirror while Paper is offline. Effective backup capability still requires `backups.enabled`. The stable 3.5.0 Host also forces server-tree create/write/upload/rename/delete and `backup.restore` off even if legacy configuration enables them; `restoreEnabled` cannot override that boundary. Effective console viewing requires Host `console.enabled` plus the corresponding `console.view.errors` or `console.view.full` capability. HostConfig continues rejecting Paper-only scope families. Read-only file operations remain confined under `serverRoot`, and lifecycle actions remain bound to the validated exact systemd service name.
 
 ## Console authority and retained history
 
@@ -46,24 +46,22 @@ Paper no longer owns server-console capture or retained replay. Legacy Paper `co
 
 ## Backups
 
-Configure `backups.enabled`, exact include names, retention 1–1000, size 1 MiB–1 TiB and interval (zero disables scheduling). Host action capabilities still apply. Online backup needs Paper's remote-actions/backups enabled; unattended jobs also require `allow-host-schedule`.
+Configure `backups.enabled`, exact include names, retention 1–1000, size 1 MiB–1 TiB, the protected rclone destination, and the Host-local command channel. Full backups are manual-only. Before confirming **Fully Backup Now**, the operator chooses exactly 30, 15, 10, or 5 minutes; the Host validates and durably persists that countdown and its warning plan. Automatic restart scheduling is independent and uses the same presets, daily/weekly/selected-weekday schedules, and bounded shutdown/startup timeouts. It never creates a backup.
 
-A renewable save lease preserves world autosave settings, pauses saving and flushes on the Paper thread. Host renews every 20 seconds; Paper resumes after a 60-second lost-renewal watchdog. Backup aborts on lease loss. Completion/error/plugin shutdown restores previous autosave settings. Do not manually toggle saving during a lease.
+For an online server, the always-on Host sends the selected player warnings over fixed-command loopback RCON, requires an affirmative `save-all flush`, stops the exact configured systemd service, and independently proves it inactive before reading the server tree. Paper is not part of this critical path. The Host then creates a cold staged ZIP, verifies SHA-256/metadata locally, uploads through Google Drive/rclone staging and promotion, verifies the promoted remote object, and brings Minecraft back online with systemd plus RCON readiness checks.
 
-Offline backup requires inactive/failed service. Bounded ZIP/SHA-256 metadata stay local. Symlinks, panel identities, audit/logs, credentials and active database files are excluded. A world lease cannot freeze third-party plugin writes: **stop Paper for consistent plugin data**. Validate includes against your plugin stack.
+Rclone uses only fixed `/usr/bin/rclone`, a configured `remote:path`, and a protected local config. Browsers cannot choose executable/remote arguments or see credentials. A connectivity test updates test status only; it does not claim a successful remote-backup verification. If the local archive verifies but Google Drive ultimately fails, the Host restores server availability and records a degraded/retryable job. **Retry Upload** reuses that verified local archive without another shutdown.
 
-Rclone uses only fixed `/usr/bin/rclone`, configured remote:path and a protected local config. Browsers cannot choose executable/remote arguments. Offsite-copy failure preserves local data and reports failure. Local retention and remote-provider retention are separate. Dashboard listings are 50/page; browser downloads max 64 MiB. Retrieve larger archives locally/offsite. Download cancellation is available; running backup jobs are not browser-cancellable.
+The job and selected countdown survive browser refresh, disconnect, and Host restart. The Dashboard reconstructs status from Host-owned durable state. Closing the browser does not cancel the operation, and the browser never owns the authoritative timer.
 
-## Restore and recovery
+## Read-only boundary and historical restore recovery
 
-Restore requires literal Owner, host backup.restore, local restoreEnabled, a stopped service and disconnected Paper. The UI obtains a one-minute device/archive-bound nonce, requires the typed configured server name and separate final confirmation.
+Direct remote restore is not part of the stable 3.5.0 capability contract. The Host mounts the Minecraft tree read-only and forces `backup.restore` plus Host file mutations off. Perform a planned restore locally under the server operator's recovery procedure, outside the network-reachable Host process.
 
-The host verifies SHA-256, takes an emergency backup, validates bounded ZIP entries, stages on the server filesystem and journals original target existence before renames. Traversal, links, protected targets and expansion-limit violations fail. Plugin folders and root JARs are individual targets; panel identity stays protected. Restore never starts Paper automatically. Emergency archives cannot be deleted by the browser.
-
-On recovery-required, leave Paper stopped, inspect local journal/logs, repair storage/permissions and run:
+Historical interrupted-restore journals remain recognized so an upgrade cannot bypass an existing safety gate. On `RECOVERY_REQUIRED`, leave Paper stopped, inspect local journal/logs, repair storage/permissions and run:
 
 ```sh
-sudo -u plexonpanel-host /usr/bin/java -jar /opt/plexonpanel-host/plexonpanel-host-3.0.1.jar /etc/plexonpanel-host/host-config.json --recover-restore
+sudo -u plexonpanel-host /usr/bin/java -jar /opt/plexonpanel-host/plexonpanel-host-3.5.0.jar /etc/plexonpanel-host/host-config.json --recover-restore
 ```
 
-Recovery restores saved originals and removes new targets; repeating it after interruption preserves originals already recovered. Malformed/unknown journals fail closed. Never delete a journal to bypass recovery. Validate files and gameplay before deliberately starting Paper. Actual systemd/rclone interruption tests remain release gates.
+Recovery restores saved originals and removes new targets left by a historical interrupted restore; repeating it preserves originals already recovered. Malformed/unknown journals fail closed. Never delete a journal to bypass recovery. Validate files and gameplay before deliberately starting Paper. Real systemd/RCON/rclone interruption and Google Drive verification tests remain stable-release gates.
