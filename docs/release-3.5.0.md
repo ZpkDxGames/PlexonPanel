@@ -23,4 +23,6 @@ Protocol remains 3, Java remains 25, and Paper API remains 26.2. No identity res
 
 ## Certification
 
-Stable publication is gated on exact Dashboard/relay provenance, x64 and ARM64 CI, and real PlexonCraft backup acceptance: selected warning delivery, `save-all flush`, stop proof, local archive verification, Google Drive promotion/verification, automatic restart/readiness, reconnect recovery, and bounded failure handling. A gate not executed must remain `NOT_EXECUTED`.
+The matched Dashboard/relay source is `72d1f36b99e07ba1d319f18a2e574e5d7ca0a493`; Dashboard CI run `35171476557`, production relay deployment run `35171476559`, Vercel, and the deployed relay identity all passed.
+
+Stable publication is still gated on backend x64 and ARM64 CI plus real PlexonCraft backup acceptance: selected warning delivery, `save-all flush`, stop proof, local archive verification, Google Drive promotion/verification, automatic restart/readiness, reconnect recovery, and bounded failure handling. A gate not executed must remain `NOT_EXECUTED`.
