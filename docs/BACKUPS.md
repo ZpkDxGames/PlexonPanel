@@ -89,13 +89,19 @@ Host/rclone secrets and Host data are excluded from the server archive.
 
 ## Google Drive through rclone
 
-Install rclone on the Host and keep its configuration protected under the `plexonpanel-host` account. Example:
+Install rclone on the Host and keep its configuration in a dedicated Host-owned directory. OAuth
+providers refresh tokens by atomically rewriting the configuration, so both the file and its parent
+directory must be writable by `plexonpanel-host`. Do not make `/etc/plexonpanel-host` writable: it
+also contains root-owned policy and RCON material.
 
 ```sh
-sudo install -d -m 0750 -o plexonpanel-host -g plexonpanel-host /etc/plexonpanel-host
-sudo -u plexonpanel-host /usr/bin/rclone config --config /etc/plexonpanel-host/rclone.conf
-sudo chmod 0600 /etc/plexonpanel-host/rclone.conf
-sudo chown plexonpanel-host:plexonpanel-host /etc/plexonpanel-host/rclone.conf
+sudo install -d -m 0700 -o plexonpanel-host -g plexonpanel-host \
+  /var/lib/plexonpanel-host/rclone
+sudo -u plexonpanel-host /usr/bin/rclone config \
+  --config /var/lib/plexonpanel-host/rclone/rclone.conf
+sudo chmod 0600 /var/lib/plexonpanel-host/rclone/rclone.conf
+sudo chown plexonpanel-host:plexonpanel-host \
+  /var/lib/plexonpanel-host/rclone/rclone.conf
 ```
 
 Example Host provider fields:
@@ -104,7 +110,7 @@ Example Host provider fields:
 {
   "rcloneExecutable": "/usr/bin/rclone",
   "rcloneRemote": "gdrive:PlexonCraft",
-  "rcloneConfig": "/etc/plexonpanel-host/rclone.conf"
+  "rcloneConfig": "/var/lib/plexonpanel-host/rclone/rclone.conf"
 }
 ```
 

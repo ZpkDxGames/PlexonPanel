@@ -16,3 +16,5 @@ The remediation applies one shared source walker to preflight sizing, the stoppe
 - never requires broadening the Host ACL to unrelated server files.
 
 The prior candidate must not be certified or tagged. Build a fresh matched Paper/Host pair, deploy the replacement Host JAR without changing identity/configuration, resolve the preserved maintenance recovery gate only after systemd plus RCON readiness pass, and rerun preflight and the complete cold-backup/Google Drive/restart acceptance flow.
+
+The bounded-walker candidate then correctly exposed two deployment defects: the active allowlist named nonexistent Nether and End roots, and Google Drive token refresh could not atomically rewrite an rclone config stored beside root-owned Host policy. Follow-up hardening gives each preflight gate a sanitized typed failure and moves the documented OAuth config location to an isolated Host-owned directory under `/var/lib/plexonpanel-host`. Neither remediation broadens Host authority over the live server tree or root-owned policy.

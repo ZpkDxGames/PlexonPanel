@@ -4,7 +4,7 @@ This step keeps Google Drive authority entirely in the Linux Host Companion. The
 
 ## Host-local provider contract
 
-The active Host configuration owns `backups.rcloneExecutable`, `backups.rcloneRemote`, and `backups.rcloneConfig`. The executable remains fixed to `/usr/bin/rclone`; the configured remote is validated by `HostConfig`; the rclone configuration path must be absolute and remains Host-local. Provider configuration changes take effect when the Host process loads the updated Host configuration.
+The active Host configuration owns `backups.rcloneExecutable`, `backups.rcloneRemote`, and `backups.rcloneConfig`. The executable remains fixed to `/usr/bin/rclone`; the configured remote is validated by `HostConfig`; the rclone configuration path must be absolute and remains Host-local. Token-based providers atomically rewrite this file during refresh, so deploy it in a dedicated Host-owned directory such as `/var/lib/plexonpanel-host/rclone/`, not beside root-owned Host policy under `/etc/plexonpanel-host`. Provider configuration changes take effect when the Host process loads the updated Host configuration.
 
 Raw rclone stdout/stderr is never forwarded to the dashboard. Command output is bounded and redacted, and operational failures use stable error codes instead of provider output.
 
@@ -68,7 +68,7 @@ Remote transfer observability uses a separate `UPLOADING_REMOTE` event. It never
 Before enabling manual full backups in production:
 
 1. install rclone at `/usr/bin/rclone`;
-2. place the rclone configuration in a Host-readable, non-browser-accessible absolute path;
+2. place the rclone configuration in a dedicated Host-owned, non-browser-accessible absolute path whose parent permits rclone's atomic token refresh;
 3. set a validated `backups.rcloneRemote` in Host configuration;
 4. ensure the backup directory is outside the Minecraft server root and writable by the Host service account;
 5. restart/reload the Host process according to the deployment procedure so it loads the intended Host configuration;
