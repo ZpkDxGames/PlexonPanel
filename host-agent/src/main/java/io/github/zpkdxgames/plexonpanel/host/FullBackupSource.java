@@ -81,6 +81,11 @@ final class FullBackupSource {
             @Override
             public FileVisitResult visitFileFailed(Path file, IOException failure)
                 throws IOException {
+              // FileTreeWalker may need to open a directory before preVisitDirectory can prune it.
+              // Mandatory private/noise exclusions are deliberately unreadable to the Host, so an
+              // access failure for an already-excluded path is the expected security boundary, not
+              // a failed backup source. Never apply this exception to an included path.
+              if (excluded(root.relativize(file), settings)) return FileVisitResult.CONTINUE;
               if (failure instanceof NoSuchFileException)
                 throw new IOException("BACKUP_SOURCE_CHANGED", failure);
               if (failure instanceof AccessDeniedException)
