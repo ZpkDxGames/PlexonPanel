@@ -12,7 +12,7 @@ Current matched control-plane evidence:
 - Dashboard CI: run `35238389769` (`Dashboard and relay checks`, PASS);
 - production relay deployment for this candidate: `NOT_EXECUTED`;
 - production relay `/healthz`: still reports the previous candidate `72d1f36b99e07ba1d319f18a2e574e5d7ca0a493` (verified 2026-09-17 UTC);
-- Vercel status for this candidate: `NOT_EXECUTED`.
+- Vercel status for this candidate: PASS (GitHub deployment status verified 2026-09-17 UTC).
 
 Record the remaining exact values after the backend pull request merges and its required CI completes:
 
