@@ -27,6 +27,6 @@ Protocol remains 3, Java remains 25, and Paper API remains 26.2. No identity res
 
 ## Certification
 
-The matched Dashboard/relay source candidate is `93bd3a5e6456efb18e7c9017d2a0208b3595852c`, and Dashboard CI run `35238389769` passed. Production relay and Vercel deployment of that candidate remain `NOT_EXECUTED`; the production relay still reports the previous `72d1f36b99e07ba1d319f18a2e574e5d7ca0a493` identity.
+The matched Dashboard/relay source candidate is `93bd3a5e6456efb18e7c9017d2a0208b3595852c`, Dashboard CI run `35238389769` passed, and Vercel reports a successful deployment for that commit. Production relay deployment remains `NOT_EXECUTED`; the production relay still reports the previous `72d1f36b99e07ba1d319f18a2e574e5d7ca0a493` identity.
 
 Stable publication is still gated on backend x64 and ARM64 CI plus real PlexonCraft backup acceptance: selected warning delivery, `save-all flush`, stop proof, local archive verification, Google Drive promotion/verification, automatic restart/readiness, reconnect recovery, and bounded failure handling. A gate not executed must remain `NOT_EXECUTED`.
