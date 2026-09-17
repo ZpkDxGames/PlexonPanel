@@ -78,9 +78,11 @@ class MaintenanceStopTimeoutTest {
       state.beginCountdown(job, 1800, Instant.now());
 
       Map<String, Object> status = maintenance.status();
-      assertEquals(3, status.get("jobStateContractVersion"));
+      assertEquals(4, status.get("jobStateContractVersion"));
       assertEquals("ACTIVE", status.get("countdownState"));
       assertNotNull(status.get("countdownDeadline"));
+      assertEquals(1800, status.get("countdownInitialSeconds"));
+      assertEquals(List.of(1800), status.get("countdownWarningSeconds"));
       long remaining = ((Number) status.get("countdownRemainingSeconds")).longValue();
       assertTrue(remaining >= 1790 && remaining <= 1800, "remaining=" + remaining);
       assertEquals(List.of(), status.get("countdownWarningsSent"));
