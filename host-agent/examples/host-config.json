@@ -58,7 +58,7 @@
     "restoreEnabled": false,
     "rcloneExecutable": "/usr/bin/rclone",
     "rcloneRemote": "",
-    "rcloneConfig": "/etc/plexonpanel-host/rclone.conf",
+    "rcloneConfig": "/var/lib/plexonpanel-host/rclone/rclone.conf",
     "liveSnapshotExcludes": [
       "logs",
       "crash-reports",

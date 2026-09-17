@@ -2,6 +2,7 @@ package io.github.zpkdxgames.plexonpanel.host;
 
 import static org.junit.jupiter.api.Assertions.*;
 
+import io.github.zpkdxgames.plexonpanel.control.OperationFailure;
 import java.io.IOException;
 import java.nio.file.*;
 import java.nio.file.attribute.PosixFilePermissions;
@@ -80,5 +81,33 @@ class FullBackupPreflightTest {
                     MaintenanceSettings.migratedDefaults().fullRestorePoint()));
 
     assertEquals("BACKUP_SOURCE_UNREADABLE", failure.getMessage());
+  }
+
+  @Test
+  void sourceFailureBecomesTypedBrowserSafePreflightFailure() {
+    OperationFailure failure =
+        FullBackupPreflight.translate(
+            new IOException("BACKUP_SOURCE_MISSING"),
+            "BACKUP_SOURCE_UNREADABLE",
+            "source");
+
+    assertEquals("BACKUP_SOURCE_MISSING", failure.code());
+    assertEquals("PREFLIGHT", failure.phase());
+    assertTrue(failure.retryable());
+    assertEquals("source", failure.safeData().get("stage"));
+    assertFalse(failure.getMessage().contains("/"));
+  }
+
+  @Test
+  void rawIoFailureUsesTheStageFallbackWithoutLeakingItsMessage() {
+    OperationFailure failure =
+        FullBackupPreflight.translate(
+            new IOException("/private/provider/path: permission denied"),
+            "RCLONE_CONFIG_UNREADABLE",
+            "provider");
+
+    assertEquals("RCLONE_CONFIG_UNREADABLE", failure.code());
+    assertEquals("provider", failure.safeData().get("stage"));
+    assertFalse(failure.getMessage().contains("private"));
   }
 }
