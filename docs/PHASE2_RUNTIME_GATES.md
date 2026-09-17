@@ -8,11 +8,11 @@ Repository CI is required evidence, but it is not runtime certification. Never c
 
 Current matched control-plane evidence:
 
-- Dashboard/relay `main`: `72d1f36b99e07ba1d319f18a2e574e5d7ca0a493`;
-- Dashboard CI: run `35171476557` (`Dashboard and relay checks`, PASS);
-- production relay deployment: run `35171476559` (PASS);
-- production relay `/healthz`: version `3.5.0`, Protocol `3`, `cloudflare-worker`, commit `72d1f36b99e07ba1d319f18a2e574e5d7ca0a493` (verified 2026-09-17 UTC);
-- Vercel status for the merged Dashboard commit: PASS.
+- Dashboard/relay `main` candidate: `93bd3a5e6456efb18e7c9017d2a0208b3595852c`;
+- Dashboard CI: run `35238389769` (`Dashboard and relay checks`, PASS);
+- production relay deployment for this candidate: `NOT_EXECUTED`;
+- production relay `/healthz`: still reports the previous candidate `72d1f36b99e07ba1d319f18a2e574e5d7ca0a493` (verified 2026-09-17 UTC);
+- Vercel status for this candidate: `NOT_EXECUTED`.
 
 Record the remaining exact values after the backend pull request merges and its required CI completes:
 
@@ -23,7 +23,7 @@ Record the remaining exact values after the backend pull request merges and its 
 
 Protocol remains `3` and Java remains `25`. Runtime certification remains `NOT_EXECUTED` until every required live gate below is completed. A green source build is not a substitute for deployment or production evidence.
 
-Production relay deployment configuration is now present and the matched 3.5.0 relay identity has been verified. Keep all protected token/account values in GitHub configuration; never place them in this document.
+Production relay deployment configuration is present, but the matched `93bd3a5e6456efb18e7c9017d2a0208b3595852c` relay identity has not yet been deployed and verified. Keep all protected token/account values in GitHub configuration; never place them in this document.
 
 ## Final backup contract
 
