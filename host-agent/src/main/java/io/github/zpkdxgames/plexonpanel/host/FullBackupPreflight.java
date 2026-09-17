@@ -37,7 +37,7 @@ final class FullBackupPreflight {
         || Files.isSymbolicLink(staging)
         || !Files.isWritable(staging)) throw new IOException("BACKUP_STAGING_UNAVAILABLE");
 
-    Scan scan = scan(root, settings);
+    Scan scan = scan(root, backupConfig.include(), settings);
     long usable = Files.getFileStore(base).getUsableSpace();
     long required = requiredSpace(scan.bytes());
     if (usable < required) throw new IOException("BACKUP_DISK_SPACE_INSUFFICIENT");
@@ -80,55 +80,30 @@ final class FullBackupPreflight {
         || !Files.isReadable(providerConfig)) throw new IOException("RCLONE_CONFIG_UNREADABLE");
   }
 
-  private static Scan scan(Path root, MaintenanceSettings.FullRestorePoint settings) throws IOException {
+  static Scan scan(
+      Path root, List<String> includes, MaintenanceSettings.FullRestorePoint settings)
+      throws IOException {
     long[] bytes = {0};
     int[] entries = {0};
-    Files.walkFileTree(
+    FullBackupSource.walk(
         root,
-        EnumSet.noneOf(FileVisitOption.class),
-        96,
-        new SimpleFileVisitor<>() {
+        includes,
+        settings,
+        new FullBackupSource.Visitor() {
           @Override
-          public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) throws IOException {
-            Path relative = root.relativize(dir);
-            if (!relative.toString().isEmpty() && excluded(relative, settings))
-              return FileVisitResult.SKIP_SUBTREE;
-            if (Files.isSymbolicLink(dir)) throw new IOException("BACKUP_SYMLINK_REJECTED");
-            return FileVisitResult.CONTINUE;
-          }
-
-          @Override
-          public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
-            Path relative = root.relativize(file);
-            if (excluded(relative, settings)) return FileVisitResult.CONTINUE;
-            if (!attrs.isRegularFile() || Files.isSymbolicLink(file))
-              throw new IOException("BACKUP_SYMLINK_REJECTED");
+          public void visitFile(Path file, Path relative, BasicFileAttributes attributes)
+              throws IOException {
             if (++entries[0] > ENTRY_LIMIT) throw new IOException("BACKUP_ENTRY_LIMIT");
             try {
-              bytes[0] = Math.addExact(bytes[0], attrs.size());
+              bytes[0] = Math.addExact(bytes[0], attributes.size());
             } catch (ArithmeticException overflow) {
               throw new IOException("BACKUP_SIZE_LIMIT", overflow);
             }
             if (bytes[0] > settings.maximumBytes()) throw new IOException("BACKUP_SIZE_LIMIT");
-            return FileVisitResult.CONTINUE;
           }
         });
     return new Scan(bytes[0], entries[0]);
   }
 
-  private static boolean excluded(Path relative, MaintenanceSettings.FullRestorePoint settings) {
-    String name = relative.toString().replace(File.separatorChar, '/');
-    if (name.isEmpty()) return false;
-    String lower = name.toLowerCase(Locale.ROOT);
-    if (lower.startsWith(".plexonpanel-restore-")
-        || lower.startsWith(".plexonpanel-rollback-")
-        || lower.endsWith(".partial")) return true;
-    for (String configured : settings.excludes()) {
-      String normalized = configured.replace('\\', '/');
-      if (name.equals(normalized) || name.startsWith(normalized + "/")) return true;
-    }
-    return false;
-  }
-
-  private record Scan(long bytes, int entries) {}
+  record Scan(long bytes, int entries) {}
 }

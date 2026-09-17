@@ -246,7 +246,9 @@ public record HostConfig(
         || b.directory == null
         || !Path.of(b.directory).isAbsolute()
         || b.include == null
+        || (b.enabled && b.include.isEmpty())
         || b.include.size() > 64
+        || new HashSet<>(b.include).size() != b.include.size()
         || b.retentionCount < 1
         || b.retentionCount > 1000
         || b.intervalMinutes < 0

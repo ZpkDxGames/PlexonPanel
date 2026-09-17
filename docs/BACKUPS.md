@@ -43,6 +43,8 @@ No live-snapshot action, Paper backup lease/coordinator, or recurring backup sch
 
 `backup.preflight` runs on the Host and fails closed before a backup countdown begins. It verifies, among other Host-owned requirements:
 
+- preflight sizing and cold archive creation traverse only the exact top-level names in Host `backups.include`; unrelated server-root entries are neither read nor archived;
+- the configured include list is non-empty and unique when backups are enabled, and a missing, unreadable or symlinked configured source fails closed;
 - Google Drive/rclone is configured according to policy;
 - `/usr/bin/rclone` exists, is executable and is not a symlink;
 - the configured rclone config is absolute, readable and not a symlink;

@@ -4,6 +4,8 @@ PlexonPanel 3.5.0 adds operator-selectable 30-, 15-, 10-, and 5-minute Host-owne
 
 The release also fixes remote-verification truthfulness: a Google Drive/rclone connectivity test no longer updates the timestamp reserved for a successfully verified remote backup.
 
+Production preflight additionally verifies the same bounded source contract used by archive creation. Both operations traverse only Host `backups.include`, so unrelated server-root paths cannot enter a full backup or require broader Host filesystem authority.
+
 The stable Host authority boundary is read-only for the live Minecraft tree. Server-tree file mutations and direct restore are not advertised as effective Host capabilities. Backup verification, retry-upload, retention/deletion, systemd lifecycle, provider diagnostics, and cold-backup creation remain supported under the existing device-scope and local-policy intersection.
 
 ## Matched artifacts

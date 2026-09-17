@@ -48,6 +48,7 @@ public final class FullRestorePointManager {
   private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
   private final HostConfig config;
   private final Path root, base, restorePoints, metadataDirectory, staging;
+  private final List<String> includes;
   private final SystemdService service;
   private final BooleanSupplier paperConnected;
   private final ReentrantLock operationLock;
@@ -66,6 +67,7 @@ public final class FullRestorePointManager {
     this.config = Objects.requireNonNull(config);
     this.root = Path.of(config.serverRoot()).toRealPath();
     this.base = Path.of(config.backups().directory()).toAbsolutePath().normalize();
+    this.includes = List.copyOf(config.backups().include());
     this.restorePoints = base.resolve("restore-points");
     this.metadataDirectory = base.resolve("metadata");
     this.staging = base.resolve("staging");
@@ -170,30 +172,20 @@ public final class FullRestorePointManager {
               Files.newOutputStream(partial, StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE);
           ZipOutputStream zip = new ZipOutputStream(new BufferedOutputStream(stream, 128 * 1024))) {
         zip.setLevel(Deflater.BEST_SPEED);
-        Files.walkFileTree(
+        FullBackupSource.walk(
             root,
-            EnumSet.noneOf(FileVisitOption.class),
-            96,
-            new SimpleFileVisitor<>() {
+            includes,
+            settings,
+            new FullBackupSource.Visitor() {
               @Override
-              public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs)
-                  throws IOException {
+              public void visitDirectory(Path directory, Path relative) throws IOException {
                 checkStopped();
-                Path relative = root.relativize(dir);
-                if (!relative.toString().isEmpty() && excluded(relative, settings))
-                  return FileVisitResult.SKIP_SUBTREE;
-                if (Files.isSymbolicLink(dir)) throw new IOException("BACKUP_SYMLINK_REJECTED");
-                return FileVisitResult.CONTINUE;
               }
 
               @Override
-              public FileVisitResult visitFile(Path file, BasicFileAttributes attrs)
+              public void visitFile(Path file, Path relative, BasicFileAttributes attributes)
                   throws IOException {
                 checkStopped();
-                Path relative = root.relativize(file);
-                if (excluded(relative, settings)) return FileVisitResult.CONTINUE;
-                if (!attrs.isRegularFile() || Files.isSymbolicLink(file))
-                  throw new IOException("BACKUP_SYMLINK_REJECTED");
                 if (++entries[0] > 500_000) throw new IOException("BACKUP_ENTRY_LIMIT");
                 String name = relative.toString().replace(File.separatorChar, '/');
                 validateArchiveName(name);
@@ -210,7 +202,6 @@ public final class FullRestorePointManager {
                   }
                 }
                 zip.closeEntry();
-                return FileVisitResult.CONTINUE;
               }
             });
       }
@@ -529,48 +520,25 @@ public final class FullRestorePointManager {
   private Scan scan(MaintenanceSettings.FullRestorePoint settings) throws IOException {
     long[] bytes = {0};
     int[] entries = {0};
-    Files.walkFileTree(
+    FullBackupSource.walk(
         root,
-        EnumSet.noneOf(FileVisitOption.class),
-        96,
-        new SimpleFileVisitor<>() {
+        includes,
+        settings,
+        new FullBackupSource.Visitor() {
           @Override
-          public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) throws IOException {
-            Path relative = root.relativize(dir);
-            if (!relative.toString().isEmpty() && excluded(relative, settings))
-              return FileVisitResult.SKIP_SUBTREE;
-            if (Files.isSymbolicLink(dir)) throw new IOException("BACKUP_SYMLINK_REJECTED");
-            return FileVisitResult.CONTINUE;
-          }
-
-          @Override
-          public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
-            Path relative = root.relativize(file);
-            if (excluded(relative, settings)) return FileVisitResult.CONTINUE;
-            if (!attrs.isRegularFile() || Files.isSymbolicLink(file))
-              throw new IOException("BACKUP_SYMLINK_REJECTED");
+          public void visitFile(Path file, Path relative, BasicFileAttributes attributes)
+              throws IOException {
             entries[0]++;
             if (entries[0] > 500_000) throw new IOException("BACKUP_ENTRY_LIMIT");
-            bytes[0] = Math.addExact(bytes[0], attrs.size());
+            try {
+              bytes[0] = Math.addExact(bytes[0], attributes.size());
+            } catch (ArithmeticException overflow) {
+              throw new IOException("BACKUP_SIZE_LIMIT", overflow);
+            }
             if (bytes[0] > settings.maximumBytes()) throw new IOException("BACKUP_SIZE_LIMIT");
-            return FileVisitResult.CONTINUE;
           }
         });
     return new Scan(bytes[0], entries[0]);
-  }
-
-  private boolean excluded(Path relative, MaintenanceSettings.FullRestorePoint settings) {
-    String name = relative.toString().replace(File.separatorChar, '/');
-    if (name.isEmpty()) return false;
-    String lower = name.toLowerCase(Locale.ROOT);
-    if (lower.startsWith(".plexonpanel-restore-")
-        || lower.startsWith(".plexonpanel-rollback-")
-        || lower.endsWith(".partial")) return true;
-    for (String configured : settings.excludes()) {
-      String normalized = configured.replace('\\', '/');
-      if (name.equals(normalized) || name.startsWith(normalized + "/")) return true;
-    }
-    return false;
   }
 
   private Set<String> extractArchive(Path archive, Path destination, long maximumBytes) throws IOException {
