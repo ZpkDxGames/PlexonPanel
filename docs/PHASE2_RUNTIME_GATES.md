@@ -6,18 +6,24 @@ Repository CI is required evidence, but it is not runtime certification. Never c
 
 ## 3.5.0 candidate provenance
 
-Record the exact values after both pull requests merge and their required CI completes:
+Current matched control-plane evidence:
+
+- Dashboard/relay `main`: `72d1f36b99e07ba1d319f18a2e574e5d7ca0a493`;
+- Dashboard CI: run `35171476557` (`Dashboard and relay checks`, PASS);
+- production relay deployment: run `35171476559` (PASS);
+- production relay `/healthz`: version `3.5.0`, Protocol `3`, `cloudflare-worker`, commit `72d1f36b99e07ba1d319f18a2e574e5d7ca0a493` (verified 2026-09-17 UTC);
+- Vercel status for the merged Dashboard commit: PASS.
+
+Record the remaining exact values after the backend pull request merges and its required CI completes:
 
 - backend/Paper/Host `main` commit;
-- Dashboard/relay `main` commit;
-- Dashboard CI run;
 - backend x64 and ARM64 CI run;
 - Paper and Host JAR SHA-256 values;
 - deployed Dashboard and relay identities.
 
 Protocol remains `3` and Java remains `25`. Runtime certification remains `NOT_EXECUTED` until every required live gate below is completed. A green source build is not a substitute for deployment or production evidence.
 
-Production relay deployment is separately blocked until the repository has valid `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, and `PRODUCTION_RELAY_URL` configuration. Never place those values in this document.
+Production relay deployment configuration is now present and the matched 3.5.0 relay identity has been verified. Keep all protected token/account values in GitHub configuration; never place them in this document.
 
 ## Final backup contract
 
