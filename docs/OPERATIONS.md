@@ -26,9 +26,9 @@ For the intended PlexonCraft full-capability deployment, use the separate [Paper
 
 ## Full-control deployment checks
 
-Before production, confirm Paper reports its supported scopes only, Host reports its supported scopes only, and a newly paired Owner receives the current canonical scope set. Host must still reject `players.*`, `player.*`, `console.*`, `chat.*` and `plugins.*`; Paper must still leave `server.start`, `server.stop` and `server.restart` disabled. A blue/non-applicable matrix cell is correct when that agent has no handler.
+Before production, confirm Paper reports its supported scopes only, Host reports its supported scopes only, and a newly paired Owner receives the current canonical scope set. Host must still reject `players.*`, `player.*`, `chat.*`, `plugins.*` and `console.execute.allowed`; Host-owned `console.view.*` is valid. Paper must still leave `server.start`, `server.stop` and `server.restart` disabled. A blue/non-applicable matrix cell is correct when that agent has no handler.
 
-The Host runtime user needs explicit permission for the configured systemd unit. Full Host file capability stays under `serverRoot`; do not broaden it to `/`. Backups remain effective only when `backups.enabled` is true, and restore additionally requires `restoreEnabled`. Test stop/restart and restore only on disposable data or a planned maintenance target.
+The Host runtime user needs explicit permission for the configured systemd unit and loopback command channel. In stable 3.5.0, mount `serverRoot` read-only: Host list/read/download remain confined beneath it while create/write/upload/rename/delete and remote restore are forced off even if legacy configuration requests them. Backups remain effective only when `backups.enabled` is true. Test the full save-all → stop → archive → Google Drive verify → automatic restart path, degraded retry-upload, and scheduled restart only on disposable data or a planned maintenance target.
 
 ## Player presence lifecycle
 
@@ -42,7 +42,7 @@ History uses UUID identity and plain account names. Names may change. UTC journa
 
 ## File boundaries
 
-Roots must exist and resolve to approved absolute directories. A mutation needs scope, agent capability, a writable root and OS permission. Paths reject absolute browser inputs, `..`, encoded traversal, backslashes, symlink components and broad OS roots. Identity/panel data, audit/logs, dotfiles, rclone credentials, private keys and sensitive configurations are protected.
+Roots must exist and resolve to approved absolute directories. Paper SafeFiles mutations need scope, Paper capability, a writable root and OS permission. The stable Host exposes only bounded read-only list/read/download beneath `serverRoot`; Host mutations are retired and its service mount is read-only. Paths reject absolute browser inputs, `..`, encoded traversal, backslashes, symlink components and broad OS roots. Identity/panel data, audit/logs, dotfiles, rclone credentials, private keys and sensitive configurations are protected.
 
 Listings use 100 entries/page and a 10,000-entry scan bound. Allowed UTF-8 text reads/edits/uploads are at most 24 KiB; JSON is validated, other text syntax needs operator review. SQL is read-only. Binary/executable writes are denied. Downloads are at most 8 MiB for general files and 64 MiB for backups, in 16 KiB ordered chunks with SHA-256 verification, cancellation and expiry.
 
@@ -73,7 +73,8 @@ Disconnect rejects pending actions with an unknown outcome and never resends the
 | Roster reconciling         | Wait for the complete Paper snapshot; repeated manual refresh is limited to five seconds. |
 | Host rejected              | Paper-side host pin, shared UUID, exact unit and registry permissions.                    |
 | File conflict              | Preserve draft, inspect actual file and save against a fresh hash.                        |
-| Save lease refused         | Paper backup setting, host trust and automatic-job opt-in.                                |
+| Backup preflight refused   | Host command channel, exact systemd unit, storage, rclone config, Google Drive connectivity and current destructive job. |
+| Countdown rejected         | Use exactly 30, 15, 10 or 5 minutes; the Host owns and persists the timer.                |
 | Recovery required          | Keep Paper stopped and follow local host recovery; never delete the journal to bypass it. |
 
 Use sanitized diagnostics for support. Keep raw logs, player data and credentials out of public issues.
