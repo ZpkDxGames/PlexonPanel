@@ -1,6 +1,7 @@
 package io.github.zpkdxgames.plexonpanel.host;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assumptions.assumeFalse;
 
 import io.github.zpkdxgames.plexonpanel.control.OperationFailure;
 import java.io.IOException;
@@ -81,6 +82,31 @@ class FullBackupPreflightTest {
                     MaintenanceSettings.migratedDefaults().fullRestorePoint()));
 
     assertEquals("BACKUP_SOURCE_UNREADABLE", failure.getMessage());
+  }
+
+  @Test
+  void unreadableMandatoryExcludedDirectoryIsPrunedWithoutGrantingReadAccess() throws Exception {
+    if (!FileSystems.getDefault().supportedFileAttributeViews().contains("posix")) return;
+    Path root = Files.createDirectory(temporary.resolve("server"));
+    Path plugins = Files.createDirectories(root.resolve("plugins/PlexonPanel"));
+    Path audit = Files.createDirectory(plugins.resolve("audit"));
+    Files.writeString(audit.resolve("private.jsonl"), "must-not-be-read");
+    Path included = Files.writeString(root.resolve("plugins/kept.yml"), "included");
+    Files.setPosixFilePermissions(audit, PosixFilePermissions.fromString("---------"));
+
+    try {
+      assumeFalse(Files.isReadable(audit), "Privileged test process bypasses POSIX read denial");
+      FullBackupPreflight.Scan scan =
+          FullBackupPreflight.scan(
+              root,
+              List.of("plugins"),
+              MaintenanceSettings.migratedDefaults().fullRestorePoint());
+
+      assertEquals(1, scan.entries());
+      assertEquals(Files.size(included), scan.bytes());
+    } finally {
+      Files.setPosixFilePermissions(audit, PosixFilePermissions.fromString("rwx------"));
+    }
   }
 
   @Test

@@ -9,6 +9,7 @@
 - Replace Paper reconnection as maintenance startup readiness with active-systemd plus fixed RCON readiness verification.
 - Fix Google Drive truthfulness so a provider connectivity test never updates the last successful remote-backup verification. Preserve a verified local archive on bounded remote failure and support retry-upload without another shutdown.
 - Constrain full-backup preflight, sizing and cold-archive traversal to the exact configured top-level `backups.include` allowlist. Unrelated server-root entries are never read or archived, while missing, duplicate, empty, symlinked or unreadable configured sources continue to fail closed.
+- Prune mandatory private/noise exclusions even when their directories are intentionally unreadable to the Host, preserving denial of `device.key`, pairing identity, audit data and profiler temporary data without falsely rejecting the readable backup source tree.
 - Return typed, browser-safe preflight failure codes for provider, storage, source and capacity gates, and document writable isolated rclone token storage for OAuth refresh without weakening root-owned Host policy.
 - Guarantee server-availability recovery after a backup-owned stop: start Minecraft and verify systemd plus RCON readiness after success or degraded remote failure.
 - Add restart settings with the same countdown presets, daily/weekly/selected-weekday scheduling and independent bounded shutdown/startup timeouts; restart scheduling never creates a backup.
