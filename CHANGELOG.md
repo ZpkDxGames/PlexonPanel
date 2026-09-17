@@ -1,13 +1,20 @@
 # Changelog
 
-## Unreleased — Host-owned maintenance command channel
+## 3.5.0 — backup control room and durable Google Drive flow (live acceptance pending)
 
 - Move maintenance warning broadcasts, final `save-all flush`, and post-start readiness probing onto a Host-local fixed-command RCON client so the Paper plugin is no longer required for those maintenance steps.
 - Add protected Host `commandChannel` configuration with loopback-only targets, a secret-file reference instead of an inline password, bounded command/readiness timeouts, and no browser-facing arbitrary command route.
-- Make full-backup countdown timing Host-owned with the required 30m / 15m / 1m / 30s / 15s / 5s warning boundaries, durable deadline/consumed-warning state, and restart recovery that skips missed boundaries instead of replaying them.
+- Add validated 30-, 15-, 10-, and 5-minute initial full-backup countdown presets. Persist the selected duration, warning plan, deadline and consumed boundaries so reconnect/restart recovery skips missed notices instead of replaying them.
 - Enforce a tested final-save safety gate: any RCON authentication, timeout, secret, protocol, or save-flush failure fails maintenance before the systemd stop continuation can run.
 - Replace Paper reconnection as maintenance startup readiness with active-systemd plus fixed RCON readiness verification.
-- Add RCON protocol/security/config/countdown/recovery tests and Host-local migration guidance. Live PlexonCraft RCON/firewall behavior remains a deployment acceptance gate rather than a CI claim.
+- Fix Google Drive truthfulness so a provider connectivity test never updates the last successful remote-backup verification. Preserve a verified local archive on bounded remote failure and support retry-upload without another shutdown.
+- Guarantee server-availability recovery after a backup-owned stop: start Minecraft and verify systemd plus RCON readiness after success or degraded remote failure.
+- Add restart settings with the same countdown presets, daily/weekly/selected-weekday scheduling and independent bounded shutdown/startup timeouts; restart scheduling never creates a backup.
+- Rebuild the Backups page as a responsive Host-authoritative control room with preflight, countdown selection, durable phase reconstruction, local/remote verification, degraded recovery and retry controls.
+- Keep the live Minecraft tree read-only in the stable Host. Force Host file mutations and remote restore off while retaining read-only inspection and historical interrupted-restore recovery.
+- Accept authenticated empty Host console replay and the bounded source-status ordering race without tearing down the relay session.
+- Add RCON protocol/security/config/countdown/recovery tests and Host-local migration guidance while preserving signed Protocol 3, existing identities and immutable grants.
+- Source CI and preview evidence do not certify production. Stable publication remains gated on the real Ubuntu 24.04/Java 25/Paper 26.2 systemd, RCON, rclone/Google Drive, browser reconnect and degraded-retry acceptance run.
 
 ## 3.4.0 — Host-authoritative Linux console and relay parity
 
