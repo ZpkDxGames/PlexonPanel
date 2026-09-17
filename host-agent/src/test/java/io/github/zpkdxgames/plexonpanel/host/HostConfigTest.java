@@ -176,6 +176,19 @@ class HostConfigTest {
   }
 
   @Test
+  void enabledBackupsRequireUniqueTopLevelIncludes() throws Exception {
+    JsonObject empty = fullControlConfig();
+    empty.getAsJsonObject("backups").add("include", new JsonArray());
+    assertThrows(IllegalArgumentException.class, () -> load(empty));
+
+    JsonObject duplicate = fullControlConfig();
+    duplicate
+        .getAsJsonObject("backups")
+        .add("include", new Gson().toJsonTree(List.of("world", "world")));
+    assertThrows(IllegalArgumentException.class, () -> load(duplicate));
+  }
+
+  @Test
   void defaultsCannotInvokeShellOrUnconfiguredServices() throws Exception {
     assertFalse(load(config()).effectiveCapabilities().get("server.start"));
     for (String service :

@@ -71,20 +71,17 @@ class FullRestorePointPolicyTest {
     Files.writeString(root.resolve("world/playerdata/player.dat"), "player-state");
     Files.writeString(root.resolve("config/paper-global.yml"), "config-state");
     Files.writeString(root.resolve("logs/latest.log"), "noise");
+    Files.writeString(root.resolve("unconfigured-secret.dat"), "must-not-be-read");
 
     var manager = manager(root, backups);
     var settings = MaintenanceSettings.migratedDefaults().fullRestorePoint();
-    Method excluded =
-        FullRestorePointManager.class.getDeclaredMethod(
-            "excluded", Path.class, MaintenanceSettings.FullRestorePoint.class);
-    excluded.setAccessible(true);
 
-    assertFalse((boolean) excluded.invoke(manager, Path.of("plugins/PlexonRanks/database.db"), settings));
-    assertFalse((boolean) excluded.invoke(manager, Path.of("plugins/PlexonRanks/data.sqlite"), settings));
-    assertFalse((boolean) excluded.invoke(manager, Path.of("world/level.dat"), settings));
-    assertFalse((boolean) excluded.invoke(manager, Path.of("world/playerdata/player.dat"), settings));
-    assertFalse((boolean) excluded.invoke(manager, Path.of("config/paper-global.yml"), settings));
-    assertTrue((boolean) excluded.invoke(manager, Path.of("logs/latest.log"), settings));
+    assertFalse(FullBackupSource.excluded(Path.of("plugins/PlexonRanks/database.db"), settings));
+    assertFalse(FullBackupSource.excluded(Path.of("plugins/PlexonRanks/data.sqlite"), settings));
+    assertFalse(FullBackupSource.excluded(Path.of("world/level.dat"), settings));
+    assertFalse(FullBackupSource.excluded(Path.of("world/playerdata/player.dat"), settings));
+    assertFalse(FullBackupSource.excluded(Path.of("config/paper-global.yml"), settings));
+    assertTrue(FullBackupSource.excluded(Path.of("logs/latest.log"), settings));
 
     Method scan =
         FullRestorePointManager.class.getDeclaredMethod(
