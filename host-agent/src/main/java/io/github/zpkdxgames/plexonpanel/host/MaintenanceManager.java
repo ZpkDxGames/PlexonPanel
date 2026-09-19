@@ -603,7 +603,10 @@ public final class MaintenanceManager implements AutoCloseable {
           fullBackups.createLocked(
               job.jobId(), actor(device, automatic), automatic, false, current.fullRestorePoint(), true);
       boolean providerConfigured = Boolean.TRUE.equals(fullBackups.providerStatus().get("configured"));
-      boolean localVerified = backup.local() && backup.sha256() != null && !backup.sha256().isBlank();
+      boolean localVerified =
+          backup.sha256() != null
+              && !backup.sha256().isBlank()
+              && (backup.local() || backup.offsite());
       boolean remoteVerified = backup.offsite();
       boolean degraded = providerConfigured && !remoteVerified;
       String errorCode = degraded ? retryableOffsiteCode(backup.errorCode()) : "";

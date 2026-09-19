@@ -208,8 +208,7 @@ public final class FullRestorePointManager {
       try (FileChannel channel = FileChannel.open(partial, StandardOpenOption.WRITE)) {
         channel.force(true);
       }
-      long stagedArchiveBytes = Files.size(partial);
-      emit(jobId, backupId, "HASHING", stagedArchiveBytes, scan.bytes, entries[0]);
+      emit(jobId, backupId, "HASHING", scan.bytes, scan.bytes, entries[0]);
       VerifiedArchive published =
           verifyAndPublish(
               partial,
@@ -252,10 +251,19 @@ public final class FullRestorePointManager {
       Metadata result = local;
       if (uploadOffsite && provider.configured() && !emergency) {
         emitRemoteProgress(jobId, backupId, 0, archiveBytes, entries[0], "UPLOADING");
+        Path transferMetadata = staging.resolve(backupId + ".upload.json");
         try {
           String canonical = canonicalFor(settings, backupId);
-          Metadata remoteCandidate = withRemote(local, true, provider.status().get("remote") + "/" + canonical, "VERIFYING_REMOTE", "");
-          Path transferMetadata = staging.resolve(backupId + ".upload.json");
+          Metadata remoteCandidate =
+              withLocalState(
+                  withRemote(
+                      local,
+                      true,
+                      provider.status().get("remote") + "/" + canonical,
+                      "VERIFIED_REMOTE",
+                      ""),
+                  false,
+                  "VERIFIED_REMOTE");
           AtomicFiles.writeUtf8(transferMetadata, GSON.toJson(remoteCandidate));
           RcloneBackupProvider.Promotion promoted =
               provider.uploadAndPromote(
@@ -263,18 +271,40 @@ public final class FullRestorePointManager {
                   transferMetadata,
                   jobId,
                   canonical,
-                  settings.uploadTimeoutSeconds());
-          emitRemoteProgress(jobId, backupId, archiveBytes, archiveBytes, entries[0], "VERIFIED_REMOTE");
-          Files.deleteIfExists(transferMetadata);
-          result = withRemote(local, promoted.verified(), promoted.remotePath(), "VERIFIED", "");
-          AtomicFiles.writeUtf8(metadataFile, GSON.toJson(result));
+                  settings.uploadTimeoutSeconds(),
+                  local.sha256(),
+                  update ->
+                      emitRemoteProgress(
+                          jobId,
+                          backupId,
+                          update.bytesTransferred(),
+                          archiveBytes,
+                          entries[0],
+                          update.bytesPerSecond(),
+                          "UPLOADING"));
+          result =
+              completeRemotePromotion(
+                  local,
+                  promoted,
+                  finalArchive,
+                  metadataFile,
+                  jobId,
+                  backupId,
+                  archiveBytes,
+                  entries[0]);
         } catch (Exception remoteFailure) {
           result = withRemote(local, false, "", "LOCAL_ONLY", classify(remoteFailure));
           AtomicFiles.writeUtf8(metadataFile, GSON.toJson(result));
+        } finally {
+          try {
+            Files.deleteIfExists(transferMetadata);
+          } catch (IOException ignored) {
+          }
         }
       }
       retention(settings);
-      emit(jobId, backupId, "COMPLETE", archiveBytes, scan.bytes, entries[0]);
+      if (!result.offsite())
+        emit(jobId, backupId, "COMPLETE", scan.bytes, scan.bytes, entries[0]);
       return result;
     } catch (Exception failure) {
       Files.deleteIfExists(partial);
@@ -294,15 +324,50 @@ public final class FullRestorePointManager {
       emitRemoteProgress(jobId, backupId, 0, archiveBytes, local.entryCount(), "UPLOADING");
       Path transferMetadata = staging.resolve(backupId + ".retry.json");
       String canonical = canonicalFor(settings, backupId);
-      Metadata candidate = withRemote(local, true, provider.status().get("remote") + "/" + canonical, "VERIFYING_REMOTE", "");
-      AtomicFiles.writeUtf8(transferMetadata, GSON.toJson(candidate));
-      RcloneBackupProvider.Promotion promoted =
-          provider.uploadAndPromote(localArchive, transferMetadata, jobId, canonical, settings.uploadTimeoutSeconds());
-      emitRemoteProgress(jobId, backupId, archiveBytes, archiveBytes, local.entryCount(), "VERIFIED_REMOTE");
-      Files.deleteIfExists(transferMetadata);
-      Metadata result = withRemote(local, promoted.verified(), promoted.remotePath(), "VERIFIED", "");
-      AtomicFiles.writeUtf8(metadataDirectory.resolve(backupId + ".json"), GSON.toJson(result));
-      return result;
+      try {
+        Metadata candidate =
+            withLocalState(
+                withRemote(
+                    local,
+                    true,
+                    provider.status().get("remote") + "/" + canonical,
+                    "VERIFIED_REMOTE",
+                    ""),
+                false,
+                "VERIFIED_REMOTE");
+        AtomicFiles.writeUtf8(transferMetadata, GSON.toJson(candidate));
+        RcloneBackupProvider.Promotion promoted =
+            provider.uploadAndPromote(
+                localArchive,
+                transferMetadata,
+                jobId,
+                canonical,
+                settings.uploadTimeoutSeconds(),
+                local.sha256(),
+                update ->
+                    emitRemoteProgress(
+                        jobId,
+                        backupId,
+                        update.bytesTransferred(),
+                        archiveBytes,
+                        local.entryCount(),
+                        update.bytesPerSecond(),
+                        "UPLOADING"));
+        return completeRemotePromotion(
+            local,
+            promoted,
+            localArchive,
+            metadataDirectory.resolve(backupId + ".json"),
+            jobId,
+            backupId,
+            archiveBytes,
+            local.entryCount());
+      } finally {
+        try {
+          Files.deleteIfExists(transferMetadata);
+        } catch (IOException ignored) {
+        }
+      }
     } finally {
       operationLock.unlock();
     }
@@ -465,7 +530,7 @@ public final class FullRestorePointManager {
     try {
       Metadata value = metadata(backupId);
       if (value.emergency) throw new IOException("Emergency restore points require local review before deletion");
-      Files.deleteIfExists(archive(backupId));
+      Files.deleteIfExists(restorePoints.resolve(backupId + ".zip"));
       Files.deleteIfExists(metadataDirectory.resolve(backupId + ".json"));
     } finally {
       operationLock.unlock();
@@ -631,6 +696,56 @@ public final class FullRestorePointManager {
         value.restartPerformed, value.result, value.errorCode);
   }
 
+  private Metadata withResult(Metadata value, String result, String errorCode) {
+    return new Metadata(
+        value.backupId, value.jobId, value.type, value.timestamp, value.startedAt,
+        value.completedAt, value.durationMillis, value.serverName, value.serverVersion,
+        value.paperVersion, value.plexonPanelVersion, value.archiveBytes, value.sourceBytes,
+        value.entryCount, value.sha256, value.local, value.offsite, value.remoteProvider,
+        value.remotePath, value.verification, value.initiatedBy, value.automatic, value.emergency,
+        value.restartPerformed, result, errorCode);
+  }
+
+  private Metadata completeRemotePromotion(
+      Metadata local,
+      RcloneBackupProvider.Promotion promoted,
+      Path localArchive,
+      Path metadataFile,
+      String jobId,
+      String backupId,
+      long archiveBytes,
+      int entries)
+      throws IOException {
+    if (!promoted.uploaded() || !promoted.verified())
+      throw new IOException("REMOTE_VERIFY_FAILED");
+    Metadata remoteVerified =
+        withRemote(local, promoted.verified(), promoted.remotePath(), "VERIFIED_REMOTE", "");
+    AtomicFiles.writeUtf8(metadataFile, GSON.toJson(remoteVerified));
+    emitRemoteProgress(jobId, backupId, archiveBytes, archiveBytes, entries, "VERIFIED_REMOTE");
+    emitRemoteProgress(jobId, backupId, archiveBytes, archiveBytes, entries, "CLEANING_LOCAL");
+    try {
+      Files.deleteIfExists(localArchive);
+    } catch (Exception cleanupFailure) {
+      Metadata retained =
+          withResult(remoteVerified, "SUCCESS_WITH_WARNING", "LOCAL_CLEANUP_FAILED");
+      try {
+        AtomicFiles.writeUtf8(metadataFile, GSON.toJson(retained));
+      } catch (IOException ignored) {
+      }
+      emitRemoteProgress(jobId, backupId, archiveBytes, archiveBytes, entries, "LOCAL_RETAINED");
+      return retained;
+    }
+
+    Metadata released = withLocalState(remoteVerified, false, "VERIFIED_REMOTE");
+    try {
+      AtomicFiles.writeUtf8(metadataFile, GSON.toJson(released));
+    } catch (IOException ignored) {
+      // The previously persisted off-site state remains sufficient to re-fetch this archive.
+    }
+    emitRemoteProgress(jobId, backupId, archiveBytes, archiveBytes, entries, "LOCAL_RELEASED");
+    return released;
+  }
+
   private void waitForStopped(int seconds) throws Exception {
     long until = System.nanoTime() + TimeUnit.SECONDS.toNanos(seconds);
     while (System.nanoTime() < until) {
@@ -663,7 +778,7 @@ public final class FullRestorePointManager {
 
   private void emit(String jobId, String backupId, String phase, long bytes, long total, int entries) {
     long now = System.currentTimeMillis();
-    if (now - progressAt < 750 && !Set.of("COMPLETE", "FAILED").contains(phase)) return;
+    if (now - progressAt < 750 && "ARCHIVING".equals(phase)) return;
     progressAt = now;
     Map<String, Object> event = new LinkedHashMap<>();
     event.put("jobId", jobId);
@@ -685,16 +800,35 @@ public final class FullRestorePointManager {
       long totalBytes,
       int entries,
       String providerState) {
+    emitRemoteProgress(
+        jobId, backupId, bytesUploaded, totalBytes, entries, 0L, providerState);
+  }
+
+  private void emitRemoteProgress(
+      String jobId,
+      String backupId,
+      long bytesUploaded,
+      long totalBytes,
+      int entries,
+      long bytesPerSecond,
+      String providerState) {
     Map<String, Object> event = new LinkedHashMap<>();
     event.put("jobId", jobId);
     event.put("backupId", backupId);
     event.put("type", "FULL_RESTORE_POINT");
-    event.put("phase", "UPLOADING_REMOTE");
+    event.put(
+        "phase",
+        switch (providerState) {
+          case "VERIFIED_REMOTE" -> "VERIFYING_REMOTE";
+          case "CLEANING_LOCAL", "LOCAL_RELEASED", "LOCAL_RETAINED" -> "CLEANING_LOCAL";
+          default -> "UPLOADING_REMOTE";
+        });
     event.put("bytesUploaded", bytesUploaded);
     event.put("totalBytes", totalBytes);
     event.put("entryCount", entries);
     event.put("provider", "RCLONE");
     event.put("providerState", providerState);
+    if (bytesPerSecond > 0) event.put("bytesPerSecond", bytesPerSecond);
     event.put("capturedAt", Instant.now().toString());
     if (totalBytes > 0)
       event.put("progress", Math.min(1.0d, (double) bytesUploaded / (double) totalBytes));

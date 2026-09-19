@@ -1,6 +1,6 @@
 # Full local capability deployment
 
-PlexonPanel 3.5.0 provides explicit full-control examples for the intended PlexonCraft deployment without changing signed wire protocol 3 or weakening the local authorization model. The stable Host now keeps the live Minecraft tree read-only while retaining Host-owned lifecycle, console, backup, Google Drive, and maintenance authority.
+PlexonPanel 3.5.1 provides explicit full-control examples for the intended PlexonCraft deployment without changing signed wire protocol 3 or weakening the local authorization model. The stable Host keeps the live Minecraft tree read-only while retaining Host-owned lifecycle, console, backup, Google Drive, and maintenance authority.
 
 Use:
 
@@ -55,7 +55,7 @@ The Host preset enables telemetry, Host-owned console viewing, server status/sta
 
 Host configuration still rejects Paper-only scope families such as players, console, chat, player actions and plugins. Lifecycle operations still use the validated exact systemd service name; the daemon must run as a dedicated non-root Linux user with permission to manage that configured unit.
 
-Backup capability remains defense-in-depth gated. A configured backup scope is effective only while `backups.enabled` is true. Legacy `backups.restoreEnabled` is parsed for rolling-upgrade compatibility but cannot make `backup.restore` effective in the 3.5.0 stable Host.
+Backup capability remains defense-in-depth gated. A configured backup scope is effective only while `backups.enabled` is true. Legacy `backups.restoreEnabled` is parsed for rolling-upgrade compatibility but cannot make `backup.restore` effective in the 3.5.1 stable Host.
 
 The Host service mounts `serverRoot` read-only. Listing, bounded reads and downloads remain confined beneath that root; create/write/upload/rename/delete are retired from the stable Host capability contract. Full Plexon server control is not unrestricted Linux filesystem or shell access.
 

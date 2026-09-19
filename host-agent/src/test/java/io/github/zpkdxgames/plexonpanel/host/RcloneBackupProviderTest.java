@@ -5,7 +5,9 @@ import static org.junit.jupiter.api.Assertions.*;
 import io.github.zpkdxgames.plexonpanel.control.OperationFailure;
 import java.io.IOException;
 import java.nio.file.*;
+import java.security.MessageDigest;
 import java.util.*;
+import java.util.function.Consumer;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -109,7 +111,56 @@ class RcloneBackupProviderTest {
     assertTrue(result.verified());
     assertEquals(4096L, fake.remote.get(ROOT + "/PlexonCraft-Latest.zip"));
     assertEquals(512L, fake.remote.get(ROOT + "/PlexonCraft-Latest.json"));
+    assertTrue(fake.commands.stream().anyMatch(command -> command.contains("hashsum")));
     assertTrue(fake.copyAttempts >= 3, "the failed first upload should have been retried");
+    assertTrue(
+        fake.commands.stream()
+            .anyMatch(
+                command ->
+                    command.contains("--stats")
+                        && command.contains("1s")
+                        && command.contains("--stats-one-line")
+                        && command.contains("--stats-log-level")));
+  }
+
+  @Test
+  void uploadStreamsNumericOnlyRcloneProgress() throws Exception {
+    Path archive = local("progress.zip", 8192);
+    Path metadata = local("progress.json", 512);
+    FakeRclone fake = new FakeRclone();
+    fake.progressLines.add(
+        "2026/09/18 14:04:08 NOTICE: Transferred: 4.000 KiB / 8.000 KiB, 50%, 2.000 KiB/s, ETA 2s");
+    fake.progressLines.add(
+        "2026/09/18 14:04:10 NOTICE: Transferred: 8.000 KiB / 8.000 KiB, 100%, 2.000 KiB/s, ETA 0s");
+    List<RcloneBackupProvider.TransferProgress> updates = new ArrayList<>();
+    var provider = new RcloneBackupProvider(config(), fake);
+
+    provider.uploadAndPromote(
+        archive,
+        metadata,
+        UUID.randomUUID().toString(),
+        "PlexonCraft-Latest.zip",
+        30,
+        updates::add);
+
+    assertEquals(2, updates.size());
+    assertEquals(4096L, updates.get(0).bytesTransferred());
+    assertEquals(8192L, updates.get(0).totalBytes());
+    assertEquals(2048L, updates.get(0).bytesPerSecond());
+    assertEquals(8192L, updates.get(1).bytesTransferred());
+  }
+
+  @Test
+  void progressParserIgnoresNonStatsOutputAndClampsCompletionToExactArchiveSize() {
+    assertTrue(RcloneBackupProvider.parseProgressLine("authentication failed", 8192L).isEmpty());
+
+    var complete =
+        RcloneBackupProvider.parseProgressLine(
+                "Transferred: 7.999 KiB / 8.000 KiB, 100%, 1.500 KiB/s, ETA 0s", 8192L)
+            .orElseThrow();
+
+    assertEquals(8192L, complete.bytesTransferred());
+    assertEquals(1536L, complete.bytesPerSecond());
   }
 
   @Test
@@ -207,6 +258,26 @@ class RcloneBackupProviderTest {
                         && command.get(3).equals(canonicalZip)));
   }
 
+  @Test
+  void mismatchedRemoteHashRetainsTheLocalArchiveAndRollsBackCanonical() throws Exception {
+    Path archive = local("hash-mismatch.zip", 4096);
+    Path metadata = local("hash-mismatch.json", 512);
+    FakeRclone fake = new FakeRclone();
+    String canonicalZip = ROOT + "/PlexonCraft-Latest.zip";
+    fake.remote.put(canonicalZip, 777L);
+    fake.mismatchHash = true;
+    var provider = new RcloneBackupProvider(config(), fake);
+
+    IOException error = assertThrows(
+        IOException.class,
+        () -> provider.uploadAndPromote(
+            archive, metadata, UUID.randomUUID().toString(), "PlexonCraft-Latest.zip", 30));
+
+    assertEquals("REMOTE_VERIFY_FAILED", error.getMessage());
+    assertTrue(Files.exists(archive));
+    assertEquals(777L, fake.remote.get(canonicalZip));
+  }
+
   private Path local(String name, int bytes) throws IOException {
     Path file = temporary.resolve(name);
     Files.write(file, new byte[bytes]);
@@ -237,6 +308,8 @@ class RcloneBackupProviderTest {
     String failDestination = "";
     int failDestinationCopies;
     String failureOutput = "simulated failure";
+    boolean mismatchHash;
+    final List<String> progressLines = new ArrayList<>();
 
     @Override
     public RcloneBackupProvider.ProcessResult run(List<String> arguments, int timeoutSeconds)
@@ -249,8 +322,22 @@ class RcloneBackupProviderTest {
         case "lsf" -> exists(arguments.get(2));
         case "deletefile" -> delete(arguments.get(2));
         case "lsjson" -> new RcloneBackupProvider.ProcessResult(0, "[]");
+        case "hashsum" -> hash(arguments.get(3));
         default -> new RcloneBackupProvider.ProcessResult(1, "unsupported operation");
       };
+    }
+
+    @Override
+    public RcloneBackupProvider.ProcessResult run(
+        List<String> arguments, int timeoutSeconds, Consumer<String> outputLine) throws Exception {
+      RcloneBackupProvider.ProcessResult result = run(arguments, timeoutSeconds);
+      if (arguments.size() > 3
+          && arguments.get(1).equals("copyto")
+          && !arguments.get(2).startsWith(ROOT + "/")
+          && arguments.get(2).endsWith(".zip")) {
+        progressLines.forEach(outputLine);
+      }
+      return result;
     }
 
     private RcloneBackupProvider.ProcessResult copy(List<String> arguments) throws Exception {
@@ -288,6 +375,20 @@ class RcloneBackupProviderTest {
       return bytes == null
           ? new RcloneBackupProvider.ProcessResult(4, "not found")
           : new RcloneBackupProvider.ProcessResult(0, bytes + " object");
+    }
+
+    private RcloneBackupProvider.ProcessResult hash(String path) throws Exception {
+      Long size = remote.get(path);
+      if (size == null) return new RcloneBackupProvider.ProcessResult(4, "not found");
+      MessageDigest digest = MessageDigest.getInstance("SHA-256");
+      byte[] zeros = new byte[1024];
+      for (long remaining = size; remaining > 0; ) {
+        int count = (int) Math.min(remaining, zeros.length);
+        digest.update(zeros, 0, count);
+        remaining -= count;
+      }
+      String value = mismatchHash ? "0".repeat(64) : HexFormat.of().formatHex(digest.digest());
+      return new RcloneBackupProvider.ProcessResult(0, value + "  " + Path.of(path).getFileName());
     }
 
     private RcloneBackupProvider.ProcessResult exists(String path) {

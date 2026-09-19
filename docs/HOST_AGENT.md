@@ -15,7 +15,7 @@ Use a disposable server first. Adjust the example user, paths and `plexoncraft.s
 7. Initialize as the host user:
 
 ```sh
-sudo -u plexonpanel-host /usr/bin/java -jar /opt/plexonpanel-host/plexonpanel-host-3.5.0.jar --init /var/lib/plexonpanel-host
+sudo -u plexonpanel-host /usr/bin/java -jar /opt/plexonpanel-host/plexonpanel-host-3.5.1.jar --init /var/lib/plexonpanel-host
 ```
 
 Copy only its printed public key to Paper `host.public-key`; copy the existing Paper UUID to host config. Both use the relay public key and WSS `/v1/agent` URL. Reload Paper locally.
@@ -25,7 +25,7 @@ Copy only its printed public key to Paper `host.public-key`; copy the existing P
 
 ## Full local Host capabilities
 
-The full-control example enables telemetry, server status/start/stop/restart, bounded read-only file inspection, manual backup operations, audit, settings, and Host-owned console viewing when explicitly enabled. Device pairing, grant changes, revocation, and generation/revision ownership remain Paper-authoritative even if legacy Host configuration still lists `devices.*`; Host effective capabilities force those mutation scopes off, so an explicitly Host-targeted access change fails closed. Already paired credentials continue to authorize Host-backed actions from the private mirror while Paper is offline. Effective backup capability still requires `backups.enabled`. The stable 3.5.0 Host also forces server-tree create/write/upload/rename/delete and `backup.restore` off even if legacy configuration enables them; `restoreEnabled` cannot override that boundary. Effective console viewing requires Host `console.enabled` plus the corresponding `console.view.errors` or `console.view.full` capability. HostConfig continues rejecting Paper-only scope families. Read-only file operations remain confined under `serverRoot`, and lifecycle actions remain bound to the validated exact systemd service name.
+The full-control example enables telemetry, server status/start/stop/restart, bounded read-only file inspection, manual backup operations, audit, settings, and Host-owned console viewing when explicitly enabled. Device pairing, grant changes, revocation, and generation/revision ownership remain Paper-authoritative even if legacy Host configuration still lists `devices.*`; Host effective capabilities force those mutation scopes off, so an explicitly Host-targeted access change fails closed. Already paired credentials continue to authorize Host-backed actions from the private mirror while Paper is offline. Effective backup capability still requires `backups.enabled`. The stable 3.5.1 Host also forces server-tree create/write/upload/rename/delete and `backup.restore` off even if legacy configuration enables them; `restoreEnabled` cannot override that boundary. Effective console viewing requires Host `console.enabled` plus the corresponding `console.view.errors` or `console.view.full` capability. HostConfig continues rejecting Paper-only scope families. Read-only file operations remain confined under `serverRoot`, and lifecycle actions remain bound to the validated exact systemd service name.
 
 ## Console authority and retained history
 
@@ -56,12 +56,12 @@ The job and selected countdown survive browser refresh, disconnect, and Host res
 
 ## Read-only boundary and historical restore recovery
 
-Direct remote restore is not part of the stable 3.5.0 capability contract. The Host mounts the Minecraft tree read-only and forces `backup.restore` plus Host file mutations off. Perform a planned restore locally under the server operator's recovery procedure, outside the network-reachable Host process.
+Direct remote restore is not part of the stable 3.5.1 capability contract. The Host mounts the Minecraft tree read-only and forces `backup.restore` plus Host file mutations off. Perform a planned restore locally under the server operator's recovery procedure, outside the network-reachable Host process.
 
 Historical interrupted-restore journals remain recognized so an upgrade cannot bypass an existing safety gate. On `RECOVERY_REQUIRED`, leave Paper stopped, inspect local journal/logs, repair storage/permissions and run:
 
 ```sh
-sudo -u plexonpanel-host /usr/bin/java -jar /opt/plexonpanel-host/plexonpanel-host-3.5.0.jar /etc/plexonpanel-host/host-config.json --recover-restore
+sudo -u plexonpanel-host /usr/bin/java -jar /opt/plexonpanel-host/plexonpanel-host-3.5.1.jar /etc/plexonpanel-host/host-config.json --recover-restore
 ```
 
 Recovery restores saved originals and removes new targets left by a historical interrupted restore; repeating it preserves originals already recovered. Malformed/unknown journals fail closed. Never delete a journal to bypass recovery. Validate files and gameplay before deliberately starting Paper. Real systemd/RCON/rclone interruption and Google Drive verification tests remain stable-release gates.
