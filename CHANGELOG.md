@@ -1,5 +1,15 @@
 # Changelog
 
+## 3.5.1 — live backup progress and verified VPS cleanup
+
+- Stream bounded numeric rclone statistics from the Host so Google Drive upload progress reports transferred ZIP bytes, exact total bytes, percentage, and current byte rate without exposing raw command output or credentials.
+- Keep ZIP creation progress based on source bytes processed and distinguish archive finalization, remote verification, canonical promotion, and local cleanup as separate phases.
+- Remove the temporary VPS ZIP only after the remote archive and metadata pair has been verified and promoted; retain it after upload failure or timeout so Retry Upload remains safe.
+- Preserve verified off-site success if local cleanup fails, recording `SUCCESS_WITH_WARNING` / `LOCAL_CLEANUP_FAILED` instead of falsely downgrading the remote backup.
+- Treat a cryptographically verified archive as locally verified for the maintenance result even after its temporary local file is intentionally released.
+- Keep backup history metadata after local cleanup and allow history deletion when the local archive is already absent.
+- Preserve Protocol 3, existing identities/device grants, Host/Paper authority boundaries, and the mandatory post-backup Minecraft restart.
+
 ## 3.5.0 — backup control room and durable Google Drive flow (live acceptance pending)
 
 - Move maintenance warning broadcasts, final `save-all flush`, and post-start readiness probing onto a Host-local fixed-command RCON client so the Paper plugin is no longer required for those maintenance steps.

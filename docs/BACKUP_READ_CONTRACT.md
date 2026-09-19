@@ -2,7 +2,7 @@
 
 PlexonPanel Host is intentionally non-root and must not own or write the live Minecraft server tree. On Linux, ordinary directory default ACLs are not sufficient for live backups when Paper or a plugin creates/replaces a file as mode `0600`: the new file can retain a named ACL entry for `plexonpanel-host` while its ACL mask removes the effective read bit.
 
-PlexonPanel 3.5.0 therefore ships an optional **root-owned, local-only backup read bridge** for servers that exhibit that behavior. It is the supported replacement for ad-hoc `setfacl` watchers.
+PlexonPanel 3.5.1 therefore ships an optional **root-owned, local-only backup read bridge** for servers that exhibit that behavior. It is the supported replacement for ad-hoc `setfacl` watchers.
 
 ## Security model
 
@@ -56,7 +56,7 @@ The example service hardens and permits writes only under `/opt/plexoncraft/serv
 
 ## Acceptance checks
 
-After installation, run the following locally during the 3.5.0 runtime gate:
+After installation, run the following locally during the 3.5.1 runtime gate:
 
 ```bash
 sudo systemctl status plexonpanel-backup-read-bridge.service --no-pager

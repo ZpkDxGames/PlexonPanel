@@ -33,11 +33,12 @@ After the server is stopped and the local ZIP has been atomically promoted and S
 5. preserve any current canonical ZIP/metadata as job-specific previous objects;
 6. copy staged ZIP to the canonical restore-point name and verify its size;
 7. copy staged metadata to the canonical metadata name and verify its size;
-8. only after both canonical objects verify, prune the temporary staging/previous objects.
+8. compare the promoted ZIP's Google Drive SHA-256 to the verified local archive SHA-256; require a hash to be available;
+9. only after both canonical objects verify, prune the temporary staging/previous objects.
 
 Remote steps use bounded retries inside the same total timeout. A retry never extends the configured maximum offline upload duration.
 
-The local SHA-256 remains the authoritative local integrity proof. The current rclone promotion path verifies remote object sizes; it does not expose credentials or raw provider hashes to the browser.
+The local SHA-256 remains the authoritative local integrity proof. The rclone promotion path compares the promoted ZIP's remote SHA-256 to that local hash before the VPS ZIP is deleted; an absent or mismatched hash retains the local backup for retry. It does not expose credentials or raw provider hashes to the browser.
 
 ## Drive outage and degraded completion
 
@@ -51,7 +52,7 @@ The promotion sequence preserves the previous verified remote restore point befo
 
 ## Retry Upload
 
-`backup.full.retry-upload` operates from the Host-owned, SHA-256-verified local archive. It does not stop Minecraft again and reuses the same staging, verification, preservation, promotion, and cleanup rules. On success, the backup metadata is rewritten as remotely verified.
+`backup.full.retry-upload` operates from the Host-owned, SHA-256-verified local archive. It does not stop Minecraft again and reuses the same staging, verification, preservation, promotion, and cleanup rules. On success, the backup metadata is rewritten as remotely verified and the temporary VPS ZIP is released. On failure or timeout, that local ZIP remains available for another retry.
 
 The action is safe to repeat: each invocation uses a unique job identifier and does not treat browser-supplied paths or rclone arguments as authoritative.
 
@@ -61,7 +62,7 @@ Expected provider-related states include `RCLONE_UNAVAILABLE`, `RCLONE_CONFIG_IN
 
 Maintenance/provider events remain sanitized. Backup archive progress continues through the existing Host event channel; Step 4 additionally exposes `PREFLIGHT`, `PREFLIGHT_COMPLETE`, off-site verification state, degraded completion, retry availability, and the degraded safety-restart decision without forwarding raw rclone output.
 
-Remote transfer observability uses a separate `UPLOADING_REMOTE` event. It never treats local archive bytes as already uploaded: the event starts at `bytesUploaded = 0` with the verified ZIP size as `totalBytes`, and advances to that ZIP size only after the remote upload/promotion phase has returned verified. `progress` is therefore emitted only as a reliable coarse 0-to-100% milestone rather than fabricated streaming precision. The event exposes only the fixed provider label `RCLONE` and a sanitized provider state such as `UPLOADING` or `VERIFIED_REMOTE`; rclone stdout/stderr, tokens, credentials, arbitrary remote arguments, and provider secrets are not forwarded. Retry Upload uses the same progress contract.
+Remote transfer observability uses a separate `UPLOADING_REMOTE` event. It starts at `bytesUploaded = 0` with the exact verified ZIP size as `totalBytes`, then consumes rclone's one-line periodic statistics and emits bounded numeric `bytesUploaded`, `progress`, and `bytesPerSecond` fields while the ZIP is transferred. The raw rclone line is never forwarded. Remote verification and local cleanup then use the explicit `VERIFYING_REMOTE` and `CLEANING_LOCAL` phases with sanitized provider states such as `VERIFIED_REMOTE`, `LOCAL_RELEASED`, or `LOCAL_RETAINED`. Tokens, credentials, filenames from command output, arbitrary remote arguments, and provider secrets remain Host-local. Retry Upload uses the same progress contract.
 
 ## Migration and operations
 
@@ -73,7 +74,7 @@ Before enabling manual full backups in production:
 4. ensure the backup directory is outside the Minecraft server root and writable by the Host service account;
 5. restart/reload the Host process according to the deployment procedure so it loads the intended Host configuration;
 6. use the provider test/preflight before initiating maintenance;
-7. retain the verified local restore point whenever an off-site phase is degraded and use `Retry Upload` after connectivity is restored.
+7. expect a verified successful promotion to remove the temporary VPS ZIP; retain the verified local restore point whenever an off-site phase is degraded and use `Retry Upload` after connectivity is restored.
 
 Do not grant root execution, unrestricted sudo, recursive ownership changes, or broad filesystem permissions to make rclone or backup storage work.
 

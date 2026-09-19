@@ -7,6 +7,8 @@ import java.nio.file.*;
 import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.*;
+import java.util.function.Consumer;
+import java.util.regex.*;
 
 /** Fixed-argument rclone adapter. Credentials remain host-local and output is bounded/redacted. */
 public final class RcloneBackupProvider {
@@ -17,15 +19,29 @@ public final class RcloneBackupProvider {
       String verifiedAt,
       String detail) {}
 
+  public record TransferProgress(long bytesTransferred, long totalBytes, long bytesPerSecond) {}
+
   @FunctionalInterface
   interface CommandRunner {
     ProcessResult run(List<String> arguments, int timeoutSeconds) throws Exception;
+
+    default ProcessResult run(
+        List<String> arguments, int timeoutSeconds, Consumer<String> outputLine) throws Exception {
+      return run(arguments, timeoutSeconds);
+    }
   }
 
   record ProcessResult(int exitCode, String output) {}
 
   private static final int OUTPUT_LIMIT = 64 * 1024;
   private static final int MAX_ATTEMPTS = 3;
+  private static final Pattern TRANSFERRED_BYTES =
+      Pattern.compile(
+          "(?i)Transferred:\\s*([0-9]+(?:\\.[0-9]+)?)\\s*([KMGTPE]?i?B)\\s*/");
+  private static final Pattern TRANSFER_PERCENT = Pattern.compile(",\\s*(\\d{1,3})%");
+  private static final Pattern TRANSFER_SPEED =
+      Pattern.compile(
+          "(?i),\\s*(?:\\d{1,3})%,\\s*([0-9]+(?:\\.[0-9]+)?)\\s*([KMGTPE]?i?B)/s");
   private final HostConfig.BackupConfig config;
   private final CommandRunner commandRunner;
   private final boolean enforceHostFiles;
@@ -35,7 +51,20 @@ public final class RcloneBackupProvider {
 
   public RcloneBackupProvider(HostConfig.BackupConfig config) {
     this.config = Objects.requireNonNull(config);
-    this.commandRunner = this::executeProcess;
+    this.commandRunner =
+        new CommandRunner() {
+          @Override
+          public ProcessResult run(List<String> arguments, int timeoutSeconds) throws Exception {
+            return executeProcess(arguments, timeoutSeconds, ignored -> {});
+          }
+
+          @Override
+          public ProcessResult run(
+              List<String> arguments, int timeoutSeconds, Consumer<String> outputLine)
+              throws Exception {
+            return executeProcess(arguments, timeoutSeconds, outputLine);
+          }
+        };
     this.enforceHostFiles = true;
   }
 
@@ -125,7 +154,36 @@ public final class RcloneBackupProvider {
       String canonicalFilename,
       int timeoutSeconds)
       throws Exception {
+    return uploadAndPromote(
+        archive, metadata, jobId, canonicalFilename, timeoutSeconds, ignored -> {});
+  }
+
+  public Promotion uploadAndPromote(
+      Path archive,
+      Path metadata,
+      String jobId,
+      String canonicalFilename,
+      int timeoutSeconds,
+      Consumer<TransferProgress> progress)
+      throws Exception {
+    return uploadAndPromote(
+        archive, metadata, jobId, canonicalFilename, timeoutSeconds,
+        BackupManager.fileHash(archive), progress);
+  }
+
+  public Promotion uploadAndPromote(
+      Path archive,
+      Path metadata,
+      String jobId,
+      String canonicalFilename,
+      int timeoutSeconds,
+      String expectedSha256,
+      Consumer<TransferProgress> progress)
+      throws Exception {
     requireConfigured(enforceHostFiles);
+    Objects.requireNonNull(progress);
+    if (expectedSha256 == null || !expectedSha256.matches("(?i)[0-9a-f]{64}"))
+      throw new IllegalArgumentException("Invalid verified archive hash");
     UUID.fromString(jobId);
     validateCanonical(canonicalFilename);
     if (timeoutSeconds < 1) throw new IllegalArgumentException("Invalid upload timeout");
@@ -145,12 +203,12 @@ public final class RcloneBackupProvider {
 
     long localBytes = Files.size(archive);
     long metadataBytes = Files.size(metadata);
-    copyLocalToRemote(archive, stageZip, deadline);
+    copyLocalToRemote(archive, stageZip, localBytes, deadline, progress);
     if (remoteSize(stageZip, deadline) != localBytes) {
       safeDelete(stageZip, deadline);
       throw new IOException("REMOTE_VERIFY_FAILED");
     }
-    copyLocalToRemote(metadata, stageJson, deadline);
+    copyLocalToRemote(metadata, stageJson, metadataBytes, deadline, ignored -> {});
     if (remoteSize(stageJson, deadline) != metadataBytes) {
       safeDelete(stageJson, deadline);
       throw new IOException("REMOTE_VERIFY_FAILED");
@@ -168,6 +226,10 @@ public final class RcloneBackupProvider {
       copyRemote(stageJson, canonicalJson, deadline);
       if (remoteSize(canonicalJson, deadline) != metadataBytes)
         throw new IOException("REMOTE_PROMOTION_FAILED");
+      // Google Drive exposes SHA-256 for new binary uploads. Never discard the local
+      // ZIP when the promoted object has no hash or its content differs.
+      if (!expectedSha256.equalsIgnoreCase(remoteSha256(canonicalZip, deadline)))
+        throw new IOException("REMOTE_VERIFY_FAILED");
     } catch (Exception failure) {
       rollbackCanonical(
           canonicalZip,
@@ -247,7 +309,13 @@ public final class RcloneBackupProvider {
     }
   }
 
-  private void copyLocalToRemote(Path local, String remote, Deadline deadline) throws Exception {
+  private void copyLocalToRemote(
+      Path local,
+      String remote,
+      long totalBytes,
+      Deadline deadline,
+      Consumer<TransferProgress> progress)
+      throws Exception {
     retry(
         deadline,
         timeout -> {
@@ -263,9 +331,26 @@ public final class RcloneBackupProvider {
                   "1",
                   "--checkers",
                   "1",
+                  "--stats",
+                  "1s",
+                  "--stats-one-line",
+                  "--stats-log-level",
+                  "NOTICE",
+                  "--stats-unit",
+                  "bytes",
                   "--log-level",
-                  "ERROR"),
-              timeout);
+                  "NOTICE"),
+              timeout,
+              line ->
+                  parseProgressLine(line, totalBytes)
+                      .ifPresent(
+                          update -> {
+                            try {
+                              progress.accept(update);
+                            } catch (RuntimeException ignored) {
+                              // Telemetry must never interrupt or invalidate a backup transfer.
+                            }
+                          }));
           return null;
         });
   }
@@ -319,6 +404,21 @@ public final class RcloneBackupProvider {
           }
           throw new IOException("REMOTE_VERIFY_FAILED");
         });
+  }
+
+  private String remoteSha256(String remote, Deadline deadline) throws Exception {
+    String output =
+        run(
+            List.of(
+                config.rcloneExecutable(), "hashsum", "SHA-256", remote,
+                "--config", config.rcloneConfig()),
+            deadline.remainingSeconds());
+    String[] lines = output.strip().split("\\R");
+    if (lines.length != 1
+        || !lines[0].matches("(?i)[0-9a-f]{64}\\s+\\*?" +
+            Pattern.quote(Path.of(remote.substring(remote.lastIndexOf('/') + 1)).toString())))
+      throw new IOException("REMOTE_VERIFY_FAILED");
+    return lines[0].substring(0, 64);
   }
 
   private boolean remoteExists(String remote, Deadline deadline) throws Exception {
@@ -383,12 +483,25 @@ public final class RcloneBackupProvider {
     return result.output;
   }
 
+  private String run(
+      List<String> arguments, int timeoutSeconds, Consumer<String> outputLine) throws Exception {
+    ProcessResult result = runAllowFailure(arguments, timeoutSeconds, outputLine);
+    if (result.exitCode != 0) throw new IOException("RCLONE_COMMAND_FAILED");
+    return result.output;
+  }
+
   private ProcessResult runAllowFailure(List<String> arguments, int timeoutSeconds) throws Exception {
+    return runAllowFailure(arguments, timeoutSeconds, ignored -> {});
+  }
+
+  private ProcessResult runAllowFailure(
+      List<String> arguments, int timeoutSeconds, Consumer<String> outputLine) throws Exception {
     if (arguments.isEmpty() || !arguments.get(0).equals(config.rcloneExecutable()))
       throw new SecurityException("RCLONE_EXECUTABLE_MISMATCH");
     if (timeoutSeconds < 1) throw new IOException("RCLONE_UPLOAD_TIMEOUT");
     try {
-      ProcessResult result = commandRunner.run(List.copyOf(arguments), timeoutSeconds);
+      ProcessResult result =
+          commandRunner.run(List.copyOf(arguments), timeoutSeconds, outputLine);
       return new ProcessResult(result.exitCode, redact(result.output));
     } catch (InterruptedException interrupted) {
       Thread.currentThread().interrupt();
@@ -396,24 +509,27 @@ public final class RcloneBackupProvider {
     }
   }
 
-  private ProcessResult executeProcess(List<String> arguments, int timeoutSeconds) throws Exception {
+  private ProcessResult executeProcess(
+      List<String> arguments, int timeoutSeconds, Consumer<String> outputLine) throws Exception {
     Process process = new ProcessBuilder(arguments).redirectErrorStream(true).start();
     CompletableFuture<String> output = new CompletableFuture<>();
     Thread.ofVirtual()
         .start(
             () -> {
-              try (InputStream input = process.getInputStream()) {
-                ByteArrayOutputStream buffer = new ByteArrayOutputStream();
-                byte[] bytes = new byte[2048];
-                int count;
-                while ((count = input.read(bytes)) >= 0) {
-                  if (buffer.size() + count > OUTPUT_LIMIT) {
-                    process.destroyForcibly();
-                    throw new IOException("Rclone output exceeded limit");
+              try (BufferedReader reader =
+                  new BufferedReader(
+                      new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8))) {
+                StringBuilder tail = new StringBuilder();
+                String line;
+                while ((line = reader.readLine()) != null) {
+                  try {
+                    outputLine.accept(line);
+                  } catch (RuntimeException ignored) {
+                    // A failed observer must not terminate the bounded rclone subprocess.
                   }
-                  buffer.write(bytes, 0, count);
+                  appendTail(tail, line);
                 }
-                output.complete(buffer.toString(StandardCharsets.UTF_8));
+                output.complete(tail.toString());
               } catch (Exception e) {
                 output.completeExceptionally(e);
               }
@@ -428,6 +544,49 @@ public final class RcloneBackupProvider {
     } finally {
       if (process.isAlive()) process.destroyForcibly();
     }
+  }
+
+  static Optional<TransferProgress> parseProgressLine(String line, long totalBytes) {
+    if (line == null || totalBytes <= 0) return Optional.empty();
+    Matcher transferred = TRANSFERRED_BYTES.matcher(line);
+    if (!transferred.find()) return Optional.empty();
+    long bytes = parseByteSize(transferred.group(1), transferred.group(2));
+    Matcher percent = TRANSFER_PERCENT.matcher(line.substring(transferred.end()));
+    if (percent.find() && Integer.parseInt(percent.group(1)) >= 100) bytes = totalBytes;
+    bytes = Math.max(0L, Math.min(totalBytes, bytes));
+    long bytesPerSecond = 0L;
+    Matcher speed = TRANSFER_SPEED.matcher(line);
+    if (speed.find()) bytesPerSecond = parseByteSize(speed.group(1), speed.group(2));
+    return Optional.of(new TransferProgress(bytes, totalBytes, Math.max(0L, bytesPerSecond)));
+  }
+
+  private static long parseByteSize(String amount, String unit) {
+    double value;
+    try {
+      value = Double.parseDouble(amount);
+    } catch (NumberFormatException ignored) {
+      return 0L;
+    }
+    String normalized = unit.toUpperCase(Locale.ROOT);
+    int exponent =
+        switch (normalized.charAt(0)) {
+          case 'K' -> 1;
+          case 'M' -> 2;
+          case 'G' -> 3;
+          case 'T' -> 4;
+          case 'P' -> 5;
+          case 'E' -> 6;
+          default -> 0;
+        };
+    double base = normalized.contains("I") ? 1024.0d : 1000.0d;
+    double bytes = value * Math.pow(base, exponent);
+    if (!Double.isFinite(bytes) || bytes >= Long.MAX_VALUE) return Long.MAX_VALUE;
+    return Math.max(0L, Math.round(bytes));
+  }
+
+  private static void appendTail(StringBuilder tail, String line) {
+    tail.append(line).append('\n');
+    if (tail.length() > OUTPUT_LIMIT) tail.delete(0, tail.length() - OUTPUT_LIMIT);
   }
 
   private String remoteRoot() {

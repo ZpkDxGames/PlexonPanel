@@ -28,7 +28,7 @@ For the intended PlexonCraft full-capability deployment, use the separate [Paper
 
 Before production, confirm Paper reports its supported scopes only, Host reports its supported scopes only, and a newly paired Owner receives the current canonical scope set. Host must still reject `players.*`, `player.*`, `chat.*`, `plugins.*` and `console.execute.allowed`; Host-owned `console.view.*` is valid. Paper must still leave `server.start`, `server.stop` and `server.restart` disabled. A blue/non-applicable matrix cell is correct when that agent has no handler.
 
-The Host runtime user needs explicit permission for the configured systemd unit and loopback command channel. In stable 3.5.0, mount `serverRoot` read-only: Host list/read/download remain confined beneath it while create/write/upload/rename/delete and remote restore are forced off even if legacy configuration requests them. Backups remain effective only when `backups.enabled` is true. Test the full save-all → stop → archive → Google Drive verify → automatic restart path, degraded retry-upload, and scheduled restart only on disposable data or a planned maintenance target.
+The Host runtime user needs explicit permission for the configured systemd unit and loopback command channel. In stable 3.5.1, mount `serverRoot` read-only: Host list/read/download remain confined beneath it while create/write/upload/rename/delete and remote restore are forced off even if legacy configuration requests them. Backups remain effective only when `backups.enabled` is true. Test the full save-all → stop → archive → Google Drive verify → VPS ZIP cleanup → automatic restart path, degraded retry-upload, and scheduled restart only on disposable data or a planned maintenance target.
 
 ## Player presence lifecycle
 

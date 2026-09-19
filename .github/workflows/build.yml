@@ -104,7 +104,7 @@ jobs:
 
           text=Path('build.gradle.kts').read_text()
           version=re.search(r'^version\s*=\s*"([^"]+)"\s*$', text, re.M).group(1)
-          dashboard='93bd3a5e6456efb18e7c9017d2a0208b3595852c'
+          dashboard='59adce1eab53b3c5ccf465b9c20685eaf7167a53'
           manifest=json.loads(Path('build/release/release-manifest.json').read_text())
           assert manifest['sourceCommit'] == os.environ['GITHUB_SHA']
           assert manifest['javaCandidateCommit'] == os.environ['GITHUB_SHA']
@@ -113,9 +113,9 @@ jobs:
           assert manifest['protocolVersion'] == 3
           assert manifest['java'] == 25
           assert manifest['dashboardCandidateCommit'] == dashboard
-          assert manifest['dashboardCiRun'] == 35238389769
-          assert manifest['rollback']['plexonPanelCommit'] == 'e0984b625d692de6076afa7e20c4fe4b35f07e9a'
-          assert manifest['rollback']['dashboardCommit'] == '03777c7dc108b54dda625c7f56f5e723ca35124f'
+          assert manifest['dashboardCiRun'] == 35448373378
+          assert manifest['rollback']['plexonPanelCommit'] == '40a1c94892f83bdd3c7e82ec89196fcae8ced371'
+          assert manifest['rollback']['dashboardCommit'] == '5d25671bc73569e18599be1e9034291d1f87d171'
           assert manifest['runtimeCertification'] == 'NOT_EXECUTED'
           assert manifest['hostArtifactType'] == 'architecture-neutral-java-jar'
           assert manifest['hostSupportedPlatforms'] == ['linux-x64', 'linux-arm64']

@@ -21,8 +21,9 @@ A normal **Fully Backup Now** operation is:
 9. Host verifies the local archive and persists SHA-256/metadata.
 10. Host uploads through configured Google Drive/rclone staging/promotion.
 11. Host verifies the promoted remote copy.
-12. If this workflow stopped Minecraft, Host starts it unconditionally and verifies readiness.
-13. The durable job becomes `COMPLETED`, `DEGRADED`, `FAILED`, or `RECOVERY_REQUIRED` as appropriate.
+12. Host removes the temporary VPS ZIP only after remote archive and metadata verification succeeds.
+13. If this workflow stopped Minecraft, Host starts it unconditionally and verifies readiness.
+14. The durable job becomes `COMPLETED`, `DEGRADED`, `FAILED`, or `RECOVERY_REQUIRED` as appropriate.
 
 Browser refresh/disconnect never cancels the Host job. `maintenance.status` exposes the durable current operation. During `COUNTDOWN`, it also exposes the durable initial duration, warning plan, deadline, consumed warnings, and remaining seconds; the browser must not create its own authoritative countdown.
 
@@ -120,9 +121,11 @@ PlexonPanel invokes rclone through fixed `ProcessBuilder` argument arrays. No br
 
 For `SINGLE_CURRENT`, the Host uploads a unique staging object, verifies it, promotes it to the canonical object and verifies the promoted result before cleanup. The previous known-good remote copy remains protected until the replacement is verified.
 
+After verified promotion and a matching Google Drive SHA-256, the Host first persists off-site availability and then removes `restore-points/<backupId>.zip` to release VPS disk space. Backup history remains available from metadata and accurately reports the restore point as Google Drive-only. A failed local deletion is recorded as `SUCCESS_WITH_WARNING` / `LOCAL_CLEANUP_FAILED` and leaves the ZIP in place; it never invalidates an already verified remote copy.
+
 A bounded provider failure after local verification does not invalidate the local backup. The Host restores Minecraft availability and records a degraded/retryable result.
 
-`backup.full.retry-upload` reuses the existing verified local archive. It does not perform another Minecraft shutdown.
+`backup.full.retry-upload` reuses the existing verified local archive. It does not perform another Minecraft shutdown. A successful retry releases the VPS ZIP; a failed retry retains it.
 
 ## Durable job states
 
@@ -138,8 +141,11 @@ FINAL_SAVE
 STOPPING_SERVER
 WAITING_FOR_STOP
 ARCHIVING
+HASHING
 VERIFYING_LOCAL
+UPLOADING_REMOTE
 VERIFYING_REMOTE
+CLEANING_LOCAL
 STARTING_SERVER
 VERIFYING_STARTUP
 COMPLETED
@@ -148,7 +154,7 @@ FAILED
 RECOVERY_REQUIRED
 ```
 
-Live archive/upload byte progress is emitted separately with the same durable `jobId`; consumers must match job IDs and must not use stale progress from an earlier operation. Upload progress can report `UPLOADING_REMOTE` while the durable maintenance job remains inside its archive/provider execution segment.
+Live archive/upload byte progress is emitted separately with the same durable `jobId`; consumers must match job IDs and must not use stale progress from an earlier operation. `ARCHIVING` reports source bytes read into the ZIP. `UPLOADING_REMOTE` reports rclone-transferred ZIP bytes and the current byte rate from bounded one-line statistics. `VERIFYING_REMOTE` and `CLEANING_LOCAL` remain distinct so 100% transferred is not confused with verified promotion or local disk cleanup. Raw rclone output never crosses the Host boundary.
 
 ## Failure policy
 
