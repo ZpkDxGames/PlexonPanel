@@ -27,10 +27,10 @@ final class HostConsoleHistory {
   private static final int QUERY_TIMEOUT_SECONDS = 10;
   private static final Set<String> LEVELS = Set.of("DEBUG", "INFO", "WARN", "ERROR");
   private static final Set<String> PARAMETERS =
-      Set.of("before", "after", "limit", "invocationId", "levels");
+      Set.of("before", "after", "cursor", "limit", "invocationId", "levels");
 
   record Query(
-      Instant before, Instant after, int limit, String invocationId, Set<String> levels) {
+      Instant before, Instant after, String cursor, int limit, String invocationId, Set<String> levels) {
     static Query parse(JsonObject parameters) {
       if (parameters == null) parameters = new JsonObject();
       if (!PARAMETERS.containsAll(parameters.keySet()))
@@ -38,6 +38,15 @@ final class HostConsoleHistory {
 
       Instant before = instant(parameters, "before");
       Instant after = instant(parameters, "after");
+      String cursor = null;
+      if (parameters.has("cursor")) {
+        if (!parameters.get("cursor").isJsonPrimitive()
+            || !parameters.getAsJsonPrimitive("cursor").isString())
+          throw new IllegalArgumentException("Invalid console history cursor");
+        cursor = parameters.get("cursor").getAsString();
+        if (!cursor.matches("[A-Za-z0-9;=:_-]{1,4096}") || before != null)
+          throw new IllegalArgumentException("Invalid console history cursor");
+      }
       if (before != null && after != null && !after.isBefore(before))
         throw new IllegalArgumentException("Console history window is empty");
 
@@ -82,7 +91,7 @@ final class HostConsoleHistory {
           levels.add(level);
         }
       }
-      return new Query(before, after, limit, invocationId, Set.copyOf(levels));
+      return new Query(before, after, cursor, limit, invocationId, Set.copyOf(levels));
     }
 
     private static Instant instant(JsonObject parameters, String name) {
@@ -100,8 +109,9 @@ final class HostConsoleHistory {
     }
   }
 
-  private record ReadResult(
-      List<ConsoleLine> lines, boolean hasMore, boolean stoppedEarly, int scanned, int rawBytes) {}
+  record ReadResult(
+      List<ConsoleLine> lines, boolean hasMore, boolean stoppedEarly,
+      String nextCursor, int scanned, int rawBytes) {}
 
   private final String serviceName;
   private final HostConfig.ConsoleConfig settings;
@@ -162,6 +172,8 @@ final class HostConsoleHistory {
       Map<String, Object> result = new LinkedHashMap<>();
       result.put("lines", lines);
       result.put("hasMore", read.hasMore());
+      if (read.hasMore() && read.nextCursor() != null)
+        result.put("nextCursor", read.nextCursor());
       result.put("source", "HOST_JOURNAL");
       result.put("service", serviceName);
       result.put("retentionBounded", true);
@@ -210,7 +222,9 @@ final class HostConsoleHistory {
         "--output-fields=MESSAGE,__CURSOR,__REALTIME_TIMESTAMP,_SYSTEMD_UNIT,_SYSTEMD_INVOCATION_ID,_PID,PRIORITY");
     command.add("--no-pager");
     command.add("--quiet");
-    command.add("--lines=" + Math.min(MAX_SCAN_LINES + 1, Math.max(2, scanLines)));
+    command.add("--reverse");
+    command.add("--lines=" + Math.min(MAX_SCAN_LINES + 2, Math.max(2, scanLines + 1)));
+    if (query.cursor() != null) command.add("--cursor=" + query.cursor());
     if (query.after() != null)
       command.add("--since=" + journalTime(plusMicros(query.after(), 1)));
     if (query.before() != null)
@@ -220,7 +234,7 @@ final class HostConsoleHistory {
     return List.copyOf(command);
   }
 
-  private ReadResult read(Process process, Query query, boolean problemsOnly, int scanLines)
+  ReadResult read(Process process, Query query, boolean problemsOnly, int scanLines)
       throws IOException {
     List<ConsoleLine> accepted = new ArrayList<>();
     int scanned = 0;
@@ -228,6 +242,7 @@ final class HostConsoleHistory {
     int responseBytes = 0;
     boolean hasMore = false;
     boolean stoppedEarly = false;
+    String lastScannedCursor = null;
 
     try (BufferedReader reader =
         new BufferedReader(new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8))) {
@@ -248,8 +263,17 @@ final class HostConsoleHistory {
         }
         ConsoleLine line = parseJournalLine(raw);
         if (line == null) continue;
-        if (problemsOnly && !Set.of("WARN", "ERROR").contains(line.level())) continue;
-        if (!query.levels().isEmpty() && !query.levels().contains(line.level())) continue;
+        // journalctl --cursor includes the anchor itself. Exclude it so each
+        // retained journal entry appears on at most one page.
+        if (query.cursor() != null && query.cursor().equals(line.journalCursor())) continue;
+        if (problemsOnly && !Set.of("WARN", "ERROR").contains(line.level())) {
+          lastScannedCursor = line.journalCursor();
+          continue;
+        }
+        if (!query.levels().isEmpty() && !query.levels().contains(line.level())) {
+          lastScannedCursor = line.journalCursor();
+          continue;
+        }
 
         int encodedBytes = gson.toJson(line).getBytes(StandardCharsets.UTF_8).length;
         if (accepted.size() >= query.limit() || responseBytes + encodedBytes > MAX_RESPONSE_BYTES) {
@@ -258,10 +282,13 @@ final class HostConsoleHistory {
           break;
         }
         accepted.add(line);
+        lastScannedCursor = line.journalCursor();
         responseBytes += encodedBytes;
       }
     }
-    return new ReadResult(List.copyOf(accepted), hasMore, stoppedEarly, scanned, rawBytes);
+    Collections.reverse(accepted);
+    return new ReadResult(List.copyOf(accepted), hasMore, stoppedEarly,
+        lastScannedCursor, scanned, rawBytes);
   }
 
   ConsoleLine parseJournalLine(String json) {

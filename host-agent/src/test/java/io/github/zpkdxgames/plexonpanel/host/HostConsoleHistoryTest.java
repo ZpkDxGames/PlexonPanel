@@ -4,11 +4,30 @@ import static org.junit.jupiter.api.Assertions.*;
 
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
+import java.io.*;
+import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 
 class HostConsoleHistoryTest {
+  private static Process journal(String... lines) {
+    byte[] data = (String.join("\n", lines) + "\n").getBytes(StandardCharsets.UTF_8);
+    return new Process() {
+      @Override public OutputStream getOutputStream() { return new ByteArrayOutputStream(); }
+      @Override public InputStream getInputStream() { return new ByteArrayInputStream(data); }
+      @Override public InputStream getErrorStream() { return InputStream.nullInputStream(); }
+      @Override public int waitFor() { return 0; }
+      @Override public int exitValue() { return 0; }
+      @Override public void destroy() {}
+    };
+  }
+
+  private static String entry(String cursor, int seconds, String message) {
+    return "{\"MESSAGE\":\"" + message + "\",\"__CURSOR\":\"" + cursor
+        + "\",\"__REALTIME_TIMESTAMP\":\"" + (1789380000L + seconds) * 1_000_000L
+        + "\",\"_SYSTEMD_UNIT\":\"plexoncraft.service\",\"PRIORITY\":\"6\"}";
+  }
   private static HostConfig.ConsoleConfig settings() {
     return new HostConfig.ConsoleConfig(
         true,
@@ -57,6 +76,7 @@ class HostConsoleHistoryTest {
     HostConsoleHistory.Query query = HostConsoleHistory.Query.parse(request);
     assertEquals(Instant.parse("2026-09-14T10:00:00Z"), query.before());
     assertEquals(Instant.parse("2026-09-14T09:00:00Z"), query.after());
+    assertNull(query.cursor());
     assertEquals(75, query.limit());
     assertEquals("0123456789abcdef0123456789abcdef", query.invocationId());
     assertEquals(java.util.Set.of("WARN", "ERROR"), query.levels());
@@ -77,12 +97,62 @@ class HostConsoleHistoryTest {
     assertTrue(command.contains("--output=json"));
     assertTrue(command.contains("--no-pager"));
     assertTrue(command.contains("--quiet"));
-    assertTrue(command.contains("--lines=80"));
+    assertTrue(command.contains("--reverse"));
+    assertTrue(command.contains("--lines=81"));
     assertTrue(
         command.contains("_SYSTEMD_INVOCATION_ID=0123456789abcdef0123456789abcdef"));
     assertTrue(command.stream().anyMatch(value -> value.startsWith("--until=@")));
     assertFalse(command.contains("ssh.service"));
     assertFalse(command.contains("--system"));
+  }
+
+  @Test
+  void cursorPaginationIsBoundedAndExcludesConflictingTimestampAnchor() {
+    HostConsoleHistory history = new HostConsoleHistory("plexoncraft.service", settings());
+    JsonObject request = new JsonObject();
+    request.addProperty("cursor", "s=0123abcd;i=00000001");
+    request.addProperty("limit", 20);
+    var query = HostConsoleHistory.Query.parse(request);
+    assertEquals("s=0123abcd;i=00000001", query.cursor());
+    assertTrue(history.command(query, 80).contains("--cursor=s=0123abcd;i=00000001"));
+    assertFalse(history.command(query, 80).stream().anyMatch(value -> value.startsWith("--until=")));
+
+    request.addProperty("before", "2026-09-14T10:00:00Z");
+    assertThrows(IllegalArgumentException.class, () -> HostConsoleHistory.Query.parse(request));
+    request.remove("before");
+    request.addProperty("cursor", "--unit=ssh.service");
+    assertThrows(IllegalArgumentException.class, () -> HostConsoleHistory.Query.parse(request));
+  }
+
+  @Test
+  void newestFirstScanPaginatesWithoutSkippingTheRecentWindow() throws Exception {
+    var history = new HostConsoleHistory("plexoncraft.service", settings());
+    var parameters = new JsonObject();
+    parameters.addProperty("limit", 2);
+    var query = HostConsoleHistory.Query.parse(parameters);
+    var first = history.read(journal(entry("c3", 3, "third"), entry("c2", 2, "second"),
+        entry("c1", 1, "first")), query, false, 8);
+    assertEquals(List.of("c2", "c3"), first.lines().stream().map(line -> line.journalCursor()).toList());
+    assertTrue(first.hasMore());
+    assertEquals("c2", first.nextCursor());
+
+    parameters.addProperty("cursor", first.nextCursor());
+    var older = history.read(journal(entry("c2", 2, "second"), entry("c1", 1, "first")),
+        HostConsoleHistory.Query.parse(parameters), false, 8);
+    assertEquals(List.of("c1"), older.lines().stream().map(line -> line.journalCursor()).toList());
+    assertFalse(older.hasMore());
+  }
+
+  @Test
+  void filteredEmptyScanStillReturnsProgressCursor() throws Exception {
+    var history = new HostConsoleHistory("plexoncraft.service", settings());
+    var parameters = new JsonObject();
+    parameters.addProperty("limit", 2);
+    var result = history.read(journal(entry("c3", 3, "info"), entry("c2", 2, "info"),
+        entry("c1", 1, "[ERROR] older")), HostConsoleHistory.Query.parse(parameters), true, 2);
+    assertTrue(result.lines().isEmpty());
+    assertTrue(result.hasMore());
+    assertEquals("c2", result.nextCursor());
   }
 
   @Test

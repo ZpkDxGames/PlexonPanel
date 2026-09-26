@@ -62,6 +62,8 @@ Presence timestamps are UTC ISO-8601 instants. UUID is identity; the name is bou
 
 `inventory.players` may add `sessionId` and `sessionStartedAt`. `firstSeenAt` and `lastLoginAt` are included only when persistent history is locally enabled and the recipient holds `players.history.view`. `players.history.list` returns newest-first `entries`, nullable `nextCursor`, `hasMore`, `boundedWindow`, `capturedAt`, and `historyEnabled`. Cursors are opaque and bound to the original filter/window; they never contain a caller-selected path.
 
+Host `console.history` and `console.history.errors` accept a validated opaque `cursor` in place of `before` for older-page traversal. The response supplies `nextCursor` when more scanned journal entries may exist. The errors action remains filtered server-side, regardless of requested severity. Older Hosts continue to support timestamp `before` pagination; the dashboard treats that as a bounded compatibility path.
+
 Presence event bodies, player inventory bodies, and history action results are excluded from Durable Object persistence. Action results remain routed only to the requesting device.
 
 Transfers use start → ordered 16 KiB chunks → cancellation/expiry, with final SHA-256 verification. File bodies and action results are transient. Durable Object storage contains identity/access/pairing coordination only; bounded socket attachments retain pending routing metadata across hibernation. Cloudflare's attachment limit is [16,384 bytes](https://developers.cloudflare.com/durable-objects/best-practices/websockets/); signed session sequences avoid unbounded replay arrays.

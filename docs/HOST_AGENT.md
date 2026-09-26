@@ -36,9 +36,11 @@ The authenticated Host control plane exposes two retained-history actions:
 - `console.history` requires `console.view.full`;
 - `console.history.errors` requires `console.view.errors` and still restricts results to warning/error classifications server-side.
 
-History requests may contain only the typed fields `before`, `after`, `limit`, `invocationId`, and `levels`. Timestamps are ISO-8601 instants, `invocationId` is a validated 32-hex systemd invocation identifier, and severity values are drawn from the fixed console severity set. Unknown fields are rejected. The browser cannot provide a unit name, journal executable, output mode, or arbitrary `journalctl` flags.
+History requests may contain only the typed fields `before`, `after`, `cursor`, `limit`, `invocationId`, and `levels`. `cursor` is an opaque journal cursor returned by the preceding page and is mutually exclusive with `before`. Timestamps are ISO-8601 instants, `invocationId` is a validated 32-hex systemd invocation identifier, and severity values are drawn from the fixed console severity set. Unknown fields are rejected. The browser cannot provide a unit name, journal executable, output mode, or arbitrary `journalctl` flags.
 
 Each history response returns at most 100 lines. The Host additionally bounds the number of journal records scanned, raw bytes consumed, returned encoded console bytes, and query execution time. Console content passes through the same shared redaction/classification path as live Host console output before it can reach the relay. Entries from a different `_SYSTEMD_UNIT` are rejected defensively even though `journalctl` is already unit-pinned.
+
+History scans newest first and returns each page in chronological order. When a bounded scan has more journal entries, `nextCursor` points to the last scanned journal entry, including when a severity filter returned no matching lines. The next query resumes older than that cursor; old dashboards may continue using `before` timestamps. A mixed-version dashboard falls back to timestamp pagination when the old Host has no cursor response. The dashboard text search applies only to loaded visible lines; Host applies severity and time-window filters within its scan budget.
 
 **History is limited by systemd-journald retention on the VPS.** PlexonPanel must not describe this as unlimited history. If journald has rotated an entry away, PlexonPanel cannot recover it. A stopped Paper server does not remove retained journal history because the Host remains online and queries journald independently.
 
