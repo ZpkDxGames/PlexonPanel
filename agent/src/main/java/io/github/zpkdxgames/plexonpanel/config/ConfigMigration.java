@@ -2,6 +2,7 @@ package io.github.zpkdxgames.plexonpanel.config;
 
 import io.github.zpkdxgames.plexonpanel.util.AtomicFiles;
 import java.io.IOException;
+import java.math.BigDecimal;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
@@ -24,7 +25,7 @@ public final class ConfigMigration {
       throw new IOException("config.yml must be a regular non-symlink file");
     }
 
-    int schemaVersion = config.getInt("schema-version", 0);
+    int schemaVersion = schemaVersion(config.get("schema-version"));
     if (schemaVersion < 0 || schemaVersion > PanelSettings.CURRENT_SCHEMA_VERSION) {
       throw new IllegalArgumentException(
           "Unsupported config.yml schema-version " + schemaVersion);
@@ -44,5 +45,16 @@ public final class ConfigMigration {
 
     config.set("schema-version", PanelSettings.CURRENT_SCHEMA_VERSION);
     AtomicFiles.writeUtf8(configPath, config.saveToString());
+  }
+
+  private static int schemaVersion(Object raw) {
+    if (raw == null) return 0;
+    if (!(raw instanceof Number number))
+      throw new IllegalArgumentException("config.yml schema-version must be an integer");
+    try {
+      return new BigDecimal(number.toString()).intValueExact();
+    } catch (ArithmeticException | NumberFormatException error) {
+      throw new IllegalArgumentException("config.yml schema-version must be an integer", error);
+    }
   }
 }

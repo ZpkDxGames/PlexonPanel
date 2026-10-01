@@ -39,4 +39,17 @@ class ConfigMigrationTest {
     assertEquals(future, Files.readString(configPath));
     assertFalse(Files.exists(root.resolve("config.yml.pre-v4-backup")));
   }
+
+  @Test
+  void refusesNonIntegerSchemaWithoutRewritingIt() throws Exception {
+    Path configPath = root.resolve("config.yml");
+    String malformed = "schema-version: 3.5\noperator-note: untouched\n";
+    Files.writeString(configPath, malformed);
+    YamlConfiguration config = new YamlConfiguration();
+    config.loadFromString(malformed);
+
+    assertThrows(IllegalArgumentException.class, () -> ConfigMigration.migrate(config, configPath));
+    assertEquals(malformed, Files.readString(configPath));
+    assertFalse(Files.exists(root.resolve("config.yml.pre-v4-backup")));
+  }
 }
