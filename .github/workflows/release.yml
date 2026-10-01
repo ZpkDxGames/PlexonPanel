@@ -137,6 +137,7 @@ jobs:
         run: |
           set -euo pipefail
           VERSION='${{ steps.project.outputs.version }}'
+          export VERSION
           test "${GITHUB_REF_NAME}" = 'release/stable'
           case "${VERSION}" in
             *-*) echo "Stable workflow refuses prerelease version: ${VERSION}" >&2; exit 1 ;;
@@ -144,6 +145,20 @@ jobs:
           git fetch origin main
           test "${GITHUB_SHA}" = "$(git rev-parse origin/main)"
           test -s "docs/release-${VERSION}.md"
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          version=os.environ['VERSION']
+          gates=json.loads(Path(f'docs/release-gates-{version}.json').read_text())
+          required=('source','ci','security','runtime','backup','console','history','restartRecovery')
+          failed={name:gates['certification'].get(name) for name in required if gates['certification'].get(name) != 'PASS'}
+          if failed:
+              raise SystemExit(f'Stable release gates are not PASS: {failed}')
+          evidence=gates.get('evidence', {})
+          for name in ('source','ci','security','runtime'):
+              if not evidence.get(name):
+                  raise SystemExit(f'Missing stable release evidence for {name}')
+          PY
           if gh release view "v${VERSION}" >/dev/null 2>&1; then
             echo "v${VERSION} already exists" >&2
             exit 1
@@ -178,16 +193,19 @@ jobs:
 
           version=re.search(r'^version\s*=\s*"([^"]+)"\s*$', Path('build.gradle.kts').read_text(), re.M).group(1)
           manifest=json.loads(Path('build/release/release-manifest.json').read_text())
+          contract=json.loads(Path(f'docs/release-gates-{version}.json').read_text())
           assert manifest['sourceCommit'] == os.environ['GITHUB_SHA']
+          assert manifest['buildCommit'] == os.environ['GITHUB_SHA']
           assert manifest['javaCandidateCommit'] == os.environ['GITHUB_SHA']
+          assert manifest['backendCiRun'] == int(os.environ['GITHUB_RUN_ID'])
           assert manifest['workingTreeModified'] is False
           assert manifest['version'] == version
           assert manifest['protocolVersion'] == 3
           assert manifest['java'] == 25
           assert manifest['runtimeCertification'] == 'PASS'
           assert manifest['securityReview'] == 'PASS'
-          assert manifest['dashboardCandidateCommit'] == '59adce1eab53b3c5ccf465b9c20685eaf7167a53'
-          assert manifest['dashboardCiRun'] == 35448373378
+          assert manifest['dashboardCandidateCommit'] == contract['dashboardCommit']
+          assert manifest['dashboardCiRun'] == contract['dashboardCiRun']
           assert manifest['hostArtifactType'] == 'architecture-neutral-java-jar'
           assert manifest['hostSupportedPlatforms'] == ['linux-x64', 'linux-arm64']
 

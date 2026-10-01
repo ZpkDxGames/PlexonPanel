@@ -192,7 +192,7 @@ class RemoteUploadProgressTest {
         "PlexonCraft-Test",
         "Minecraft 26.2",
         "Paper 26.2",
-        "3.5.1",
+        "4.0.0",
         archiveBytes,
         8192L,
         12,

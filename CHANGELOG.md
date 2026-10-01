@@ -1,5 +1,20 @@
 # Changelog
 
+## 4.0.0 — coordinated release identity, migration and durable operations
+
+- Coordinate Paper, Host, Dashboard and Worker/standalone relay version identity on Protocol 3.
+- Integrate the reviewed 3.5.1 live-backup progress, verified remote promotion/cleanup, retained
+  journald cursor paging and Paper-owned durable player history work.
+- Add schema-4 Paper/Host configuration migration with pre-migration backups, atomic replacement,
+  unknown-key preservation and future-schema rejection. Root-owned Host policy migrates through a
+  local stopped-service operation so the daemon never receives `/etc` write access.
+- Restore an explicitly enabled, bounded and redacted Paper live-console fallback with signed
+  source transitions while keeping Host preferred and retained console history Host-only.
+- Generate a traceable release manifest with source/build commits, counterpart Dashboard/relay
+  commit, CI run provenance, build timestamp, artifact size/SHA-256 data and truthful certification.
+- Keep stable publication blocked until source, CI, security, runtime, backup, console, history and
+  restart/recovery gates have explicit PASS evidence for the exact candidate.
+
 ## 3.5.1 — live backup progress and verified VPS cleanup
 
 - Stream bounded numeric rclone statistics from the Host so Google Drive upload progress reports transferred ZIP bytes, exact total bytes, percentage, and current byte rate without exposing raw command output or credentials.

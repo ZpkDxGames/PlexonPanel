@@ -3,7 +3,7 @@ plugins {
 }
 
 group = "io.github.zpkdxgames"
-version = "3.5.1"
+version = "4.0.0"
 
 allprojects {
     group = rootProject.group

@@ -9,6 +9,7 @@ import shutil
 import stat
 import subprocess
 import zipfile
+from datetime import datetime, timezone
 
 root = Path(__file__).resolve().parent.parent
 version_match = re.search(
@@ -20,14 +21,24 @@ if not version_match:
     raise SystemExit("Cannot read the release version from build.gradle.kts")
 version = version_match.group(1)
 
-DASHBOARD_CANDIDATE = "59adce1eab53b3c5ccf465b9c20685eaf7167a53"
-DASHBOARD_CI_RUN = 35448373378
-JAVA_ROLLBACK_VERSION = "3.5.0"
-JAVA_ROLLBACK_COMMIT = "40a1c94892f83bdd3c7e82ec89196fcae8ced371"
-DASHBOARD_ROLLBACK_COMMIT = "5d25671bc73569e18599be1e9034291d1f87d171"
-RUNTIME_CERTIFICATION = "NOT_EXECUTED"
 HOST_ARTIFACT_TYPE = "architecture-neutral-java-jar"
 HOST_SUPPORTED_PLATFORMS = ["linux-x64", "linux-arm64"]
+
+contract_path = root / f"docs/release-gates-{version}.json"
+if not contract_path.is_file():
+    raise SystemExit(f"Missing coordinated release gate file: {contract_path.relative_to(root)}")
+contract = json.loads(contract_path.read_text())
+if contract.get("version") != version or contract.get("protocolVersion") != 3:
+    raise SystemExit("Release gate version/protocol does not match the source candidate")
+dashboard_commit = contract.get("dashboardCommit", "")
+dashboard_ci_run = contract.get("dashboardCiRun")
+if not re.fullmatch(r"[0-9a-f]{40}", dashboard_commit):
+    raise SystemExit("Release gates require the exact 40-character Dashboard commit")
+if not isinstance(dashboard_ci_run, int) or dashboard_ci_run < 1:
+    raise SystemExit("Release gates require the passing Dashboard CI run ID")
+certification = contract.get("certification")
+if not isinstance(certification, dict):
+    raise SystemExit("Release gates require explicit certification states")
 
 out = root / "build/release"
 out.mkdir(parents=True, exist_ok=True)
@@ -48,7 +59,28 @@ examples = [
     root / "agent/src/main/resources/config.yml",
     *sorted((root / "agent/examples").glob("*")),
     *sorted((root / "host-agent/examples").glob("*")),
-    *sorted((root / "docs").glob("*.md")),
+    *[
+        root / "docs" / name
+        for name in [
+            "ACCESS.md",
+            "BACKUPS.md",
+            "BACKUP_READ_CONTRACT.md",
+            "CONFIGURATION.md",
+            "FULL_CONTROL.md",
+            "HOST_AGENT.md",
+            "HOST_AUTHORIZATION_MIRROR.md",
+            "INSTALLATION.md",
+            "OPERATIONS.md",
+            "PERMISSIONS.md",
+            "PLEXONCORE.md",
+            "PROTOCOL.md",
+            "TROUBLESHOOTING.md",
+            "VALIDATION.md",
+            "ADR-4.0-ARCHITECTURE.md",
+            "4.0-source-audit.md",
+            f"release-{version}.md",
+        ]
+    ],
     root / "scripts/verify-host-portability.py",
     root / "README.md",
     root / "CHANGELOG.md",
@@ -108,6 +140,26 @@ def tracked_worktree_modified():
 
 
 dirty = tracked_worktree_modified()
+test_summary = out / "test-summary.txt"
+if test_summary.is_file():
+    artifacts.append(test_summary)
+build_timestamp = os.environ.get("PLEXON_BUILD_TIMESTAMP", "").strip()
+try:
+    parsed_timestamp = datetime.fromisoformat(build_timestamp.replace("Z", "+00:00"))
+except ValueError:
+    source_timestamp = subprocess.check_output(
+        ["git", "show", "-s", "--format=%cI", "HEAD"], cwd=root, text=True
+    ).strip()
+    parsed_timestamp = datetime.fromisoformat(source_timestamp.replace("Z", "+00:00"))
+build_timestamp = parsed_timestamp.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+backend_ci_run = os.environ.get("GITHUB_RUN_ID", "").strip()
+artifact_details = {
+    path.name: {
+        "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+        "bytes": path.stat().st_size,
+    }
+    for path in artifacts
+}
 manifest = out / "release-manifest.json"
 manifest.write_text(
     json.dumps(
@@ -115,32 +167,31 @@ manifest.write_text(
             "version": version,
             "protocolVersion": 3,
             "java": 25,
+            "paperApi": "26.2.build.121-stable",
             "sourceCommit": commit,
+            "buildCommit": commit,
             "javaCandidateCommit": commit,
-            "dashboardCandidateCommit": DASHBOARD_CANDIDATE,
-            "dashboardCiRun": DASHBOARD_CI_RUN,
+            "backendCiRun": int(backend_ci_run) if backend_ci_run.isdigit() else None,
+            "dashboardCandidateCommit": dashboard_commit,
+            "dashboardSourceCommit": dashboard_commit,
+            "relaySourceCommit": dashboard_commit,
+            "dashboardCiRun": dashboard_ci_run,
+            "buildTimestamp": build_timestamp,
             "hostArtifactType": HOST_ARTIFACT_TYPE,
             "hostSupportedPlatforms": HOST_SUPPORTED_PLATFORMS,
-            "rollback": {
-                "plexonPanelVersion": JAVA_ROLLBACK_VERSION,
-                "plexonPanelCommit": JAVA_ROLLBACK_COMMIT,
-                "dashboardCommit": DASHBOARD_ROLLBACK_COMMIT,
-                "dashboardRelay": "deployed Worker relay rollback path",
-            },
-            "runtimeCertification": RUNTIME_CERTIFICATION,
-            "securityReview": "PENDING_END_TO_END_CERTIFICATION",
+            "rollback": contract.get("rollback"),
+            "certification": certification,
+            "runtimeCertification": certification.get("runtime", "NOT_EXECUTED"),
+            "securityReview": certification.get("security", "NOT_EXECUTED"),
             "workingTreeModified": dirty,
-            "productionAcceptance": "see docs/PHASE2_RUNTIME_GATES.md",
+            "artifacts": artifact_details,
+            "productionAcceptance": f"see docs/release-{version}.md and {contract_path.name}",
         },
         indent=2,
     )
     + "\n"
 )
 artifacts.append(manifest)
-
-test_summary = out / "test-summary.txt"
-if test_summary.is_file():
-    artifacts.append(test_summary)
 
 (out / "SHA256SUMS.txt").write_text(
     "".join(
