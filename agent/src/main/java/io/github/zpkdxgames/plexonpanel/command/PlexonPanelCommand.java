@@ -116,7 +116,7 @@ public final class PlexonPanelCommand implements CommandExecutor, TabCompleter {
     sendRow(sender, "Fingerprint", plugin.identity().fingerprint());
     if (runtime != null) {
       sendRow(sender, "Telemetry", enabled(runtime.settings().telemetry().enabled()));
-      sendRow(sender, "Console authority", "Host Companion");
+      sendRow(sender, "Console authority", runtime.console().currentAuthority());
       sendRow(sender, "Chat stream", enabled(runtime.settings().chat().streamEnabled()));
       sendRow(sender, "Remote actions", enabled(runtime.settings().remoteActions().enabled()));
     }

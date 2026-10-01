@@ -1,5 +1,30 @@
 # Changelog
 
+## 4.0.0 — coordinated release identity, migration and durable operations
+
+- Coordinate Paper, Host, Dashboard and Worker/standalone relay version identity on Protocol 3.
+- Integrate the reviewed 3.5.1 live-backup progress, verified remote promotion/cleanup, retained
+  journald cursor paging and Paper-owned durable player history work.
+- Add schema-4 Paper/Host configuration migration with pre-migration backups, atomic replacement,
+  unknown-key preservation and future-schema rejection. Root-owned Host policy migrates through a
+  local stopped-service operation so the daemon never receives `/etc` write access.
+- Restore an explicitly enabled, bounded and redacted Paper live-console fallback with signed
+  source transitions while keeping Host preferred and retained console history Host-only.
+- Generate a traceable release manifest with source/build commits, counterpart Dashboard/relay
+  commit, CI run provenance, build timestamp, artifact size/SHA-256 data and truthful certification.
+- Keep stable publication blocked until source, CI, security, runtime, backup, console, history and
+  restart/recovery gates have explicit PASS evidence for the exact candidate.
+
+## 3.5.1 — live backup progress and verified VPS cleanup
+
+- Stream bounded numeric rclone statistics from the Host so Google Drive upload progress reports transferred ZIP bytes, exact total bytes, percentage, and current byte rate without exposing raw command output or credentials.
+- Keep ZIP creation progress based on source bytes processed and distinguish archive finalization, remote verification, canonical promotion, and local cleanup as separate phases.
+- Remove the temporary VPS ZIP only after the remote archive and metadata pair has been verified and promoted; retain it after upload failure or timeout so Retry Upload remains safe.
+- Preserve verified off-site success if local cleanup fails, recording `SUCCESS_WITH_WARNING` / `LOCAL_CLEANUP_FAILED` instead of falsely downgrading the remote backup.
+- Treat a cryptographically verified archive as locally verified for the maintenance result even after its temporary local file is intentionally released.
+- Keep backup history metadata after local cleanup and allow history deletion when the local archive is already absent.
+- Preserve Protocol 3, existing identities/device grants, Host/Paper authority boundaries, and the mandatory post-backup Minecraft restart.
+
 ## 3.5.0 — backup control room and durable Google Drive flow (live acceptance pending)
 
 - Move maintenance warning broadcasts, final `save-all flush`, and post-start readiness probing onto a Host-local fixed-command RCON client so the Paper plugin is no longer required for those maintenance steps.

@@ -1,5 +1,9 @@
-# PlexonPanel 3.0.1 — local policy is authoritative
+# PlexonPanel 4.0 — local policy is authoritative
 # The database-less relay is disabled until its URL and public key are configured.
+
+# Configuration schema, not the plugin or wire-protocol version. PlexonPanel backs up and
+# atomically migrates older configurations before changing this value.
+schema-version: 4
 
 gateway:
   enabled: false
@@ -45,10 +49,17 @@ player-history:
   maximum-page-size: 100
   shutdown-flush-seconds: 5
 
-# Paper no longer captures authoritative server-console output or history. The Host
-# Companion owns journald capture/replay/history. These patterns are retained only
-# to redact Paper-owned remote command results before they are returned.
+# Host journald is authoritative whenever healthy. When it is unavailable, Paper can
+# tail only new latest.log lines as a bounded, redacted, non-persistent fallback.
 console:
+  fallback-enabled: false
+  stream-enabled: false
+  errors-enabled: true
+  poll-interval-millis: 250
+  batch-interval-millis: 300
+  batch-size: 100
+  ring-buffer-lines: 1000
+  maximum-line-bytes: 16384
   redact-patterns:
     - "(?i)(password|passwd|secret|token|api[-_ ]?key)\\s*[=:]\\s*\\S+"
     - "(?i)(authorization:\\s*bearer)\\s+\\S+"

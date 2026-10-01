@@ -1,13 +1,13 @@
-# PlexonPanel 3.5.0
+# PlexonPanel 4.0.0
 
-PlexonPanel is an outbound-only control room agent for Paper 26.2 on Java 25 with an optional non-root Linux Host Companion. The 3.5.0 line preserves signed **Protocol 3**, `/v1` routes, existing identities/device grants, and the Paper/Host authority split while hardening Host-owned cold backups and adding selectable backup/restart countdowns.
+PlexonPanel is an outbound-only control room agent for Paper 26.2 on Java 25 with an optional non-root Linux Host Companion. The 4.0.0 line preserves signed **Protocol 3**, `/v1` routes, existing identities/device grants, and the Paper/Host authority split while adding real backup progress and verified temporary-ZIP cleanup.
 
 ## Matched Java pair
 
 Install the Paper and Host artifacts from the same release:
 
-- `PlexonPanel-3.5.0.jar`
-- `plexonpanel-host-3.5.0.jar`
+- `PlexonPanel-4.0.0.jar`
+- `plexonpanel-host-4.0.0.jar`
 
 Do not mix Java bundle versions when replacing the production pair. Preserve the existing `plugins/PlexonPanel/` identity/access state and Host identity/configuration during upgrades.
 
@@ -16,32 +16,33 @@ Do not mix Java bundle versions when replacing the production pair. Preserve the
 When the optional Host Companion is installed and its console policy is enabled, it can stream the configured `plexoncraft.service` journald output through the existing signed Protocol 3 relay.
 
 - Host journald is preferred only while the Host is authenticated and its console source reports healthy.
-- Paper does not become a fallback console or backup authority when Host is unavailable.
+- When Host journal authority is unavailable, an explicitly enabled Paper fallback can stream
+  only new, bounded and redacted `latest.log` lines; it never supplies retained history.
 - Paper remains the **only** `console.execute` authority. Host console access is read-only and `console.execute.allowed` is forced false on the Host.
 - Console visibility still requires the device scope and local capability to both allow it.
 - Existing Host configs remain valid: if the new `console` object is omitted, Host console starts disabled.
 
-The Host source uses the fixed `/usr/bin/journalctl` executable, bounded replay/history/queues/batches, cursor/invocation persistence, restart backoff, shared severity classification, and pre-transport redaction. See [3.5.0 release notes](RELEASE_NOTES_3.5.0.md).
+The Host source uses the fixed `/usr/bin/journalctl` executable, bounded replay/history/queues/batches, cursor/invocation persistence, restart backoff, shared severity classification, and pre-transport redaction. See [4.0.0 release notes](RELEASE_NOTES_4.0.0.md).
 
 ## Protocol and security
 
 Wire protocol remains **3**. Paper and Host use signed `/v1` transport and preserve the existing Ed25519 identities, device generations/revisions, replay/sequence protections, bounded queues, local policy intersection, high-risk confirmation, and audit rules.
 
-Paper remains authoritative for Paper/JVM telemetry, players, chat, Paper actions, command execution, pairing, and device state. Host remains authoritative for Linux telemetry, systemd lifecycle, Host files/backups, Host-local policy, and—when healthy and enabled—the Linux journald console stream. The relay verifies/routes signed protocol traffic; the Dashboard is the browser presentation/control surface.
+Paper remains authoritative for Paper/JVM telemetry, players, chat, Paper actions, command execution, pairing, device state, and the optional live-only console fallback. Host remains authoritative for Linux telemetry, systemd lifecycle, Host files/backups, Host-local policy, and retained Linux journald console history. The relay verifies/routes signed protocol traffic and selects the healthy source; the Dashboard is the browser presentation/control surface.
 
-The 3.5.0 maintenance extension adds only optional Protocol 3 action/status fields; it does not require a Protocol 4 migration, identity reset, or automatic re-pair.
+The 4.0.0 maintenance extension adds only optional Protocol 3 event fields; it does not require a Protocol 4 migration, identity reset, or automatic re-pair.
 
 See [protocol 3](docs/PROTOCOL.md), [access/scopes](docs/ACCESS.md), [privacy](PRIVACY.md), and [operations](docs/OPERATIONS.md).
 
 ## Backups and automatic restarts
 
-**Fully Backup Now** remains manual and Host-authoritative. The operator chooses a 30-, 15-, 10-, or 5-minute initial player countdown. The Host validates and durably stores the complete warning plan, requires `save-all flush`, proves the configured Minecraft service stopped, creates and locally verifies a cold archive, uploads/promotes/verifies it through the configured Google Drive/rclone remote, and automatically restores Minecraft availability.
+**Fully Backup Now** remains manual and Host-authoritative. The operator chooses a 30-, 15-, 10-, or 5-minute initial player countdown. The Host validates and durably stores the complete warning plan, requires `save-all flush`, proves the configured Minecraft service stopped, creates and locally verifies a cold archive, uploads/promotes/verifies it through the configured Google Drive/rclone remote, removes the temporary VPS ZIP only after verified promotion, and automatically restores Minecraft availability. Upload failure retains the local ZIP for safe retry.
 
 Restart-only scheduling uses the same safe countdown presets and remains independent from full backups. Daily, weekly, and selected-weekday schedules are supported.
 
 The stable Host service mounts `serverRoot` read-only. Network-reachable server-tree file mutation and direct restore capabilities are forced off even if legacy configuration keys remain present. Backup read access is supported through the bounded read contract; Host data and backup destinations remain writable. A provider connectivity test updates only test state and can no longer masquerade as a successfully verified remote backup.
 
-See [Backups & Maintenance](docs/BACKUPS.md), [backup read contract](docs/BACKUP_READ_CONTRACT.md), and [3.5.0 release notes](RELEASE_NOTES_3.5.0.md).
+See [Backups & Maintenance](docs/BACKUPS.md), [backup read contract](docs/BACKUP_READ_CONTRACT.md), and [4.0.0 release notes](RELEASE_NOTES_4.0.0.md).
 
 ## PlexonCore mode
 
@@ -84,9 +85,9 @@ python3 scripts/package-release.py
 
 The release package contains:
 
-- `PlexonPanel-3.5.0.jar`
-- `plexonpanel-host-3.5.0.jar`
-- `PlexonPanel-3.5.0-examples.zip`
+- `PlexonPanel-4.0.0.jar`
+- `plexonpanel-host-4.0.0.jar`
+- `PlexonPanel-4.0.0-examples.zip`
 - `release-manifest.json`
 - `SHA256SUMS.txt`
 - `test-summary.txt`
@@ -97,9 +98,10 @@ The contract verifies Java 25/class major 69, Protocol 3, Paper metadata, requir
 
 1. Stop Minecraft and the Host Companion if installed.
 2. Back up `plugins/PlexonPanel/` and Host identity/configuration.
-3. Replace both Java artifacts with the matching 3.5.0 release pair.
+3. Replace both Java artifacts with the matching 4.0.0 release pair. While Host is stopped, run its
+   local `--migrate-config` operation against the root-owned policy file.
 4. Do not delete identity/access files and do not re-pair as an upgrade workaround.
-5. If Host console viewing is desired, add the `console` object and console view capabilities from the matching example; otherwise omitted console configuration remains disabled.
+5. If Host console viewing is desired, add its `console` object and view capabilities. Enable Paper `console.fallback-enabled` only if bounded live fallback is desired; it is disabled in the public default and enabled in the full-control preset.
 6. Start the Host Companion and Paper server.
 7. Verify `/plexon modules`, `/plexonpanel status`, `/plexonpanel capabilities`, and `/plexonpanel diagnostics`; confirm UUID/fingerprint and browser credential continuity.
 
@@ -107,4 +109,4 @@ The contract verifies Java 25/class major 69, Protocol 3, Paper metadata, requir
 
 ## Release and runtime certification
 
-Repository CI is source evidence, not production acceptance. Do not create the stable `v3.5.0` tag or mark runtime/security certification `PASS` until the final Paper JAR, Host JAR, relay and Dashboard are deployed and exercised on the authorized Linux host, including the selected countdown, `save-all flush`, cold archive, Google Drive verification, automatic restart, reconnect, and failure/recovery gates.
+Repository CI is source evidence, not production acceptance. Do not mark runtime/security certification `PASS` until the final Paper JAR, Host JAR, relay and Dashboard are deployed and exercised on the authorized Linux host, including the selected countdown, `save-all flush`, cold archive, live transfer reporting, Google Drive verification, temporary-ZIP cleanup, automatic restart, reconnect, and failure/recovery gates.

@@ -1,5 +1,27 @@
 # Migration and rollback
 
+## 3.5.x to 4.0.0
+
+PlexonPanel 4.0.0 keeps Protocol 3 and all existing identity/pairing material. Follow the exact
+upgrade and rollback sequence in [release-4.0.0.md](release-4.0.0.md). Paper and Host configuration
+files receive additive schema-4 markers through backed-up atomic migration. Paper performs its
+migration during startup. Because Host policy is intentionally root-owned and read-only to the
+service account, stop the Host and run the local one-shot operation before restarting it:
+
+```sh
+sudo /usr/bin/java -jar /opt/plexonpanel-host/plexonpanel-host-4.0.0.jar \
+  /etc/plexonpanel-host/host-config.json --migrate-config
+```
+
+The Host migration preserves the original owner, group and mode. Normal non-root startup accepts a
+legacy unmarked file read-only for rollback compatibility but reports that migration is still due.
+Existing device grants remain immutable; no device gains the new history scope implicitly.
+
+Deploy the coordinated Dashboard/relay commit first because it retains older Host/Paper fallbacks,
+then Host, then Paper. Keep the recorded 3.5.0 artifacts and deployment available until the live
+4.0 certification matrix passes. Do not clear relay room storage, delete identity files, or re-pair
+browsers as a migration shortcut.
+
 ## 3.0.0 to 3.0.1
 
 PlexonPanel 3.0.1 is a local capability-policy and deployment hardening update. It keeps signed wire protocol 3, `/v1` routes, the Paper UUID/Ed25519 identity, Host pinning and existing device records. No existing grant is silently expanded.

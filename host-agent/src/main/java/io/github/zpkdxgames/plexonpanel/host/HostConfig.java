@@ -20,6 +20,7 @@ public record HostConfig(
     BackupConfig backups,
     ConsoleConfig console,
     CommandChannelConfig commandChannel) {
+  static final int CURRENT_SCHEMA_VERSION = 4;
   /**
    * Network-reachable Host capabilities that would require write authority inside serverRoot.
    *
@@ -149,6 +150,7 @@ public record HostConfig(
     if (Files.size(path) > 65536) throw new java.io.IOException("Host config exceeds limit");
     JsonObject raw = JsonParser.parseString(Files.readString(path)).getAsJsonObject();
     if (!Set.of(
+            "schemaVersion",
             "serverId",
             "serverName",
             "relayUrl",
@@ -163,6 +165,12 @@ public record HostConfig(
             "commandChannel")
         .containsAll(raw.keySet()))
       throw new IllegalArgumentException("Unknown host configuration key");
+    if (raw.has("schemaVersion")
+        && (!raw.get("schemaVersion").isJsonPrimitive()
+            || !raw.get("schemaVersion").getAsJsonPrimitive().isNumber()
+            || raw.get("schemaVersion").getAsBigDecimal().stripTrailingZeros().scale() > 0
+            || raw.get("schemaVersion").getAsInt() != CURRENT_SCHEMA_VERSION))
+      throw new IllegalArgumentException("Unsupported Host configuration schemaVersion");
     if (raw.has("commandChannel")) {
       JsonElement commandRaw = raw.get("commandChannel");
       if (!commandRaw.isJsonObject()

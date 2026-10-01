@@ -69,6 +69,7 @@ class RcloneRetryUploadPolicyTest {
   private static final class RetryRunner implements RcloneBackupProvider.CommandRunner {
     final Map<String, Long> remote = new HashMap<>();
     boolean providerAvailable = true;
+    Path archiveSource;
 
     @Override
     public RcloneBackupProvider.ProcessResult run(List<String> arguments, int timeoutSeconds)
@@ -79,6 +80,7 @@ class RcloneRetryUploadPolicyTest {
         case "lsl" -> size(arguments.get(2));
         case "lsf" -> exists(arguments.get(2));
         case "deletefile" -> delete(arguments.get(2));
+        case "hashsum" -> hash(arguments.get(3));
         case "lsjson" ->
             providerAvailable
                 ? new RcloneBackupProvider.ProcessResult(0, "[]")
@@ -95,7 +97,10 @@ class RcloneRetryUploadPolicyTest {
       Long bytes = remote.get(source);
       if (bytes == null && !source.startsWith(ROOT + "/")) {
         Path local = Path.of(source);
-        if (Files.isRegularFile(local)) bytes = Files.size(local);
+        if (Files.isRegularFile(local)) {
+          bytes = Files.size(local);
+          if (source.endsWith(".zip")) archiveSource = local;
+        }
       }
       if (bytes == null) return new RcloneBackupProvider.ProcessResult(4, "not found");
       remote.put(destination, bytes);
@@ -107,6 +112,13 @@ class RcloneRetryUploadPolicyTest {
       return bytes == null
           ? new RcloneBackupProvider.ProcessResult(4, "not found")
           : new RcloneBackupProvider.ProcessResult(0, bytes + " object");
+    }
+
+    private RcloneBackupProvider.ProcessResult hash(String path) throws IOException {
+      if (!providerAvailable || archiveSource == null || !remote.containsKey(path))
+        return new RcloneBackupProvider.ProcessResult(4, "not found");
+      return new RcloneBackupProvider.ProcessResult(
+          0, BackupManager.fileHash(archiveSource) + "  " + Path.of(path).getFileName());
     }
 
     private RcloneBackupProvider.ProcessResult exists(String path) {

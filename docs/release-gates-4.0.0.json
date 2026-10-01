@@ -1,0 +1,31 @@
+{
+  "version": "4.0.0",
+  "protocolVersion": 3,
+  "dashboardCommit": "e1b901cfef9cd51089f7e54dbe437052d4f4b3f9",
+  "dashboardCiRun": 36931928908,
+  "certification": {
+    "source": "SOURCE_REVIEWED",
+    "ci": "PENDING",
+    "security": "SOURCE_REVIEWED",
+    "runtime": "NOT_EXECUTED",
+    "backup": "NOT_EXECUTED",
+    "console": "NOT_EXECUTED",
+    "history": "NOT_EXECUTED",
+    "restartRecovery": "NOT_EXECUTED"
+  },
+  "rollback": {
+    "plexonPanelVersion": "3.5.0",
+    "plexonPanelCommit": "40a1c94892f83bdd3c7e82ec89196fcae8ced371",
+    "dashboardVersion": "3.5.0",
+    "dashboardCommit": "5d25671bc73569e18599be1e9034291d1f87d171",
+    "dashboardRelay": "redeploy the recorded 3.5.0 Worker commit and restore the saved Host/Paper JARs"
+  },
+  "evidence": {
+    "source": "docs/4.0-source-audit.md",
+    "ci": "https://github.com/ZpkDxGames/PlexonPanel-Dashboard/actions/runs/36931928908",
+    "security": "docs/4.0-source-audit.md",
+    "runtime": null,
+    "dashboardDeployment": "https://vercel.com/zpkdxgames-projects/plexon-panel-dashboard/4XvtUNJEA2SEKbVov2LMg9u1p8df",
+    "relayDeployment": "https://github.com/ZpkDxGames/PlexonPanel-Dashboard/actions/runs/36931928774"
+  }
+}
