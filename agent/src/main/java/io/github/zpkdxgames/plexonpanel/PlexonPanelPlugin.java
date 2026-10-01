@@ -4,6 +4,7 @@ import io.github.zpkdxgames.plexonpanel.api.DefaultPlexonPanelAPI;
 import io.github.zpkdxgames.plexonpanel.api.PlexonPanelAPI;
 import io.github.zpkdxgames.plexonpanel.command.PlexonPanelCommand;
 import io.github.zpkdxgames.plexonpanel.config.Messages;
+import io.github.zpkdxgames.plexonpanel.config.ConfigMigration;
 import io.github.zpkdxgames.plexonpanel.config.PanelSettings;
 import io.github.zpkdxgames.plexonpanel.identity.DeviceIdentity;
 import io.github.zpkdxgames.plexonpanel.identity.IdentityStore;
@@ -36,8 +37,8 @@ public final class PlexonPanelPlugin extends JavaPlugin {
     coreBridge = CoreBridgeFactory.resolve(this);
     coreBridge.registerStarting();
     saveDefaultConfig();
-    migrateConfigDefaults();
     try {
+      ConfigMigration.migrate(this);
       Path dataDirectory = getDataFolder().toPath();
       identityStore = new IdentityStore(dataDirectory);
       identity = identityStore.loadOrCreate();
@@ -96,7 +97,8 @@ public final class PlexonPanelPlugin extends JavaPlugin {
 
   public synchronized void reloadAgent() throws java.io.IOException {
     reloadConfig();
-    migrateConfigDefaults();
+    ConfigMigration.migrate(this);
+    reloadConfig();
     PanelSettings candidateSettings = PanelSettings.load(getConfig());
     AgentRuntime next = createRuntime(candidateSettings, identity);
     AgentRuntime previous = runtime;
@@ -212,8 +214,4 @@ public final class PlexonPanelPlugin extends JavaPlugin {
     return panelApi != null;
   }
 
-  private void migrateConfigDefaults() {
-    getConfig().options().copyDefaults(true);
-    saveConfig();
-  }
 }

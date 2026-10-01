@@ -1,6 +1,6 @@
 # Full local capability deployment
 
-PlexonPanel 3.5.1 provides explicit full-control examples for the intended PlexonCraft deployment without changing signed wire protocol 3 or weakening the local authorization model. The stable Host keeps the live Minecraft tree read-only while retaining Host-owned lifecycle, console, backup, Google Drive, and maintenance authority.
+PlexonPanel 4.0.0 provides explicit full-control examples for the intended PlexonCraft deployment without changing signed wire protocol 3 or weakening the local authorization model. The stable Host keeps the live Minecraft tree read-only while retaining Host-owned lifecycle, console, backup, Google Drive, and maintenance authority.
 
 Use:
 
@@ -27,7 +27,7 @@ Owner receives the canonical `Scopes.ALL` set only when a new Owner grant is iss
 | Overview | `overview.view` | not a Host capability |
 | Telemetry | `telemetry.view` | `telemetry.view` |
 | Players/history/location/address | enabled by Paper policy | not a Host capability |
-| Console | enabled by Paper policy | not a Host capability |
+| Console | bounded live fallback and command execution | preferred live source and retained history |
 | Chat | enabled by Paper policy | not a Host capability |
 | Player actions | enabled by Paper policy | not a Host capability |
 | Plugins | enabled by Paper policy | not a Host capability |
@@ -41,7 +41,10 @@ A disabled/non-applicable Host cell for Paper-only actions is correct. A disable
 
 ## Paper full-control policy
 
-The Paper preset enables player history, player location/address, full console streaming, dashboard chat sending including MiniMessage, every currently implemented player action, device revoke, SafeFiles operations, backup coordination and the existing monitoring/audit/settings capabilities.
+The Paper preset enables player history, player location/address, bounded full-console fallback when
+Host authority is unavailable, dashboard chat sending including MiniMessage, every currently
+implemented player action, device revoke, SafeFiles operations, backup coordination and the existing
+monitoring/audit/settings capabilities.
 
 `plugins.reload` remains explicit. The preset configures only `PlexonPanel: "plexonpanel reload"` and adds exactly that command to the console allowlist. The capability is advertised only when at least one configured reload command actually passes the same local command allow/deny policy used at execution time. Generic Bukkit/Paper `/reload` is not exposed.
 
@@ -53,9 +56,9 @@ Paper file access remains confined by `SafeFiles`/`PathPolicy`: canonical roots,
 
 The Host preset enables telemetry, Host-owned console viewing, server status/start/stop/restart, read-only server-tree inspection, manual full-backup creation/verification/retry-upload/download/delete/retention, audit and settings. Host-side device mutation, server-tree mutation and remote restore are forced off even if legacy configuration requests them.
 
-Host configuration still rejects Paper-only scope families such as players, console, chat, player actions and plugins. Lifecycle operations still use the validated exact systemd service name; the daemon must run as a dedicated non-root Linux user with permission to manage that configured unit.
+Host configuration still rejects Paper-only scope families such as players, chat, player actions and plugins. Console view scopes are intentionally shared: Host is preferred and owns retained history, while Paper can advertise them only for its locally enabled live fallback. Lifecycle operations still use the validated exact systemd service name; the daemon must run as a dedicated non-root Linux user with permission to manage that configured unit.
 
-Backup capability remains defense-in-depth gated. A configured backup scope is effective only while `backups.enabled` is true. Legacy `backups.restoreEnabled` is parsed for rolling-upgrade compatibility but cannot make `backup.restore` effective in the 3.5.1 stable Host.
+Backup capability remains defense-in-depth gated. A configured backup scope is effective only while `backups.enabled` is true. Legacy `backups.restoreEnabled` is parsed for rolling-upgrade compatibility but cannot make `backup.restore` effective in the 4.0.0 stable Host.
 
 The Host service mounts `serverRoot` read-only. Listing, bounded reads and downloads remain confined beneath that root; create/write/upload/rename/delete are retired from the stable Host capability contract. Full Plexon server control is not unrestricted Linux filesystem or shell access.
 

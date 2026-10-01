@@ -1,6 +1,6 @@
 # Protocol 3 contract
 
-Product/bundle version 3.1.0, wire version 3. Routes retain `/v1`; protocol 2 is explicitly incompatible. Paper and host initiate WSS `/v1/agent?serverId=<uuid>&agentKind=PAPER|HOST` with `X-PlexonPanel-Protocol: 3`.
+Product/bundle version 4.0.0, wire version 3. Routes retain `/v1`; protocol 2 is explicitly incompatible. Paper and host initiate WSS `/v1/agent?serverId=<uuid>&agentKind=PAPER|HOST` with `X-PlexonPanel-Protocol: 3`.
 
 ## Envelope
 
@@ -63,6 +63,14 @@ Presence timestamps are UTC ISO-8601 instants. UUID is identity; the name is bou
 `inventory.players` may add `sessionId` and `sessionStartedAt`. `firstSeenAt` and `lastLoginAt` are included only when persistent history is locally enabled and the recipient holds `players.history.view`. `players.history.list` returns newest-first `entries`, nullable `nextCursor`, `hasMore`, `boundedWindow`, `capturedAt`, and `historyEnabled`. Cursors are opaque and bound to the original filter/window; they never contain a caller-selected path.
 
 Host `console.history` and `console.history.errors` accept a validated opaque `cursor` in place of `before` for older-page traversal. The response supplies `nextCursor` when more scanned journal entries may exist. The errors action remains filtered server-side, regardless of requested severity. Older Hosts continue to support timestamp `before` pagination; the dashboard treats that as a bounded compatibility path.
+
+Console source selection remains additive Protocol 3. An authenticated Host publishes
+`console.source` with its fixed `HOST_JOURNAL` source, availability, bounded state and configured
+service. The relay returns signed `console.authority` to Paper with `hostAuthoritative`, source and
+state. A healthy authorized Host suppresses Paper output; when it is unavailable, a locally enabled
+Paper fallback may publish new `console.lines`. Dashboard ready state reports `HOST`,
+`PAPER_FALLBACK`, or `UNAVAILABLE` plus the explicit source state. Only Host answers retained-history
+actions, and neither relay runtime persists console bodies.
 
 Presence event bodies, player inventory bodies, and history action results are excluded from Durable Object persistence. Action results remain routed only to the requesting device.
 

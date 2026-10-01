@@ -1,6 +1,6 @@
 # Optional Linux host companion
 
-The host runs Java 25 as a dedicated non-root Linux user, with no inbound listener. It owns an independent Ed25519 identity and can operate only locally configured paths, executable and exact systemd unit. The Host Companion is also the sole authoritative source for PlexonPanel server-console capture, replay, and retained-history queries. Paper remains responsible for Paper/Bukkit-only runtime operations such as locally allowlisted console command execution, but it no longer tails `logs/latest.log` or provides fallback console history. Authorization for already paired devices is mirrored into Host-owned local state so Host-backed controls can remain available while Paper is stopped; pairing and access mutation remain Paper-authoritative.
+The host runs Java 25 as a dedicated non-root Linux user, with no inbound listener. It owns an independent Ed25519 identity and can operate only locally configured paths, executable and exact systemd unit. The Host Companion is the preferred live console source and the sole authority for replay and retained-history queries. Paper remains responsible for Paper/Bukkit-only runtime operations and can provide an explicitly enabled, live-only `latest.log` fallback while Host journal authority is unavailable. Authorization for already paired devices is mirrored into Host-owned local state so Host-backed controls can remain available while Paper is stopped; pairing and access mutation remain Paper-authoritative.
 
 ## Ubuntu 24.04 installation
 
@@ -15,21 +15,31 @@ Use a disposable server first. Adjust the example user, paths and `plexoncraft.s
 7. Initialize as the host user:
 
 ```sh
-sudo -u plexonpanel-host /usr/bin/java -jar /opt/plexonpanel-host/plexonpanel-host-3.5.1.jar --init /var/lib/plexonpanel-host
+sudo -u plexonpanel-host /usr/bin/java -jar /opt/plexonpanel-host/plexonpanel-host-4.0.0.jar --init /var/lib/plexonpanel-host
 ```
 
 Copy only its printed public key to Paper `host.public-key`; copy the existing Paper UUID to host config. Both use the relay public key and WSS `/v1/agent` URL. Reload Paper locally.
 
 8. Review/install the example service and polkit rule as root-owned files. The rule permits only start/stop/restart of exactly `plexoncraft.service` for the host user, with no wildcard or shell. Keep companion lifetime independent from Paper.
-9. Reload systemd and start the host locally. Validate monitoring first, then selectively enable capabilities or intentionally apply the full-control example. Restart completes only after service startup and authenticated Paper reconnection.
+9. For an upgrade from an unmarked 3.5 configuration, keep the service stopped and run:
+
+```sh
+sudo /usr/bin/java -jar /opt/plexonpanel-host/plexonpanel-host-4.0.0.jar \
+  /etc/plexonpanel-host/host-config.json --migrate-config
+```
+
+The one-shot command backs up and atomically updates the root-owned policy while preserving its
+owner, group and mode. The non-root daemon never needs write access to `/etc`.
+
+10. Reload systemd and start the host locally. Validate monitoring first, then selectively enable capabilities or intentionally apply the full-control example. Restart completes only after service startup and authenticated Paper reconnection.
 
 ## Full local Host capabilities
 
-The full-control example enables telemetry, server status/start/stop/restart, bounded read-only file inspection, manual backup operations, audit, settings, and Host-owned console viewing when explicitly enabled. Device pairing, grant changes, revocation, and generation/revision ownership remain Paper-authoritative even if legacy Host configuration still lists `devices.*`; Host effective capabilities force those mutation scopes off, so an explicitly Host-targeted access change fails closed. Already paired credentials continue to authorize Host-backed actions from the private mirror while Paper is offline. Effective backup capability still requires `backups.enabled`. The stable 3.5.1 Host also forces server-tree create/write/upload/rename/delete and `backup.restore` off even if legacy configuration enables them; `restoreEnabled` cannot override that boundary. Effective console viewing requires Host `console.enabled` plus the corresponding `console.view.errors` or `console.view.full` capability. HostConfig continues rejecting Paper-only scope families. Read-only file operations remain confined under `serverRoot`, and lifecycle actions remain bound to the validated exact systemd service name.
+The full-control example enables telemetry, server status/start/stop/restart, bounded read-only file inspection, manual backup operations, audit, settings, and Host-owned console viewing when explicitly enabled. Device pairing, grant changes, revocation, and generation/revision ownership remain Paper-authoritative even if legacy Host configuration still lists `devices.*`; Host effective capabilities force those mutation scopes off, so an explicitly Host-targeted access change fails closed. Already paired credentials continue to authorize Host-backed actions from the private mirror while Paper is offline. Effective backup capability still requires `backups.enabled`. The stable 4.0.0 Host also forces server-tree create/write/upload/rename/delete and `backup.restore` off even if legacy configuration enables them; `restoreEnabled` cannot override that boundary. Effective console viewing requires Host `console.enabled` plus the corresponding `console.view.errors` or `console.view.full` capability. HostConfig continues rejecting Paper-only scope families. Read-only file operations remain confined under `serverRoot`, and lifecycle actions remain bound to the validated exact systemd service name.
 
 ## Console authority and retained history
 
-The Host Companion is the single authoritative console source. Live capture follows the exact locally configured systemd unit through the locally validated `/usr/bin/journalctl` executable. The Host persists only the journal cursor/invocation metadata needed for bounded reconnect replay; it does not create an unlimited duplicate console database.
+The Host Companion is the preferred live source and the only retained-history authority. Live capture follows the exact locally configured systemd unit through the locally validated `/usr/bin/journalctl` executable. The Host persists only the journal cursor/invocation metadata needed for bounded reconnect replay; it does not create an unlimited duplicate console database.
 
 The authenticated Host control plane exposes two retained-history actions:
 
@@ -44,7 +54,13 @@ History scans newest first and returns each page in chronological order. When a 
 
 **History is limited by systemd-journald retention on the VPS.** PlexonPanel must not describe this as unlimited history. If journald has rotated an entry away, PlexonPanel cannot recover it. A stopped Paper server does not remove retained journal history because the Host remains online and queries journald independently.
 
-Paper no longer owns server-console capture or retained replay. Legacy Paper `console.stream-enabled`, `console.errors-enabled`, polling, batching, and ring-buffer settings may remain parseable during migration but do not restore Paper console authority and must not be treated as a fallback. Paper still owns `console.execute` because execution must remain on the Bukkit/Paper command path; viewing and execution intentionally have separate authorities.
+Paper never owns retained replay. When `console.fallback-enabled` is true, it tails only new
+`logs/latest.log` bytes while the signed relay reports Host authority unavailable. Reads, line size,
+batches and ring buffers are bounded; content is redacted before transport; startup begins at EOF;
+and suppressed Host-owned bytes are advanced without later replay. `console.stream-enabled` allows
+all classified lines, while `console.errors-enabled` permits warning/error-only fallback. The public
+default disables fallback; the full-control preset enables it. Paper still owns `console.execute`
+because execution must remain on the Bukkit/Paper command path.
 
 ## Backups
 
@@ -58,12 +74,12 @@ The job and selected countdown survive browser refresh, disconnect, and Host res
 
 ## Read-only boundary and historical restore recovery
 
-Direct remote restore is not part of the stable 3.5.1 capability contract. The Host mounts the Minecraft tree read-only and forces `backup.restore` plus Host file mutations off. Perform a planned restore locally under the server operator's recovery procedure, outside the network-reachable Host process.
+Direct remote restore is not part of the stable 4.0.0 capability contract. The Host mounts the Minecraft tree read-only and forces `backup.restore` plus Host file mutations off. Perform a planned restore locally under the server operator's recovery procedure, outside the network-reachable Host process.
 
 Historical interrupted-restore journals remain recognized so an upgrade cannot bypass an existing safety gate. On `RECOVERY_REQUIRED`, leave Paper stopped, inspect local journal/logs, repair storage/permissions and run:
 
 ```sh
-sudo -u plexonpanel-host /usr/bin/java -jar /opt/plexonpanel-host/plexonpanel-host-3.5.1.jar /etc/plexonpanel-host/host-config.json --recover-restore
+sudo -u plexonpanel-host /usr/bin/java -jar /opt/plexonpanel-host/plexonpanel-host-4.0.0.jar /etc/plexonpanel-host/host-config.json --recover-restore
 ```
 
 Recovery restores saved originals and removes new targets left by a historical interrupted restore; repeating it preserves originals already recovered. Malformed/unknown journals fail closed. Never delete a journal to bypass recovery. Validate files and gameplay before deliberately starting Paper. Real systemd/RCON/rclone interruption and Google Drive verification tests remain stable-release gates.

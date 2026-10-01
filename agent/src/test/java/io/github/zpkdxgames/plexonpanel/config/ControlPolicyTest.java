@@ -43,6 +43,8 @@ class ControlPolicyTest {
             "players.history.view",
             "players.location",
             "players.address",
+            "console.view.errors",
+            "console.view.full",
             "console.execute.allowed",
             "chat.view",
             "chat.send",
@@ -83,28 +85,24 @@ class ControlPolicyTest {
         assertFalse(
             policy.capabilities().get(scope), () -> "Paper must not claim Host-only scope: " + scope);
 
-    assertFalse(policy.capabilities().get("console.view.errors"));
-    assertFalse(policy.capabilities().get("console.view.full"));
+    assertTrue(policy.capabilities().get("console.view.errors"));
+    assertTrue(policy.capabilities().get("console.view.full"));
     assertFalse(policy.capabilities().get("backup.create"));
     assertTrue(policy.capabilities().get("console.execute.allowed"));
     assertEquals("plexonpanel reload", policy.pluginReloads().get("PlexonPanel"));
   }
 
   @Test
-  void legacyPaperConsoleCaptureKeysCannotRestoreReadAuthority() throws Exception {
+  void paperConsoleFallbackRequiresExplicitEnablement() throws Exception {
     Path source = fixture("examples/config-full-control.yml", "agent/examples/config-full-control.yml");
     YamlConfiguration config = YamlConfiguration.loadConfiguration(source.toFile());
     Path serverRoot = temporary.resolve("server");
     Files.createDirectories(serverRoot);
     config.set("files.roots.server.path", serverRoot.toString());
 
+    config.set("console.fallback-enabled", false);
     config.set("console.stream-enabled", true);
     config.set("console.errors-enabled", true);
-    config.set("console.poll-interval-millis", -1);
-    config.set("console.batch-interval-millis", -1);
-    config.set("console.batch-size", -1);
-    config.set("console.ring-buffer-lines", -1);
-    config.set("console.maximum-line-bytes", -1);
 
     PanelSettings settings = PanelSettings.load(config);
     ControlPolicy policy =

@@ -16,8 +16,17 @@ public record PanelSettings(
     RemoteActions remoteActions,
     Audit audit
 ) {
+    public static final int CURRENT_SCHEMA_VERSION = 4;
+
     public static PanelSettings load(FileConfiguration config) {
         Objects.requireNonNull(config, "config");
+
+        int schemaVersion = config.getInt("schema-version", 0);
+        if (schemaVersion != CURRENT_SCHEMA_VERSION) {
+            throw new IllegalArgumentException(
+                "config.yml schema-version must be " + CURRENT_SCHEMA_VERSION
+                    + " after migration (found " + schemaVersion + ")");
+        }
 
         Gateway gateway = new Gateway(
             config.getBoolean("gateway.enabled", false),
@@ -71,10 +80,19 @@ public record PanelSettings(
                 "player-history.shutdown-flush-seconds")
         );
 
-        // Paper no longer captures or buffers the authoritative server console. This section is
-        // retained only for redacting Paper-owned remote command results. Legacy capture keys are
-        // intentionally ignored so old installations migrate without regaining console authority.
         Console console = new Console(
+            config.getBoolean("console.fallback-enabled", true),
+            config.getBoolean("console.stream-enabled", false),
+            config.getBoolean("console.errors-enabled", true),
+            bounded(config.getLong("console.poll-interval-millis", 250), 100, 5000,
+                "console.poll-interval-millis"),
+            bounded(config.getLong("console.batch-interval-millis", 300), 100, 5000,
+                "console.batch-interval-millis"),
+            bounded(config.getInt("console.batch-size", 100), 1, 1000, "console.batch-size"),
+            bounded(config.getInt("console.ring-buffer-lines", 1000), 100, 100_000,
+                "console.ring-buffer-lines"),
+            bounded(config.getInt("console.maximum-line-bytes", 16_384), 512, 1_048_576,
+                "console.maximum-line-bytes"),
             List.copyOf(config.getStringList("console.redact-patterns"))
         );
 
@@ -195,7 +213,17 @@ public record PanelSettings(
     ) {
     }
 
-    public record Console(List<String> redactPatterns) {
+    public record Console(
+        boolean fallbackEnabled,
+        boolean streamEnabled,
+        boolean errorsEnabled,
+        long pollIntervalMillis,
+        long batchIntervalMillis,
+        int batchSize,
+        int ringBufferLines,
+        int maximumLineBytes,
+        List<String> redactPatterns
+    ) {
     }
 
     public record Chat(

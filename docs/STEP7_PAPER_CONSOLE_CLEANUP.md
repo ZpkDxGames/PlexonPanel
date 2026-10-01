@@ -1,5 +1,8 @@
 # Step 7 — Paper console cleanup and migration
 
+> Historical 3.5 design record. PlexonPanel 4.0 supersedes the no-fallback decision with the
+> explicitly configured, bounded, redacted live-only fallback in [HOST_AGENT.md](HOST_AGENT.md).
+
 PlexonPanel treats the Linux Host Companion as the sole authoritative server-console source. Paper still owns safe remote command execution, but it no longer captures, buffers, replays, or advertises read authority for server-console output.
 
 ## Retired Paper capture settings

@@ -31,13 +31,22 @@ public final class HostMain {
     }
     if (args.length < 1 || args.length > 2)
       throw new IllegalArgumentException(
-          "Usage: java -jar plexonpanel-host.jar <host-config.json> [--recover-restore]");
+          "Usage: java -jar plexonpanel-host.jar <host-config.json> [--recover-restore|--migrate-config]");
+
+    Path configPath = Path.of(args[0]).toAbsolutePath().normalize();
+    if (args.length == 2 && args[1].equals("--migrate-config")) {
+      HostConfigMigration.migrate(configPath);
+      System.out.println("Host configuration is migrated to schema 4; backup retained beside it.");
+      return;
+    }
     if (!System.getProperty("os.name").equals("Linux")
         || ProcessHandle.current().info().user().orElse("root").equals("root"))
       throw new SecurityException("Run the host companion as a dedicated non-root Linux user");
 
-    Path configPath = Path.of(args[0]).toAbsolutePath().normalize();
     Instant hostStartedAt = Instant.now();
+    if (HostConfigMigration.needsMigration(configPath))
+      System.err.println(
+          "Legacy Host config accepted read-only; run the local --migrate-config operation before release certification.");
     long configLoadedMtime = Files.getLastModifiedTime(configPath, LinkOption.NOFOLLOW_LINKS).toMillis();
     HostConfig config = HostConfig.load(configPath);
     Path data = Path.of(config.dataDirectory());

@@ -1,4 +1,5 @@
 {
+  "schemaVersion": 4,
   "serverId": "REPLACE_WITH_EXISTING_PAPER_SERVER_UUID",
   "serverName": "PlexonCraft",
   "relayUrl": "wss://YOUR-RELAY.workers.dev/v1/agent",

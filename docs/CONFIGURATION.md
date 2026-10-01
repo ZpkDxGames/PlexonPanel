@@ -1,8 +1,8 @@
 # Configuration reference
 
-The installable Paper default is [config.yml](../agent/src/main/resources/config.yml); the Host example is [host-config.json](../host-agent/examples/host-config.json). Local files are authoritative and no browser role—including Owner—can override them. The 3.0 loader copies only missing defaults into an existing configuration; it preserves every existing gateway, key, identity, access, stream, file, backup, and remote-action value.
+The installable Paper default is [config.yml](../agent/src/main/resources/config.yml); the Host example is [host-config.json](../host-agent/examples/host-config.json). Local files are authoritative and no browser role—including Owner—can override them. PlexonPanel 4.0 uses Paper `schema-version: 4` and Host `schemaVersion: 4`. Paper migrates at startup; the root-owned Host file uses the documented local `--migrate-config` operation while the service is stopped. A legacy file is backed up before atomic replacement, unknown operator keys are preserved, Host ownership/mode are restored, and a future schema is rejected without rewriting it. Identity, pairing and grants live outside these files and are never rotated by configuration migration.
 
-## 3.0.1 full-control examples
+## 4.0.0 full-control examples
 
 PlexonCraft deployments that intentionally want every locally implemented capability can start from [Paper full-control](../agent/examples/config-full-control.yml) and [Host full-control](../host-agent/examples/host-config-full-control.json). These examples are deliberately separate from the conservative public defaults. They preserve protocol 3, immutable grants, command allow/deny policy, confirmations, audit, SafeFiles confinement, backup gating and the Paper/Host authority split. See [full local capability deployment](FULL_CONTROL.md) before applying either example.
 
@@ -45,3 +45,25 @@ Invalid values fail startup/reload with the exact configuration key. When histor
 The journal lives below `plugins/PlexonPanel/presence/`, rejects symlinked storage, rotates by UTC day and configured size, and uses restrictive permissions where supported. Paper's `PLAY_ONE_MINUTE` statistic is sampled on the main thread and converted from its historical tick unit to milliseconds (`value × 50`); despite the Bukkit name, it represents ticks played.
 
 See [operations](OPERATIONS.md) for the remaining policy map, file boundaries, runtime diagnostics, and troubleshooting.
+
+## Paper console fallback
+
+Host journald is preferred and remains the only retained-history authority. Paper fallback is
+disabled by default and, when enabled, publishes only new `latest.log` lines while the relay reports
+Host authority unavailable.
+
+| Key | Default | Accepted range / meaning |
+| --- | ---: | --- |
+| `console.fallback-enabled` | `false` | Locally enables live-only Paper fallback; never enables retained history. |
+| `console.stream-enabled` | `false` | Includes all classified lines while fallback is active. |
+| `console.errors-enabled` | `true` | Includes warning/error lines while fallback is active. |
+| `console.poll-interval-millis` | `250` | 100–5,000 ms. |
+| `console.batch-interval-millis` | `300` | 100–5,000 ms. |
+| `console.batch-size` | `100` | 1–1,000 lines per local drain; protocol batches remain capped at 100. |
+| `console.ring-buffer-lines` | `1000` | 100–100,000 bounded recent/pending lines. |
+| `console.maximum-line-bytes` | `16384` | 512–1,048,576 bytes; longer lines are truncated. |
+| `console.redact-patterns` | see example | Additional bounded regular expressions applied before transport. |
+
+The tailer starts at EOF, advances without publishing while Host is authoritative, and does not
+write a Paper console-history database. Both the immutable device scope and Paper capability must
+permit the selected console view level.
