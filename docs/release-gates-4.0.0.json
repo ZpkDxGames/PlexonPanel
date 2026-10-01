@@ -4,8 +4,8 @@
   "dashboardCommit": "e1b901cfef9cd51089f7e54dbe437052d4f4b3f9",
   "dashboardCiRun": 36931928908,
   "certification": {
-    "source": "SOURCE_REVIEWED",
-    "ci": "PENDING",
+    "source": "PASS",
+    "ci": "PASS",
     "security": "SOURCE_REVIEWED",
     "runtime": "NOT_EXECUTED",
     "backup": "NOT_EXECUTED",
@@ -22,9 +22,10 @@
   },
   "evidence": {
     "source": "docs/4.0-source-audit.md",
-    "ci": "https://github.com/ZpkDxGames/PlexonPanel-Dashboard/actions/runs/36931928908",
+    "ci": "https://github.com/ZpkDxGames/PlexonPanel/actions/runs/36933487621",
     "security": "docs/4.0-source-audit.md",
     "runtime": null,
+    "dashboardCi": "https://github.com/ZpkDxGames/PlexonPanel-Dashboard/actions/runs/36931928908",
     "dashboardDeployment": "https://vercel.com/zpkdxgames-projects/plexon-panel-dashboard/4XvtUNJEA2SEKbVov2LMg9u1p8df",
     "relayDeployment": "https://github.com/ZpkDxGames/PlexonPanel-Dashboard/actions/runs/36931928774"
   }
