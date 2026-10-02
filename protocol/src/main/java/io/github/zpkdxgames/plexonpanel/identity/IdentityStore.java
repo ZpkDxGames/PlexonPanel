@@ -43,6 +43,22 @@ public final class IdentityStore {
     return loadOrCreate(null);
   }
 
+  /** Inspect existing public UUID without creating keys or changing file permissions. */
+  public synchronized void validateRegisteredServerId(UUID requiredServerId) throws IOException {
+    FleetIdentity.parseUuid(requiredServerId.toString(), "serverId");
+    validatePaths();
+    boolean metadataExists = Files.exists(metadataPath, LinkOption.NOFOLLOW_LINKS);
+    boolean keyExists = Files.exists(privateKeyPath, LinkOption.NOFOLLOW_LINKS);
+    if (metadataExists != keyExists) throw new IOException("IDENTITY_STATE_INCOMPLETE");
+    if (!metadataExists) return;
+    try {
+      IdentityMetadata metadata = gson.fromJson(Files.readString(metadataPath), IdentityMetadata.class);
+      if (metadata == null || !"Ed25519".equals(metadata.algorithm())
+          || !requiredServerId.equals(FleetIdentity.parseUuid(metadata.serverId(), "serverId")))
+        throw new IOException("REGISTERED_SERVER_IDENTITY_MISMATCH");
+    } catch (RuntimeException invalid) { throw new IOException("IDENTITY_METADATA_INVALID"); }
+  }
+
   /** A new Paper identity may use its pre-registered UUID; existing identity is never rewritten. */
   public synchronized DeviceIdentity loadOrCreate(UUID requiredServerId) throws IOException {
     if (requiredServerId != null) FleetIdentity.parseUuid(requiredServerId.toString(), "serverId");

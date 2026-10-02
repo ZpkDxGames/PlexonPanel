@@ -47,4 +47,17 @@ class FleetConfigMigrationTest {
     Files.writeString(path, "schema-version: 5.1\n"); assertThrows(IOException.class, () -> FleetConfigMigration.plan(defaults, path, identity));
     Files.writeString(path, "schema-version: 99\n"); assertThrows(IOException.class, () -> FleetConfigMigration.plan(defaults, path, identity));
   }
+  @Test void schemaFiveDefaultsCannotSkipLegacyCorrectionOrFleetActivation() throws Exception {
+    Path path = root.resolve("config.yml"); String original = "operator-note: preserved\n";
+    Files.writeString(path, original); var bundled = defaults(); bundled.set("schema-version", 5);
+    var loaded = YamlConfiguration.loadConfiguration(path.toFile()); loaded.setDefaults(bundled);
+    ConfigMigration.migrate(loaded, path);
+    assertEquals(4, YamlConfiguration.loadConfiguration(path.toFile()).getInt("schema-version"));
+    assertEquals(original, Files.readString(root.resolve("config.yml.pre-v4-backup")));
+    var target = identity(); FleetConfigMigration.migrate(loaded, path, target);
+    var persisted = YamlConfiguration.loadConfiguration(path.toFile());
+    assertEquals(5, persisted.getInt("schema-version")); assertEquals("preserved", persisted.getString("operator-note"));
+    assertEquals(target.nodeId(), PanelSettings.load(persisted).fleet().nodeId());
+    assertEquals(4, YamlConfiguration.loadConfiguration(root.resolve("config.yml.pre-v5-backup").toFile()).getInt("schema-version"));
+  }
 }
