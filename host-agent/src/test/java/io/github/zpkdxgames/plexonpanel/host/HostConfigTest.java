@@ -250,6 +250,6 @@ class HostConfigTest {
   void daemonRefusesRootBeforeOpeningConfiguredFiles() {
     if (ProcessHandle.current().info().user().orElse("").equals("root"))
       assertThrows(
-          SecurityException.class, () -> HostMain.main(new String[] {"/missing-config.json"}));
+          SecurityException.class, () -> HostMain.run(new String[] {"/missing-config.json"}));
   }
 }

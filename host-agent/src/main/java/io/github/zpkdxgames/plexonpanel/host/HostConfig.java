@@ -3,6 +3,7 @@ package io.github.zpkdxgames.plexonpanel.host;
 import com.google.gson.*;
 import io.github.zpkdxgames.plexonpanel.console.ConsoleRedactor;
 import io.github.zpkdxgames.plexonpanel.identity.FleetIdentity;
+import io.github.zpkdxgames.plexonpanel.identity.InstanceLayout;
 import io.github.zpkdxgames.plexonpanel.security.Scopes;
 import java.net.URI;
 import java.nio.file.*;
@@ -165,9 +166,20 @@ public record HostConfig(
   }
 
   public static HostConfig load(Path path) throws java.io.IOException {
+    InstanceLayout.rejectSymlinks(path);
+    if (!Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS)) throw new java.io.IOException("HOST_CONFIG_INVALID");
     if (Files.size(path) > 65536) throw new java.io.IOException("Host config exceeds limit");
-    JsonObject raw = JsonParser.parseString(Files.readString(path)).getAsJsonObject();
-    if (!Set.of(
+    JsonObject raw;
+    try { raw = JsonParser.parseString(Files.readString(path)).getAsJsonObject(); }
+    catch (RuntimeException invalid) { throw new java.io.IOException("HOST_CONFIG_INVALID"); }
+    return fromJson(raw);
+  }
+
+  static HostConfig fromJson(JsonObject raw) {
+    boolean schemaFive = raw.has("schemaVersion") && raw.get("schemaVersion").isJsonPrimitive()
+        && raw.get("schemaVersion").getAsJsonPrimitive().isNumber()
+        && raw.get("schemaVersion").getAsBigDecimal().compareTo(java.math.BigDecimal.valueOf(5)) == 0;
+    if (!schemaFive && !Set.of(
             "schemaVersion",
             "serverId",
             "serverName",
@@ -184,12 +196,15 @@ public record HostConfig(
             "fleet")
         .containsAll(raw.keySet()))
       throw new IllegalArgumentException("Unknown host configuration key");
-    if (raw.has("schemaVersion")
-        && (!raw.get("schemaVersion").isJsonPrimitive()
-            || !raw.get("schemaVersion").getAsJsonPrimitive().isNumber()
-            || raw.get("schemaVersion").getAsBigDecimal().stripTrailingZeros().scale() > 0
-            || raw.get("schemaVersion").getAsInt() != CURRENT_SCHEMA_VERSION))
-      throw new IllegalArgumentException("Unsupported Host configuration schemaVersion");
+    if (raw.has("schemaVersion")) {
+      int schema;
+      try {
+        if (!raw.get("schemaVersion").isJsonPrimitive() || !raw.get("schemaVersion").getAsJsonPrimitive().isNumber())
+          throw new ArithmeticException();
+        schema = raw.get("schemaVersion").getAsBigDecimal().intValueExact();
+      } catch (RuntimeException invalid) { throw new IllegalArgumentException("Unsupported Host configuration schemaVersion"); }
+      if (schema != CURRENT_SCHEMA_VERSION && schema != 5) throw new IllegalArgumentException("Unsupported Host configuration schemaVersion");
+    }
     if (raw.has("commandChannel")) {
       JsonElement commandRaw = raw.get("commandChannel");
       if (!commandRaw.isJsonObject()
@@ -226,7 +241,7 @@ public record HostConfig(
     }
     HostConfig c =
         new HostConfig(
-            parsed.serverId,
+            FleetIdentity.parseUuid(parsed.serverId, "serverId").toString(),
             parsed.serverName,
             parsed.relayUrl,
             parsed.relayPublicKey,
@@ -313,7 +328,24 @@ public record HostConfig(
     }
     validateConsole(c.console);
     validateCommandChannel(c.commandChannel);
+    if (raw.has("schemaVersion") && raw.get("schemaVersion").getAsInt() == 5) validateFleetLayout(c);
     return c;
+  }
+
+  private static void validateFleetLayout(HostConfig c) {
+    FleetIdentity identity = c.fleetIdentity();
+    if (identity == null) throw new IllegalArgumentException("SCHEMA_5_REQUIRES_FLEET_IDENTITY");
+    InstanceLayout layout = new InstanceLayout(identity.instanceKey());
+    InstanceLayout.requirePath(c.serverRoot(), layout.serverRoot());
+    InstanceLayout.requirePath(c.dataDirectory(), layout.stateDirectory());
+    InstanceLayout.requirePath(c.accessRegistry(), layout.accessRegistry());
+    InstanceLayout.requirePath(c.backups().directory(), layout.backupsDirectory());
+    if (c.commandChannel().enabled()) InstanceLayout.requirePath(c.commandChannel().secretFile(), layout.rconSecret());
+    if (c.backups().rcloneRemote() != null && !c.backups().rcloneRemote().isBlank()) {
+      InstanceLayout.requirePath(c.backups().rcloneConfig(), layout.rcloneConfig());
+      if (!c.backups().rcloneRemote().replaceAll("/+$", "").endsWith("/" + identity.serverId()))
+        throw new IllegalArgumentException("REMOTE_BACKUP_SERVER_NAMESPACE_REQUIRED");
+    }
   }
 
   private static boolean validSnapshotExclusion(String value) {

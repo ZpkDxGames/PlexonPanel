@@ -24,6 +24,16 @@ public final class HostMain {
   private HostMain() {}
 
   public static void main(String[] args) throws Exception {
+    try { run(args); }
+    catch (Exception failure) {
+      String code = failure.getMessage();
+      System.err.println(code != null && code.matches("[A-Z][A-Z0-9_]{2,63}")
+          ? code : "HOST_STARTUP_OR_LOCAL_OPERATION_FAILED " + failure.getClass().getSimpleName());
+      System.exit(1);
+    }
+  }
+
+  static void run(String[] args) throws Exception {
     if (args.length == 1 && args[0].equals("--init-node")) {
       if (!System.getProperty("os.name").equals("Linux")
           || !ProcessHandle.current().info().user().orElse("").equals("root"))
@@ -39,6 +49,18 @@ public final class HostMain {
       System.out.println("Host fingerprint: " + identity.fingerprint());
       return;
     }
+    if (args.length == 3 && (args[1].equals("--plan-fleet") || args[1].equals("--migrate-fleet"))) {
+      Path configPath = Path.of(args[0]).toAbsolutePath().normalize();
+      UUID nodeId = NodeIdentity.readDefault();
+      var plan = HostConfigMigration.planFleet(configPath, nodeId, args[2]);
+      if (args[1].equals("--migrate-fleet")) {
+        if (!System.getProperty("os.name").equals("Linux") || !ProcessHandle.current().info().user().orElse("").equals("root"))
+          throw new SecurityException("LOCAL_ADMINISTRATOR_REQUIRED");
+        HostConfigMigration.migrateFleet(configPath, nodeId, args[2]);
+      }
+      System.out.println(new com.google.gson.Gson().toJson(plan));
+      return;
+    }
     if (args.length < 1 || args.length > 2)
       throw new IllegalArgumentException(
           "Usage: java -jar plexonpanel-host.jar <host-config.json> [--recover-restore|--migrate-config]");
@@ -46,7 +68,7 @@ public final class HostMain {
     Path configPath = Path.of(args[0]).toAbsolutePath().normalize();
     if (args.length == 2 && args[1].equals("--migrate-config")) {
       HostConfigMigration.migrate(configPath);
-      System.out.println("Host configuration is migrated to schema 4; backup retained beside it.");
+      System.out.println("Host configuration migration completed; existing rollback backup retained.");
       return;
     }
     if (!System.getProperty("os.name").equals("Linux")
@@ -59,6 +81,16 @@ public final class HostMain {
           "Legacy Host config accepted read-only; run the local --migrate-config operation before release certification.");
     long configLoadedMtime = Files.getLastModifiedTime(configPath, LinkOption.NOFOLLOW_LINKS).toMillis();
     HostConfig config = HostConfig.load(configPath);
+    if (HostConfigMigration.schemaVersion(configPath) == 5) {
+      var layout = new InstanceLayout(config.fleet().instanceKey());
+      InstanceLayout.requirePath(configPath.toString(), layout.hostConfig());
+      if (!layout.hostUser().equals(ProcessHandle.current().info().user().orElse("")))
+        throw new SecurityException("HOST_INSTANCE_ACCOUNT_MISMATCH");
+      for (Path path : List.of(layout.serverRoot(), layout.stateDirectory(), layout.backupsDirectory(), layout.rconSecret(), layout.rcloneConfig()))
+        InstanceLayout.rejectSymlinks(path);
+    }
+    if (config.fleetIdentity() != null && !config.fleetIdentity().nodeId().equals(NodeIdentity.readDefault()))
+      throw new SecurityException("HOST_NODE_IDENTITY_MISMATCH");
     Path data = Path.of(config.dataDirectory());
     Files.createDirectories(data);
     DeviceIdentity stored = new IdentityStore(data).loadOrCreate(),
@@ -68,8 +100,6 @@ public final class HostMain {
 
     FleetBindingStore.Lease fleetLease = null;
     if (config.fleetIdentity() != null) {
-      if (!config.fleetIdentity().nodeId().equals(NodeIdentity.readDefault()))
-        throw new SecurityException("HOST_NODE_IDENTITY_MISMATCH");
       fleetLease = new FleetBindingStore(data, Path.of(config.serverRoot()))
           .claim(config.fleetIdentity(), identity.fingerprint());
     }
