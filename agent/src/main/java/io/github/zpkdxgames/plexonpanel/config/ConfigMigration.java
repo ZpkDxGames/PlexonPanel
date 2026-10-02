@@ -12,6 +12,8 @@ import org.bukkit.plugin.java.JavaPlugin;
 
 /** Safe, one-way migration for the operator-owned Paper configuration. */
 public final class ConfigMigration {
+  // The defaults-aware legacy correction remains a distinct step before fleet migration.
+  private static final int LEGACY_SCHEMA_VERSION = 4;
   private ConfigMigration() {}
 
   public static void migrate(JavaPlugin plugin) throws IOException {
@@ -45,7 +47,7 @@ public final class ConfigMigration {
     }
 
     config.options().copyDefaults(true);
-    boolean needsMigration = schemaVersion < PanelSettings.CURRENT_SCHEMA_VERSION;
+    boolean needsMigration = schemaVersion < LEGACY_SCHEMA_VERSION;
     if (!needsMigration) return;
 
     Path backup = configPath.resolveSibling("config.yml.pre-v4-backup");
@@ -56,7 +58,7 @@ public final class ConfigMigration {
       throw new IOException("Refusing to replace an unsafe config.yml migration backup");
     }
 
-    config.set("schema-version", PanelSettings.CURRENT_SCHEMA_VERSION);
+    config.set("schema-version", LEGACY_SCHEMA_VERSION);
     try {
       writer.write(configPath, config.saveToString());
     } catch (IOException | RuntimeException failure) {

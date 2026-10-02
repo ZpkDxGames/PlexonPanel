@@ -37,31 +37,35 @@ public final class PlexonPanelPlugin extends JavaPlugin {
   public void onEnable() {
     coreBridge = CoreBridgeFactory.resolve(this);
     coreBridge.registerStarting();
-    saveDefaultConfig();
     try {
-      ConfigMigration.migrate(this);
       Path dataDirectory = getDataFolder().toPath();
-      PanelSettings initialSettings = PanelSettings.load(getConfig());
       java.util.UUID registeredServerId = null;
+      boolean fleetStartup = getPluginMeta().getVersion().startsWith("5.") || getConfig().getInt("schema-version", 0) == 5;
+      io.github.zpkdxgames.plexonpanel.identity.FleetIdentity registered = null;
+      identityStore = new IdentityStore(dataDirectory);
+      if (fleetStartup) {
+        registered = io.github.zpkdxgames.plexonpanel.identity.PaperInstanceBootstrap.validate(
+            Path.of(System.getProperty("user.dir", ".")), dataDirectory.toAbsolutePath().normalize(),
+            ProcessHandle.current().info().user().orElse(""), getServer().getPort(),
+            io.github.zpkdxgames.plexonpanel.identity.NodeInstanceRegistry.readDefault(),
+            io.github.zpkdxgames.plexonpanel.identity.NodeIdentity.readDefault());
+        registeredServerId = registered.serverId();
+        identityStore.validateRegisteredServerId(registeredServerId);
+      }
+      saveDefaultConfig();
+      ConfigMigration.migrate(this);
+      if (fleetStartup) {
+        String name = getConfig().getString("fleet.server-name", registered.instanceKey());
+        var target = new io.github.zpkdxgames.plexonpanel.identity.FleetIdentity(
+            registered.serverId(), registered.nodeId(), registered.instanceKey(), name);
+        io.github.zpkdxgames.plexonpanel.config.FleetConfigMigration.migrate(
+            getConfig(), dataDirectory.resolve("config.yml"), target);
+        reloadConfig();
+      }
+      PanelSettings initialSettings = PanelSettings.load(getConfig());
       if (initialSettings.fleet() != null && !initialSettings.fleet().nodeId().equals(
           io.github.zpkdxgames.plexonpanel.identity.NodeIdentity.readDefault()))
         throw new java.io.IOException("PAPER_NODE_IDENTITY_MISMATCH");
-      if (getConfig().getInt("schema-version", 0) == 5) {
-        var layout = new io.github.zpkdxgames.plexonpanel.identity.InstanceLayout(initialSettings.fleet().instanceKey());
-        io.github.zpkdxgames.plexonpanel.identity.InstanceLayout.requirePath(
-            Path.of(System.getProperty("user.dir", ".")).toAbsolutePath().normalize().toString(), layout.serverRoot());
-        io.github.zpkdxgames.plexonpanel.identity.InstanceLayout.requirePath(
-            dataDirectory.toAbsolutePath().normalize().toString(), layout.serverRoot().resolve("plugins/PlexonPanel"));
-        io.github.zpkdxgames.plexonpanel.identity.InstanceLayout.rejectSymlinks(dataDirectory);
-        if (!layout.minecraftUser().equals(ProcessHandle.current().info().user().orElse("")))
-          throw new java.io.IOException("PAPER_INSTANCE_ACCOUNT_MISMATCH");
-        var registry = io.github.zpkdxgames.plexonpanel.identity.NodeInstanceRegistry.readDefault();
-        var registered = registry.instance(layout.instanceKey());
-        if (!registry.nodeId().equals(initialSettings.fleet().nodeId()) || registered.minecraftPort() != getServer().getPort())
-          throw new java.io.IOException("REGISTERED_MINECRAFT_PORT_OR_NODE_MISMATCH");
-        registeredServerId = registered.serverId();
-      }
-      identityStore = new IdentityStore(dataDirectory);
       identity = identityStore.loadOrCreate(registeredServerId);
       if (initialSettings.fleet() != null) {
         fleet = initialSettings.fleet().identityFor(identity.serverId());
