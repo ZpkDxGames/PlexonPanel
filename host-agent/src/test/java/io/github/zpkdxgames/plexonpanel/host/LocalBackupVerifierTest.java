@@ -52,6 +52,20 @@ class LocalBackupVerifierTest {
     assertThrows(IOException.class, () -> LocalBackupVerifier.verify(archive, hash, 1, 100_000));
   }
 
+  @Test void interruptedHashAndVerificationCancelWithoutClearingInterrupt() throws Exception {
+    Path archive = zip("world/level.dat", "level-data");
+    String hash = BackupManager.fileHash(archive);
+    try {
+      Thread.currentThread().interrupt();
+      IOException failure = assertThrows(IOException.class, () -> BackupManager.fileHash(archive));
+      assertEquals("BACKUP_CANCELLED", failure.getMessage());
+      assertTrue(Thread.currentThread().isInterrupted());
+      failure = assertThrows(IOException.class, () -> LocalBackupVerifier.verify(archive, hash, 1, 1024));
+      assertEquals("BACKUP_CANCELLED", failure.getMessage());
+      assertTrue(Thread.currentThread().isInterrupted());
+    } finally { Thread.interrupted(); }
+  }
+
   private Path zip(String name, String content) throws Exception {
     Path archive = temporary.resolve("backup.zip");
     try (ZipOutputStream output = new ZipOutputStream(Files.newOutputStream(archive))) {

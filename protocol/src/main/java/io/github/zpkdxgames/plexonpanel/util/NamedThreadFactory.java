@@ -19,7 +19,8 @@ public final class NamedThreadFactory implements ThreadFactory {
             .name(prefix + "-" + sequence.incrementAndGet())
             .daemon(true)
             .unstarted(runnable);
-    thread.setUncaughtExceptionHandler((ignored, error) -> error.printStackTrace(System.err));
+    thread.setUncaughtExceptionHandler((ignored, error) ->
+        System.err.println("PLEXON_WORKER_FAILED " + error.getClass().getSimpleName()));
     return thread;
   }
 }

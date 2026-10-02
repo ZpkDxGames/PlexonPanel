@@ -130,4 +130,11 @@ public final class ConsoleStreamService implements AutoCloseable {
     batchExecutor.shutdownNow();
     pending.clear();
   }
+  public boolean awaitClosed(java.time.Duration timeout) {
+    long deadline = System.nanoTime() + timeout.toNanos();
+    boolean source = tailer.awaitClosed(io.github.zpkdxgames.plexonpanel.util.ExecutorDrain.remaining(deadline));
+    boolean batches = io.github.zpkdxgames.plexonpanel.util.ExecutorDrain.await(batchExecutor,
+        io.github.zpkdxgames.plexonpanel.util.ExecutorDrain.remaining(deadline));
+    return source && batches;
+  }
 }

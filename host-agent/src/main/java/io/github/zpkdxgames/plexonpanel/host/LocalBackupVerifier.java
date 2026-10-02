@@ -40,6 +40,7 @@ final class LocalBackupVerifier {
       ZipEntry entry;
       byte[] buffer = new byte[64 * 1024];
       while ((entry = zip.getNextEntry()) != null) {
+        BackupManager.checkCancelled();
         String name = entry.getName();
         validateName(name);
         if (!names.add(name) || ++entries > ENTRY_LIMIT)
@@ -47,6 +48,7 @@ final class LocalBackupVerifier {
         if (!entry.isDirectory()) {
           int count;
           while ((count = zip.read(buffer)) >= 0) {
+            BackupManager.checkCancelled();
             try {
               expanded = Math.addExact(expanded, count);
             } catch (ArithmeticException overflow) {

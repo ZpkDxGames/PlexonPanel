@@ -5,6 +5,7 @@ import io.github.zpkdxgames.plexonpanel.audit.LocalAudit;
 import io.github.zpkdxgames.plexonpanel.control.OperationFailure;
 import io.github.zpkdxgames.plexonpanel.protocol.*;
 import io.github.zpkdxgames.plexonpanel.security.DeviceRegistry;
+import io.github.zpkdxgames.plexonpanel.util.ExecutorDrain;
 import java.io.IOException;
 import java.nio.file.*;
 import java.time.*;
@@ -36,6 +37,7 @@ public final class MaintenanceManager implements AutoCloseable {
           new ArrayBlockingQueue<>(2),
           new ThreadPoolExecutor.AbortPolicy());
   private final AtomicBoolean closed = new AtomicBoolean();
+  private final AtomicBoolean commandChannelClosed = new AtomicBoolean();
   private volatile MaintenanceSettings settings;
 
   public MaintenanceManager(
@@ -1000,10 +1002,23 @@ public final class MaintenanceManager implements AutoCloseable {
 
   @Override
   public void close() {
+    beginClose();
+    if (!awaitClosed(Duration.ofSeconds(30))) System.err.println("MAINTENANCE_DRAIN_TIMEOUT");
+  }
+
+  public void beginClose() {
     if (!closed.compareAndSet(false, true)) return;
     scheduler.shutdownNow();
     worker.shutdownNow();
-    commandChannel.close();
+  }
+
+  public boolean awaitClosed(Duration timeout) {
+    long started = System.nanoTime();
+    boolean workerDrained = ExecutorDrain.await(worker, timeout);
+    boolean schedulerDrained = ExecutorDrain.await(scheduler,
+        Duration.ofNanos(Math.max(0, timeout.toNanos() - (System.nanoTime() - started))));
+    if (workerDrained && schedulerDrained && commandChannelClosed.compareAndSet(false, true)) commandChannel.close();
+    return workerDrained && schedulerDrained;
   }
 
   private record Due(String scheduleId, Instant occurrence) {}

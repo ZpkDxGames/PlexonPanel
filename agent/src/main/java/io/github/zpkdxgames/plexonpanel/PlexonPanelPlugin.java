@@ -97,10 +97,9 @@ public final class PlexonPanelPlugin extends JavaPlugin {
   public void onDisable() {
     AgentRuntime current = runtime;
     runtime = null;
-    if (current != null) {
-      current.close();
-    }
-    if (fleetLease != null) {
+    boolean drained = current == null || current.closeAndAwait();
+    if (!drained) getLogger().warning("PAPER_DRAIN_TIMEOUT_IDENTITY_LEASE_RETAINED");
+    if (drained && fleetLease != null) {
       try { fleetLease.close(); }
       catch (java.io.IOException error) { getLogger().warning("FLEET_IDENTITY_LEASE_RELEASE_FAILED"); }
       fleetLease = null;
@@ -125,7 +124,11 @@ public final class PlexonPanelPlugin extends JavaPlugin {
     AgentRuntime previous = runtime;
     runtime = null;
     if (previous != null) {
-      previous.close();
+      if (!previous.closeAndAwait()) {
+        next.close();
+        runtime = previous;
+        throw new java.io.IOException("PAPER_DRAIN_TIMEOUT_RESTART_PROCESS_REQUIRED");
+      }
     }
     try {
       next.start();

@@ -16,6 +16,7 @@ import io.github.zpkdxgames.plexonpanel.protocol.ReconnectBackoff;
 import io.github.zpkdxgames.plexonpanel.protocol.ReplayGuard;
 import io.github.zpkdxgames.plexonpanel.security.DeviceRegistry;
 import io.github.zpkdxgames.plexonpanel.util.NamedThreadFactory;
+import io.github.zpkdxgames.plexonpanel.util.ExecutorDrain;
 import java.io.IOException;
 import java.net.http.HttpClient;
 import java.net.http.WebSocket;
@@ -609,6 +610,18 @@ public final class GatewayClient implements MessageSink, AutoCloseable {
     senderExecutor.shutdownNow();
     scheduler.shutdownNow();
     httpExecutor.shutdownNow();
+    httpClient.shutdownNow();
+  }
+
+  public boolean awaitClosed(Duration timeout) {
+    long deadline = System.nanoTime() + timeout.toNanos();
+    boolean sender = ExecutorDrain.await(senderExecutor, ExecutorDrain.remaining(deadline));
+    boolean scheduled = ExecutorDrain.await(scheduler, ExecutorDrain.remaining(deadline));
+    boolean requests = ExecutorDrain.await(httpExecutor, ExecutorDrain.remaining(deadline));
+    boolean client;
+    try { client = httpClient.awaitTermination(ExecutorDrain.remaining(deadline)); }
+    catch (InterruptedException interrupted) { Thread.currentThread().interrupt(); return false; }
+    return sender && scheduled && requests && client;
   }
 
   private void rememberProtocolRejection(String reason) {
