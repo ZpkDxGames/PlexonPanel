@@ -40,30 +40,39 @@ public final class IdentityStore {
   }
 
   public synchronized DeviceIdentity loadOrCreate() throws IOException {
+    return loadOrCreate(null);
+  }
+
+  /** A new Paper identity may use its pre-registered UUID; existing identity is never rewritten. */
+  public synchronized DeviceIdentity loadOrCreate(UUID requiredServerId) throws IOException {
+    if (requiredServerId != null) FleetIdentity.parseUuid(requiredServerId.toString(), "serverId");
     validatePaths();
     if (Files.exists(metadataPath, LinkOption.NOFOLLOW_LINKS) && Files.exists(privateKeyPath, LinkOption.NOFOLLOW_LINKS)) {
-      return load();
+      DeviceIdentity existing = load();
+      if (requiredServerId != null && !requiredServerId.equals(existing.serverId()))
+        throw new IOException("REGISTERED_SERVER_IDENTITY_MISMATCH");
+      return existing;
     }
     if (Files.exists(metadataPath, LinkOption.NOFOLLOW_LINKS) != Files.exists(privateKeyPath, LinkOption.NOFOLLOW_LINKS)) {
       throw new IOException(
           "Incomplete PlexonPanel identity; both device.json and device.key are required");
     }
-    return create();
+    return create(requiredServerId);
   }
 
   public synchronized DeviceIdentity rotate() throws IOException {
     validatePaths();
     // Generate the replacement before overwriting the existing identity; do
     // not pre-delete a working key pair.
-    return create();
+    return create(null);
   }
 
-  private DeviceIdentity create() throws IOException {
+  private DeviceIdentity create(UUID requiredServerId) throws IOException {
     try {
       Files.createDirectories(identityDirectory);
       KeyPairGenerator generator = KeyPairGenerator.getInstance("Ed25519");
       KeyPair keyPair = generator.generateKeyPair();
-      DeviceIdentity identity = new DeviceIdentity(UUID.randomUUID(), clock.instant(), keyPair);
+      DeviceIdentity identity = new DeviceIdentity(requiredServerId == null ? UUID.randomUUID() : requiredServerId, clock.instant(), keyPair);
       IdentityMetadata metadata =
           new IdentityMetadata(
               identity.serverId().toString(),

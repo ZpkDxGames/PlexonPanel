@@ -18,6 +18,15 @@ public final class AtomicFiles {
   private AtomicFiles() {}
 
   public static void writeUtf8(Path destination, String content) throws IOException {
+    writeUtf8(destination, content, OWNER_ONLY);
+  }
+
+  /** Only for explicitly public authority metadata; never use for credentials or configuration. */
+  public static void writePublicUtf8(Path destination, String content) throws IOException {
+    writeUtf8(destination, content, PosixFilePermissions.fromString("rw-r--r--"));
+  }
+
+  private static void writeUtf8(Path destination, String content, Set<PosixFilePermission> permissions) throws IOException {
     Path parent = destination.toAbsolutePath().getParent();
     Files.createDirectories(parent);
     Path temporary;
@@ -27,7 +36,7 @@ public final class AtomicFiles {
               parent,
               destination.getFileName().toString(),
               ".tmp",
-              PosixFilePermissions.asFileAttribute(OWNER_ONLY));
+              PosixFilePermissions.asFileAttribute(permissions));
     } catch (UnsupportedOperationException error) {
       temporary = Files.createTempFile(parent, destination.getFileName().toString(), ".tmp");
     }

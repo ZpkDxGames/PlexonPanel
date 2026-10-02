@@ -42,6 +42,7 @@ public final class PlexonPanelPlugin extends JavaPlugin {
       ConfigMigration.migrate(this);
       Path dataDirectory = getDataFolder().toPath();
       PanelSettings initialSettings = PanelSettings.load(getConfig());
+      java.util.UUID registeredServerId = null;
       if (initialSettings.fleet() != null && !initialSettings.fleet().nodeId().equals(
           io.github.zpkdxgames.plexonpanel.identity.NodeIdentity.readDefault()))
         throw new java.io.IOException("PAPER_NODE_IDENTITY_MISMATCH");
@@ -54,9 +55,14 @@ public final class PlexonPanelPlugin extends JavaPlugin {
         io.github.zpkdxgames.plexonpanel.identity.InstanceLayout.rejectSymlinks(dataDirectory);
         if (!layout.minecraftUser().equals(ProcessHandle.current().info().user().orElse("")))
           throw new java.io.IOException("PAPER_INSTANCE_ACCOUNT_MISMATCH");
+        var registry = io.github.zpkdxgames.plexonpanel.identity.NodeInstanceRegistry.readDefault();
+        var registered = registry.instance(layout.instanceKey());
+        if (!registry.nodeId().equals(initialSettings.fleet().nodeId()) || registered.minecraftPort() != getServer().getPort())
+          throw new java.io.IOException("REGISTERED_MINECRAFT_PORT_OR_NODE_MISMATCH");
+        registeredServerId = registered.serverId();
       }
       identityStore = new IdentityStore(dataDirectory);
-      identity = identityStore.loadOrCreate();
+      identity = identityStore.loadOrCreate(registeredServerId);
       if (initialSettings.fleet() != null) {
         fleet = initialSettings.fleet().identityFor(identity.serverId());
         fleetLease = new io.github.zpkdxgames.plexonpanel.identity.FleetBindingStore(
