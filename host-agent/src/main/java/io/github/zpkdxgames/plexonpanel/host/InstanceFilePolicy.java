@@ -24,7 +24,7 @@ final class InstanceFilePolicy {
     requireDirectory(layout.stateDirectory(), layout.hostUser(), layout.hostUser(), "rwx------");
     requireDirectory(layout.backupsDirectory(), layout.hostUser(), layout.hostUser(), "rwx------");
     if (config.commandChannel().enabled()) requireOwnerOnlyFile(layout.rconSecret(), layout.hostUser());
-    if (!config.backups().rcloneRemote().isBlank()) requireFile(layout.rcloneConfig(), layout.hostUser());
+    if (config.backups().rcloneRemote() != null && !config.backups().rcloneRemote().isBlank()) requireFile(layout.rcloneConfig(), layout.hostUser());
     requireGroups(command(List.of("/usr/bin/id", "--groups", "--name", "--", layout.hostUser())), layout.hostUser());
     if (Files.isWritable(layout.serverRoot()) && ProcessHandle.current().info().user().orElse("").equals(layout.hostUser()))
       throw new IOException("HOST_SERVER_WRITE_AUTHORITY_DENIED");
