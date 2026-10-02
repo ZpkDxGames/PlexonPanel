@@ -23,6 +23,15 @@ public final class HostMain {
   private HostMain() {}
 
   public static void main(String[] args) throws Exception {
+    if (args.length == 1 && args[0].equals("--init-node")) {
+      if (!System.getProperty("os.name").equals("Linux")
+          || !ProcessHandle.current().info().user().orElse("").equals("root"))
+        throw new SecurityException("Node provisioning requires the local Linux administrator");
+      UUID nodeId = NodeIdentity.initialize(NodeIdentity.DEFAULT_PATH);
+      if (!nodeId.equals(NodeIdentity.readDefault())) throw new SecurityException("NODE_IDENTITY_MISMATCH");
+      System.out.println("Initialized public node identity: " + nodeId);
+      return;
+    }
     if (args.length == 2 && args[0].equals("--init")) {
       DeviceIdentity identity = new IdentityStore(Path.of(args[1])).loadOrCreate();
       System.out.println("Host public key: " + identity.publicKeyBase64());
@@ -55,6 +64,15 @@ public final class HostMain {
         identity =
             new DeviceIdentity(
                 UUID.fromString(config.serverId()), stored.createdAt(), stored.keyPair());
+
+    FleetBindingStore.Lease fleetLease = null;
+    if (config.fleetIdentity() != null) {
+      if (!config.fleetIdentity().nodeId().equals(NodeIdentity.readDefault()))
+        throw new SecurityException("HOST_NODE_IDENTITY_MISMATCH");
+      fleetLease = new FleetBindingStore(data, Path.of(config.serverRoot()))
+          .claim(config.fleetIdentity(), identity.fingerprint());
+    }
+    final FleetBindingStore.Lease activeFleetLease = fleetLease;
 
     Path legacyAccessRegistry = Path.of(config.accessRegistry()).toAbsolutePath().normalize();
     HostAuthorizationMirror authorization =
@@ -90,6 +108,7 @@ public final class HostMain {
       fullBackups.recoverRestore();
       maintenance.close();
       connection.close();
+      if (activeFleetLease != null) activeFleetLease.close();
       return;
     }
 
@@ -312,6 +331,11 @@ public final class HostMain {
           try {
             var sample = new LinkedHashMap<>(metrics.collect());
             sample.put("sourceIntervalMillis", FAST_TELEMETRY_MILLIS);
+            if (config.fleetIdentity() != null) {
+              sample.put("nodeId", config.fleetIdentity().nodeId().toString());
+              sample.put("metricScope", "NODE");
+              sample.put("processRole", "HOST");
+            }
             connection.send("telemetry.system", sample, MessagePriority.TELEMETRY);
           } catch (Exception e) {
             System.err.println("Host telemetry unavailable: " + e.getClass().getSimpleName());
@@ -376,6 +400,10 @@ public final class HostMain {
                   connection.close();
                   telemetryScheduler.shutdownNow();
                   scheduler.shutdownNow();
+                  if (activeFleetLease != null) {
+                    try { activeFleetLease.close(); }
+                    catch (java.io.IOException failure) { System.err.println("FLEET_IDENTITY_LEASE_RELEASE_FAILED"); }
+                  }
                 }));
     connection.start();
     new CountDownLatch(1).await();

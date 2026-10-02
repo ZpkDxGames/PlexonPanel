@@ -242,6 +242,13 @@ public final class HostConnection implements MessageSink, AutoCloseable {
         hello.put("capabilities", config.effectiveCapabilities());
         hello.put("agentKind", "HOST");
         hello.put("hostPublicKey", "");
+        if (config.fleetIdentity() != null) {
+          var fleet = config.fleetIdentity();
+          hello.put("fleetContract", io.github.zpkdxgames.plexonpanel.identity.FleetContract.ID);
+          hello.put("nodeId", fleet.nodeId().toString());
+          hello.put("instanceKey", fleet.instanceKey());
+          hello.put("serverName", fleet.serverName());
+        }
         if (!send("agent.hello", hello, MessagePriority.CRITICAL))
           disconnect(ws, "Failed to queue Host hello");
       }

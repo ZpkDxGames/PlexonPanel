@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -30,6 +31,33 @@ class IdentityStoreTest {
     assertNotEquals(initial.serverId(), rotated.serverId());
     assertNotEquals(initial.publicKeyBase64(), rotated.publicKeyBase64());
     assertTrue(Files.isRegularFile(temporaryDirectory.resolve("identity/device.key")));
+  }
+
+  @Test
+  void mixedKeyStateAfterInterruptedPublicationIsRejectedWithoutRewritingIt() throws Exception {
+    var first = new IdentityStore(temporaryDirectory).loadOrCreate();
+    Path other = temporaryDirectory.resolve("other");
+    new IdentityStore(other).loadOrCreate();
+    Path key = temporaryDirectory.resolve("identity/device.key");
+    Files.writeString(key, Files.readString(other.resolve("identity/device.key")));
+    String mixed = Files.readString(key);
+    assertThrows(java.io.IOException.class, () -> new IdentityStore(temporaryDirectory).loadOrCreate());
+    assertEquals(mixed, Files.readString(key));
+    assertTrue(Files.readString(temporaryDirectory.resolve("identity/device.json")).contains(first.serverId().toString()));
+  }
+
+  @Test
+  void rejectsSymlinkedPrivateStateAndDoesNotEchoMalformedKeyContents() throws Exception {
+    new IdentityStore(temporaryDirectory).loadOrCreate();
+    Path key = temporaryDirectory.resolve("identity/device.key");
+    Files.writeString(key, "invalid-private-key-input");
+    var failure = assertThrows(java.io.IOException.class, () -> new IdentityStore(temporaryDirectory).loadOrCreate());
+    assertFalse(failure.toString().contains("invalid-private-key-input"));
+    assertEquals(null, failure.getCause());
+    Files.delete(key);
+    Files.createSymbolicLink(key, temporaryDirectory.resolve("outside"));
+    assertThrows(java.io.IOException.class, () -> new IdentityStore(temporaryDirectory).loadOrCreate());
+    assertTrue(Files.isSymbolicLink(key));
   }
 
   @Test

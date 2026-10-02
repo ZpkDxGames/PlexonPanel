@@ -7,6 +7,7 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.LinkOption;
 import java.nio.file.attribute.PosixFilePermission;
 import java.security.KeyPair;
 import java.security.KeyPairGenerator;
@@ -39,10 +40,11 @@ public final class IdentityStore {
   }
 
   public synchronized DeviceIdentity loadOrCreate() throws IOException {
-    if (Files.exists(metadataPath) && Files.exists(privateKeyPath)) {
+    validatePaths();
+    if (Files.exists(metadataPath, LinkOption.NOFOLLOW_LINKS) && Files.exists(privateKeyPath, LinkOption.NOFOLLOW_LINKS)) {
       return load();
     }
-    if (Files.exists(metadataPath) != Files.exists(privateKeyPath)) {
+    if (Files.exists(metadataPath, LinkOption.NOFOLLOW_LINKS) != Files.exists(privateKeyPath, LinkOption.NOFOLLOW_LINKS)) {
       throw new IOException(
           "Incomplete PlexonPanel identity; both device.json and device.key are required");
     }
@@ -50,6 +52,7 @@ public final class IdentityStore {
   }
 
   public synchronized DeviceIdentity rotate() throws IOException {
+    validatePaths();
     // Generate the replacement before overwriting the existing identity; do
     // not pre-delete a working key pair.
     return create();
@@ -95,25 +98,42 @@ public final class IdentityStore {
           KeyCodec.decodePrivate(Files.readString(privateKeyPath, StandardCharsets.UTF_8));
       DeviceIdentity identity =
           new DeviceIdentity(
-              UUID.fromString(metadata.serverId()),
+              FleetIdentity.parseUuid(metadata.serverId(), "serverId"),
               Instant.parse(metadata.createdAt()),
               new KeyPair(publicKey, privateKey));
       if (!identity.fingerprint().equals(metadata.fingerprint())) {
         throw new IOException("PlexonPanel identity fingerprint mismatch");
       }
+      var probe = "plexonpanel-private-key-consistency".getBytes(StandardCharsets.UTF_8);
+      var verifier = java.security.Signature.getInstance("Ed25519");
+      verifier.initVerify(publicKey);
+      verifier.update(probe);
+      if (!verifier.verify(Base64.getUrlDecoder().decode(identity.signBase64Url(probe))))
+        throw new IOException("PlexonPanel identity key pair mismatch");
       restrictPrivateKeyPermissions();
       return identity;
     } catch (IOException error) {
       throw error;
     } catch (Exception error) {
-      throw new IOException("Unable to load PlexonPanel identity", error);
+      // Parser/key exceptions may contain supplied private values. Keep diagnostics value-free.
+      throw new IOException("Unable to load PlexonPanel identity");
     }
   }
 
-  private void restrictPrivateKeyPermissions() {
+  private void validatePaths() throws IOException {
+    for (Path path = identityDirectory.toAbsolutePath(); path != null; path = path.getParent())
+      if (Files.isSymbolicLink(path)) throw new IOException("Identity directory may not be a symlink");
+    for (Path file : java.util.List.of(metadataPath, privateKeyPath))
+      if (Files.exists(file, LinkOption.NOFOLLOW_LINKS)
+          && (!Files.isRegularFile(file, LinkOption.NOFOLLOW_LINKS) || Files.isSymbolicLink(file)
+              || Files.size(file) > 8192))
+        throw new IOException("Invalid identity state file");
+  }
+
+  private void restrictPrivateKeyPermissions() throws IOException {
     try {
       Files.setPosixFilePermissions(privateKeyPath, OWNER_ONLY);
-    } catch (UnsupportedOperationException | IOException ignored) {
+    } catch (UnsupportedOperationException ignored) {
       // Windows and some hosted filesystems do not support POSIX permissions.
     }
   }

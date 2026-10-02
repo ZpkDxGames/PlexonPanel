@@ -14,9 +14,21 @@ public record PanelSettings(
     Console console,
     Chat chat,
     RemoteActions remoteActions,
-    Audit audit
+    Audit audit,
+    FleetSettings fleet
 ) {
     public static final int CURRENT_SCHEMA_VERSION = 4;
+
+    public PanelSettings(Gateway gateway, Telemetry telemetry, PlayerHistory playerHistory,
+        Console console, Chat chat, RemoteActions remoteActions, Audit audit) {
+        this(gateway, telemetry, playerHistory, console, chat, remoteActions, audit, null);
+    }
+
+    public record FleetSettings(java.util.UUID nodeId, String instanceKey, String serverName) {
+        public io.github.zpkdxgames.plexonpanel.identity.FleetIdentity identityFor(java.util.UUID serverId) {
+            return new io.github.zpkdxgames.plexonpanel.identity.FleetIdentity(serverId, nodeId, instanceKey, serverName);
+        }
+    }
 
     public static PanelSettings load(FileConfiguration config) {
         Objects.requireNonNull(config, "config");
@@ -128,7 +140,15 @@ public record PanelSettings(
             bounded(config.getInt("audit.retention-days", 30), 1, 3650, "audit.retention-days")
         );
 
-        return new PanelSettings(gateway, telemetry, playerHistory, console, chat, remoteActions, audit);
+        FleetSettings fleet = null;
+        if (config.get("fleet", null) != null) {
+            fleet = new FleetSettings(
+                io.github.zpkdxgames.plexonpanel.identity.FleetIdentity.parseUuid(config.getString("fleet.node-id", ""), "nodeId"),
+                config.getString("fleet.instance-key", ""), config.getString("fleet.server-name", ""));
+            // Validate presentation/key fields before activating any runtime or writing identity state.
+            fleet.identityFor(java.util.UUID.fromString("00000000-0000-4000-8000-000000000001"));
+        }
+        return new PanelSettings(gateway, telemetry, playerHistory, console, chat, remoteActions, audit, fleet);
     }
 
     private static URI validateGatewayUri(String value) {
