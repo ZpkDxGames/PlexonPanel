@@ -34,14 +34,24 @@ public final class HostMain {
   }
 
   static void run(String[] args) throws Exception {
+    if (args.length == 1 && args[0].equals("--validate-node")) {
+      if (!System.getProperty("os.name").equals("Linux") || !ProcessHandle.current().info().user().orElse("").equals("root"))
+        throw new SecurityException("LOCAL_ADMINISTRATOR_REQUIRED");
+      var registry = NodeInstanceRegistry.readDefault();
+      var entries = InstanceConfigurationAudit.validateNode(registry);
+      System.out.println(new com.google.gson.Gson().toJson(Map.of("nodeId", registry.nodeId().toString(), "instances", entries, "configurationValidated", true)));
+      return;
+    }
     if (args.length == 2 && args[0].equals("--validate-fleet")) {
       var layout = new InstanceLayout(args[1]);
       HostConfig config = HostConfig.load(layout.hostConfig());
       if (HostConfigMigration.schemaVersion(layout.hostConfig()) != 5) throw new IllegalArgumentException("FLEET_SCHEMA_REQUIRED");
       if (!layout.instanceKey().equals(config.fleet().instanceKey())) throw new IllegalArgumentException("INSTANCE_KEY_MISMATCH");
+      InstanceFilePolicy.validate(config, layout.hostConfig());
       var entry = NodeInstanceRegistry.readDefault().require(config.fleetIdentity());
       Integer port = config.commandChannel().enabled() ? config.commandChannel().port() : null;
       if (!Objects.equals(port, entry.rconPort())) throw new IllegalArgumentException("REGISTERED_RCON_PORT_MISMATCH");
+      InstanceConfigurationAudit.validate(config, entry);
       System.out.println(new com.google.gson.Gson().toJson(entry));
       return;
     }
@@ -55,6 +65,9 @@ public final class HostMain {
       int minecraftPort;
       try { minecraftPort = Integer.parseInt(args[2]); }
       catch (NumberFormatException invalid) { throw new IllegalArgumentException("REGISTRY_PORT_INVALID"); }
+      InstanceFilePolicy.validate(config, layout.hostConfig());
+      InstanceConfigurationAudit.validate(config, new NodeInstanceRegistry.Entry(config.fleetIdentity().serverId(), layout.instanceKey(), minecraftPort,
+          config.commandChannel().enabled() ? config.commandChannel().port() : null));
       var entry = NodeInstanceRegistry.registerDefault(config.fleetIdentity(), minecraftPort,
           config.commandChannel().enabled() ? config.commandChannel().port() : null);
       System.out.println(new com.google.gson.Gson().toJson(entry));
@@ -116,7 +129,9 @@ public final class HostMain {
         throw new SecurityException("HOST_INSTANCE_ACCOUNT_MISMATCH");
       for (Path path : List.of(layout.serverRoot(), layout.stateDirectory(), layout.backupsDirectory(), layout.rconSecret(), layout.rcloneConfig()))
         InstanceLayout.rejectSymlinks(path);
+      InstanceFilePolicy.validate(config, configPath);
       var registered = NodeInstanceRegistry.readDefault().require(config.fleetIdentity());
+      InstanceConfigurationAudit.validate(config, registered);
       if (!Objects.equals(registered.rconPort(), config.commandChannel().enabled() ? config.commandChannel().port() : null))
         throw new SecurityException("REGISTERED_RCON_PORT_MISMATCH");
     }
