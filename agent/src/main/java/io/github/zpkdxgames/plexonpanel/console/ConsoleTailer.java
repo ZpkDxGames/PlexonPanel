@@ -189,4 +189,7 @@ public final class ConsoleTailer implements AutoCloseable {
   public void close() {
     executor.shutdownNow();
   }
+  public boolean awaitClosed(java.time.Duration timeout) {
+    return io.github.zpkdxgames.plexonpanel.util.ExecutorDrain.await(executor, timeout);
+  }
 }

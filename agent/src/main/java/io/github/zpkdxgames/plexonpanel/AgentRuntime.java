@@ -14,6 +14,8 @@ import io.github.zpkdxgames.plexonpanel.security.DeviceRegistry;
 import io.github.zpkdxgames.plexonpanel.telemetry.TelemetryService;
 import io.github.zpkdxgames.plexonpanel.transport.GatewayClient;
 import java.nio.file.Path;
+import java.time.Duration;
+import io.github.zpkdxgames.plexonpanel.util.ExecutorDrain;
 import java.util.concurrent.atomic.AtomicBoolean;
 import org.bukkit.plugin.java.JavaPlugin;
 
@@ -29,6 +31,7 @@ public final class AgentRuntime implements AutoCloseable {
   private final DeviceRegistry devices;
   private final AtomicBoolean started = new AtomicBoolean();
   private final AtomicBoolean closed = new AtomicBoolean();
+  private volatile boolean drained;
 
   public AgentRuntime(
       JavaPlugin plugin,
@@ -140,12 +143,24 @@ public final class AgentRuntime implements AutoCloseable {
 
   @Override
   public void close() {
-    if (!closed.compareAndSet(false, true)) return;
-    actions.close();
+    if (!closeAndAwait()) System.err.println("PAPER_DRAIN_TIMEOUT_IDENTITY_LEASE_RETAINED");
+  }
+
+  public boolean closeAndAwait() {
+    if (!closed.compareAndSet(false, true)) return drained;
+    long deadline = System.nanoTime() + Duration.ofSeconds(35).toNanos();
+    actions.beginClose();
     telemetry.close();
     presence.close();
     gateway.close();
     console.close();
     chat.close();
+    boolean controls = actions.awaitClosed(ExecutorDrain.remaining(deadline));
+    boolean samples = telemetry.awaitClosed(ExecutorDrain.remaining(deadline));
+    boolean transport = gateway.awaitClosed(ExecutorDrain.remaining(deadline));
+    boolean logs = console.awaitClosed(ExecutorDrain.remaining(deadline));
+    boolean history = presence.awaitClosed(ExecutorDrain.remaining(deadline));
+    drained = controls && samples && transport && logs && history;
+    return drained;
   }
 }

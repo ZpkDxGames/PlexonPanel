@@ -16,16 +16,20 @@ public final class BackupManager {
   private BackupManager() {}
 
   public static String fileHash(Path path) throws IOException {
+    checkCancelled();
     try {
       var digest = MessageDigest.getInstance("SHA-256");
       try (var in = Files.newInputStream(path, LinkOption.NOFOLLOW_LINKS)) {
         byte[] buffer = new byte[65_536];
         int n;
-        while ((n = in.read(buffer)) >= 0) digest.update(buffer, 0, n);
+        while ((n = in.read(buffer)) >= 0) { checkCancelled(); digest.update(buffer, 0, n); }
       }
       return HexFormat.of().formatHex(digest.digest());
     } catch (NoSuchAlgorithmException e) {
       throw new IllegalStateException(e);
     }
+  }
+  static void checkCancelled() throws IOException {
+    if (Thread.currentThread().isInterrupted()) throw new IOException("BACKUP_CANCELLED");
   }
 }

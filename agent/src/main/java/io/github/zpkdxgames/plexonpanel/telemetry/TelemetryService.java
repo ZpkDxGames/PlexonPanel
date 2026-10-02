@@ -9,8 +9,10 @@ import io.github.zpkdxgames.plexonpanel.protocol.MessagePriority;
 import io.github.zpkdxgames.plexonpanel.protocol.MessageSink;
 import io.github.zpkdxgames.plexonpanel.protocol.SnapshotBatches;
 import io.github.zpkdxgames.plexonpanel.util.NamedThreadFactory;
+import io.github.zpkdxgames.plexonpanel.util.ExecutorDrain;
 import java.nio.file.Path;
 import java.time.Instant;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -609,5 +611,13 @@ public final class TelemetryService implements Listener, AutoCloseable {
     telemetryWorker.shutdownNow();
     eventWorker.shutdownNow();
     systemExecutor.shutdownNow();
+  }
+
+  public boolean awaitClosed(Duration timeout) {
+    long deadline = System.nanoTime() + timeout.toNanos();
+    boolean telemetry = ExecutorDrain.await(telemetryWorker, ExecutorDrain.remaining(deadline));
+    boolean events = ExecutorDrain.await(eventWorker, ExecutorDrain.remaining(deadline));
+    boolean system = ExecutorDrain.await(systemExecutor, ExecutorDrain.remaining(deadline));
+    return telemetry && events && system;
   }
 }

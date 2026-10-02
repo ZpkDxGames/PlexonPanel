@@ -437,5 +437,8 @@ public final class PlayerPresenceService implements AutoCloseable {
     }
     live.clear();
   }
+  public boolean awaitClosed(java.time.Duration timeout) {
+    return io.github.zpkdxgames.plexonpanel.util.ExecutorDrain.await(worker, timeout);
+  }
 
 }

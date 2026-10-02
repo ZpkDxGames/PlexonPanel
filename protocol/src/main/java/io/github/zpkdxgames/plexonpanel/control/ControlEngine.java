@@ -8,10 +8,13 @@ import io.github.zpkdxgames.plexonpanel.files.*;
 import io.github.zpkdxgames.plexonpanel.protocol.*;
 import io.github.zpkdxgames.plexonpanel.security.*;
 import io.github.zpkdxgames.plexonpanel.util.NamedThreadFactory;
+import io.github.zpkdxgames.plexonpanel.util.ExecutorDrain;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
+import java.time.Duration;
 import java.util.*;
 import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.*;
 
 public final class ControlEngine implements AutoCloseable {
@@ -30,6 +33,7 @@ public final class ControlEngine implements AutoCloseable {
   private final BooleanSupplier authenticated;
   private final String serverId;
   private final RequestGate gate = new RequestGate();
+  private final AtomicBoolean closing = new AtomicBoolean();
   private final ThreadPoolExecutor worker =
       new ThreadPoolExecutor(
           1,
@@ -64,7 +68,7 @@ public final class ControlEngine implements AutoCloseable {
   }
 
   public void accept(DecodedMessage message) {
-    if (!message.envelope().type().equals("action.request") || !authenticated.getAsBoolean())
+    if (closing.get() || !message.envelope().type().equals("action.request") || !authenticated.getAsBoolean())
       return;
     JsonObject body = message.body().deepCopy();
     try {
@@ -369,7 +373,17 @@ public final class ControlEngine implements AutoCloseable {
   }
 
   public void close() {
-    worker.shutdownNow();
-    transfers.clear();
+    beginClose();
+    if (!awaitClosed(Duration.ofSeconds(30))) System.err.println("CONTROL_DRAIN_TIMEOUT");
+  }
+
+  public void beginClose() {
+    if (closing.compareAndSet(false, true)) worker.shutdownNow();
+  }
+
+  public boolean awaitClosed(Duration timeout) {
+    boolean drained = ExecutorDrain.await(worker, timeout);
+    if (drained) transfers.clear();
+    return drained;
   }
 }

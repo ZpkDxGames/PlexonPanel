@@ -9,10 +9,12 @@ import io.github.zpkdxgames.plexonpanel.console.ConsoleRedactor;
 import io.github.zpkdxgames.plexonpanel.protocol.MessagePriority;
 import io.github.zpkdxgames.plexonpanel.protocol.SnapshotBatches;
 import io.github.zpkdxgames.plexonpanel.util.NamedThreadFactory;
+import io.github.zpkdxgames.plexonpanel.util.ExecutorDrain;
 import java.io.BufferedReader;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.time.Instant;
+import java.time.Duration;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -394,7 +396,7 @@ public final class HostConsoleStreamService implements AutoCloseable {
 
   @Override
   public void close() {
-    if (!running.compareAndSet(true, false)) return;
+    running.set(false);
     healthy = false;
     sourceState = "STOPPED";
     Process current = process;
@@ -403,5 +405,12 @@ public final class HostConsoleStreamService implements AutoCloseable {
     batchExecutor.shutdownNow();
     persistIfDue(true);
     pending.clear();
+  }
+
+  boolean awaitClosed(Duration timeout) {
+    long deadline = System.nanoTime() + timeout.toNanos();
+    boolean source = ExecutorDrain.await(sourceExecutor, ExecutorDrain.remaining(deadline));
+    boolean batches = ExecutorDrain.await(batchExecutor, ExecutorDrain.remaining(deadline));
+    return source && batches;
   }
 }

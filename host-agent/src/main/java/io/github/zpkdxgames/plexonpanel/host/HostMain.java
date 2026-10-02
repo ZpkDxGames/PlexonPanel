@@ -9,6 +9,7 @@ import io.github.zpkdxgames.plexonpanel.identity.*;
 import io.github.zpkdxgames.plexonpanel.protocol.*;
 import io.github.zpkdxgames.plexonpanel.security.*;
 import io.github.zpkdxgames.plexonpanel.telemetry.SystemMetrics;
+import io.github.zpkdxgames.plexonpanel.util.ExecutorDrain;
 import java.nio.file.*;
 import java.time.*;
 import java.util.*;
@@ -395,19 +396,31 @@ public final class HostMain {
         .addShutdownHook(
             new Thread(
                 () -> {
-                  maintenance.close();
-                  engine.close();
-                  transfers.close();
-                  connection.close();
+                  long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(45);
                   telemetryScheduler.shutdownNow();
                   scheduler.shutdownNow();
-                  if (activeFleetLease != null) {
+                  engine.beginClose();
+                  maintenance.beginClose();
+                  boolean controlDrained = engine.awaitClosed(remaining(deadline));
+                  boolean maintenanceDrained = maintenance.awaitClosed(remaining(deadline));
+                  boolean telemetryDrained = ExecutorDrain.await(telemetryScheduler, remaining(deadline));
+                  boolean schedulerDrained = ExecutorDrain.await(scheduler, remaining(deadline));
+                  transfers.close();
+                  connection.close();
+                  boolean connectionDrained = connection.awaitClosed(remaining(deadline));
+                  boolean drained = controlDrained && maintenanceDrained && telemetryDrained && schedulerDrained && connectionDrained;
+                  if (!drained) System.err.println("HOST_DRAIN_TIMEOUT_IDENTITY_LEASE_RETAINED");
+                  if (drained && activeFleetLease != null) {
                     try { activeFleetLease.close(); }
                     catch (java.io.IOException failure) { System.err.println("FLEET_IDENTITY_LEASE_RELEASE_FAILED"); }
                   }
                 }));
     connection.start();
     new CountDownLatch(1).await();
+  }
+
+  private static Duration remaining(long deadline) {
+    return Duration.ofNanos(Math.max(0, deadline - System.nanoTime()));
   }
 
   private static void waitStopped(

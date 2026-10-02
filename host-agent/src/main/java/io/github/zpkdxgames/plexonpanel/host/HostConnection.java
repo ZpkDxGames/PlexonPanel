@@ -3,6 +3,7 @@ package io.github.zpkdxgames.plexonpanel.host;
 import io.github.zpkdxgames.plexonpanel.identity.*;
 import io.github.zpkdxgames.plexonpanel.protocol.*;
 import io.github.zpkdxgames.plexonpanel.util.NamedThreadFactory;
+import io.github.zpkdxgames.plexonpanel.util.ExecutorDrain;
 import java.net.URI;
 import java.net.http.*;
 import java.nio.ByteBuffer;
@@ -33,6 +34,7 @@ public final class HostConnection implements MessageSink, AutoCloseable {
 
   private final ArrayBlockingQueue<Packet> queue = new ArrayBlockingQueue<>(128);
   private final AtomicBoolean running = new AtomicBoolean(), connecting = new AtomicBoolean();
+  private final AtomicBoolean closed = new AtomicBoolean();
   private final HttpClient http =
       HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
   private volatile long nextAttempt;
@@ -78,6 +80,7 @@ public final class HostConnection implements MessageSink, AutoCloseable {
   }
 
   public void start() {
+    if (closed.get()) throw new IllegalStateException("HOST_CONNECTION_CLOSED");
     if (!running.compareAndSet(false, true)) return;
     console.start();
     sender =
@@ -359,11 +362,24 @@ public final class HostConnection implements MessageSink, AutoCloseable {
   }
 
   public void close() {
-    if (!running.compareAndSet(true, false)) return;
+    if (!closed.compareAndSet(false, true)) return;
+    running.set(false);
     console.close();
     disconnect(null, "");
     if (sender != null) sender.interrupt();
     scheduler.shutdownNow();
     http.shutdownNow();
+  }
+
+  public boolean awaitClosed(Duration timeout) {
+    long deadline = System.nanoTime() + timeout.toNanos();
+    boolean journal = console.awaitClosed(ExecutorDrain.remaining(deadline));
+    boolean link = ExecutorDrain.await(scheduler, ExecutorDrain.remaining(deadline));
+    boolean client;
+    try {
+      if (sender != null) TimeUnit.NANOSECONDS.timedJoin(sender, ExecutorDrain.remaining(deadline).toNanos());
+      client = http.awaitTermination(ExecutorDrain.remaining(deadline));
+    } catch (InterruptedException interrupted) { Thread.currentThread().interrupt(); return false; }
+    return journal && link && client && (sender == null || !sender.isAlive());
   }
 }

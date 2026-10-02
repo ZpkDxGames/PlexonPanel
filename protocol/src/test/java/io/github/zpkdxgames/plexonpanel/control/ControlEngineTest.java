@@ -145,6 +145,33 @@ class ControlEngineTest {
     }
   }
 
+  @Test void shutdownInterruptsActiveWorkDropsQueuedActionsAndRejectsNewWork() throws Exception {
+    String server = UUID.randomUUID().toString();
+    var devices = new DeviceRegistry(root.resolve("shutdown-access.json"), server);
+    String pair = UUID.randomUUID().toString();
+    devices.begin(pair, "Owner", Scopes.ALL, Instant.now().plusSeconds(60), 1);
+    var device = devices.consume(pair, UUID.randomUUID().toString(), "Shutdown test");
+    var entered = new CountDownLatch(1);
+    var exited = new CountDownLatch(1);
+    var calls = new AtomicInteger();
+    var engine = new ControlEngine(devices, Map.of("console.execute.allowed", true),
+        new LocalAudit(root.resolve("shutdown-audit"), 30), null, (action, parameters, actor) -> {
+          calls.incrementAndGet(); entered.countDown();
+          try { Thread.sleep(60_000); return Map.of(); }
+          finally { exited.countDown(); }
+        }, (type, body, priority) -> true, () -> true, server);
+    try {
+      engine.accept(request(server, device, devices.snapshot().generation(), UUID.randomUUID().toString(), "console.execute", new JsonObject()));
+      assertTrue(entered.await(2, TimeUnit.SECONDS));
+      engine.accept(request(server, device, devices.snapshot().generation(), UUID.randomUUID().toString(), "console.execute", new JsonObject()));
+      engine.beginClose();
+      engine.accept(request(server, device, devices.snapshot().generation(), UUID.randomUUID().toString(), "console.execute", new JsonObject()));
+      assertTrue(engine.awaitClosed(Duration.ofSeconds(2)));
+      assertEquals(0, exited.getCount());
+      assertEquals(1, calls.get());
+    } finally { engine.close(); }
+  }
+
   static DecodedMessage request(
       String server,
       DeviceRegistry.Device d,
