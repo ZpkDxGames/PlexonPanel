@@ -9,6 +9,10 @@ import java.util.function.LongPredicate;
 
 public final class SystemdService {
   private final String service;
+  private final CommandRunner runner;
+
+  @FunctionalInterface
+  interface CommandRunner { String run(List<String> arguments, int timeoutSeconds) throws Exception; }
 
   private static final class CommandFailure extends IOException {
     final int exitCode;
@@ -21,15 +25,18 @@ public final class SystemdService {
     }
   }
 
-  public SystemdService(String service) {
+  public SystemdService(String service) { this(service, SystemdService::run); }
+
+  SystemdService(String service, CommandRunner runner) {
     if (!service.matches("[A-Za-z0-9][A-Za-z0-9_.@-]{0,90}\\.service"))
       throw new IllegalArgumentException("Invalid service");
     this.service = service;
+    this.runner = Objects.requireNonNull(runner);
   }
 
   public Map<String, Object> status() throws Exception {
     String output =
-        run(
+        runner.run(
             List.of(
                 "/usr/bin/systemctl",
                 "show",
@@ -88,7 +95,7 @@ public final class SystemdService {
     if (!Set.of("start", "stop", "restart").contains(action))
       throw new SecurityException("UNKNOWN_ACTION");
     try {
-      run(List.of("/usr/bin/systemctl", action, "--no-ask-password", service), 180);
+      runner.run(List.of("/usr/bin/systemctl", action, "--no-ask-password", service), 180);
     } catch (CommandFailure failure) {
       String output = failure.output.toLowerCase(Locale.ROOT);
       if (output.contains("access denied")

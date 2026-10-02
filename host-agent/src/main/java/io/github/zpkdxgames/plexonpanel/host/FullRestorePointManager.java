@@ -53,6 +53,7 @@ public final class FullRestorePointManager {
   private final BooleanSupplier paperConnected;
   private final ReentrantLock operationLock;
   private final RcloneBackupProvider provider;
+  private final NodeBackupCoordinator nodeBackups;
   private final Consumer<Map<String, Object>> progress;
   private final Map<String, RestoreGrant> restoreGrants = new HashMap<>();
   private volatile long progressAt;
@@ -64,7 +65,16 @@ public final class FullRestorePointManager {
       ReentrantLock operationLock,
       Consumer<Map<String, Object>> progress)
       throws IOException {
+    this(config, service, paperConnected, operationLock, progress,
+        config.fleetIdentity() == null ? null : NodeBackupCoordinator.forNode(config.fleetIdentity().nodeId()));
+  }
+
+  FullRestorePointManager(
+      HostConfig config, SystemdService service, BooleanSupplier paperConnected,
+      ReentrantLock operationLock, Consumer<Map<String, Object>> progress,
+      NodeBackupCoordinator nodeBackups) throws IOException {
     this.config = Objects.requireNonNull(config);
+    this.nodeBackups = nodeBackups;
     this.root = Path.of(config.serverRoot()).toRealPath();
     this.base = Path.of(config.backups().directory()).toAbsolutePath().normalize();
     this.includes = List.copyOf(config.backups().include());
@@ -84,6 +94,16 @@ public final class FullRestorePointManager {
     for (Path path : List.of(base, restorePoints, metadataDirectory, staging))
       if (Files.isSymbolicLink(path)) throw new IOException("Backup storage may not be a symlink");
     PartialBackupRecovery.clean(staging);
+  }
+
+  NodeBackupCoordinator.Lease acquireNodeBackupLease(Runnable queued) throws IOException, InterruptedException {
+    return nodeBackups == null ? null : nodeBackups.acquire(java.time.Duration.ofHours(1), queued);
+  }
+
+  public Map<String, Object> nodeBackupStatus() {
+    return Map.of("enabled", nodeBackups != null,
+        "localLeaseActive", nodeBackups != null && nodeBackups.active(),
+        "waiting", nodeBackups != null && nodeBackups.queued());
   }
 
   public List<Metadata> list() throws IOException {
@@ -133,7 +153,7 @@ public final class FullRestorePointManager {
       boolean uploadOffsite)
       throws Exception {
     if (!operationLock.tryLock()) throw new SecurityException("BUSY");
-    try {
+    try (var nodeLease = acquireNodeBackupLease(() -> emit(jobId, "", "WAITING_FOR_NODE", 0, 0, 0))) {
       return createLocked(jobId, initiatedBy, automatic, emergency, settings, uploadOffsite);
     } finally {
       operationLock.unlock();
@@ -148,6 +168,8 @@ public final class FullRestorePointManager {
       MaintenanceSettings.FullRestorePoint settings,
       boolean uploadOffsite)
       throws Exception {
+    if (nodeBackups != null && !nodeBackups.heldByCurrentThread())
+      throw new IllegalStateException("NODE_BACKUP_LEASE_REQUIRED");
     UUID.fromString(jobId);
     if (!service.stopped()) throw new SecurityException("SERVER_MUST_BE_STOPPED");
     long startedNanos = System.nanoTime();
@@ -316,7 +338,7 @@ public final class FullRestorePointManager {
   public Metadata retryUpload(String backupId, String jobId, MaintenanceSettings.FullRestorePoint settings)
       throws Exception {
     if (!operationLock.tryLock()) throw new SecurityException("BUSY");
-    try {
+    try (var nodeLease = acquireNodeBackupLease(() -> emit(jobId, backupId, "WAITING_FOR_NODE", 0, 0, 0))) {
       Metadata local = verify(backupId);
       if (!provider.configured()) throw new IllegalStateException("RCLONE_UNAVAILABLE");
       Path localArchive = archive(backupId);
@@ -423,7 +445,9 @@ public final class FullRestorePointManager {
         rollback = staging.resolve("rollback-" + restoreId),
         journal = metadataDirectory.resolve("restore-journal.json");
     boolean stoppedByRestore = false;
+    NodeBackupCoordinator.Lease nodeLease = null;
     try {
+      nodeLease = acquireNodeBackupLease(() -> emit(restoreId, backupId, "WAITING_FOR_NODE", 0, 0, 0));
       if (Files.exists(journal)) throw new IllegalStateException("RESTORE_RECOVERY_REQUIRED");
       if (!service.stopped() || paperConnected.getAsBoolean()) {
         service.action("stop");
@@ -498,11 +522,15 @@ public final class FullRestorePointManager {
       }
       throw failure;
     } finally {
-      if (!Files.exists(journal)) {
-        deleteTree(extract);
-        deleteTree(rollback);
+      try {
+        if (!Files.exists(journal)) {
+          deleteTree(extract);
+          deleteTree(rollback);
+        }
+      } finally {
+        try { if (nodeLease != null) nodeLease.close(); }
+        finally { operationLock.unlock(); }
       }
-      operationLock.unlock();
     }
   }
 

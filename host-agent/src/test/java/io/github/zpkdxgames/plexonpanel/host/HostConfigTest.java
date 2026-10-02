@@ -12,6 +12,41 @@ import org.junit.jupiter.api.io.TempDir;
 class HostConfigTest {
   @TempDir Path root;
 
+  @Test
+  void fleetBindsAnImmutableNodeAndExactMinecraftInstanceUnit() throws Exception {
+    JsonObject c = config();
+    JsonObject fleet = new JsonObject();
+    String node = UUID.randomUUID().toString();
+    fleet.addProperty("nodeId", node);
+    fleet.addProperty("instanceKey", "plexoncraft");
+    c.add("fleet", fleet);
+    c.addProperty("serviceName", "minecraft@plexoncraft.service");
+    assertEquals(node, load(c).fleetIdentity().nodeId().toString());
+    c.addProperty("serverName", "Renamed");
+    assertEquals(node, load(c).fleetIdentity().nodeId().toString());
+    c.addProperty("serviceName", "minecraft@server2.service");
+    assertThrows(IllegalArgumentException.class, () -> load(c));
+    c.addProperty("serviceName", "minecraft@plexoncraft.service");
+    fleet.addProperty("instanceKey", "plexoncraft;systemctl stop server2");
+    assertThrows(IllegalArgumentException.class, () -> load(c));
+    fleet.addProperty("instanceKey", "plexoncraft");
+    fleet.addProperty("unexpected", "denied");
+    assertThrows(IllegalArgumentException.class, () -> load(c));
+  }
+
+  @Test
+  void malformedFleetIdentityDoesNotEchoSuppliedValues() throws Exception {
+    JsonObject c = config();
+    JsonObject fleet = new JsonObject();
+    fleet.addProperty("nodeId", "sensitive-invalid-input");
+    fleet.addProperty("instanceKey", "plexoncraft");
+    c.add("fleet", fleet);
+    c.addProperty("serviceName", "minecraft@plexoncraft.service");
+    var failure = assertThrows(IllegalArgumentException.class, () -> load(c));
+    assertFalse(failure.toString().contains("sensitive-invalid-input"));
+    assertNull(failure.getCause());
+  }
+
   JsonObject config() throws Exception {
     var b = new JsonObject();
     b.addProperty("enabled", false);
