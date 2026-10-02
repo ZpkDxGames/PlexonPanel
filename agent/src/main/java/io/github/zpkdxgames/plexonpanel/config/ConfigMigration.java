@@ -20,12 +20,25 @@ public final class ConfigMigration {
   }
 
   static void migrate(FileConfiguration config, Path configPath) throws IOException {
+    migrate(config, configPath, AtomicFiles::writeUtf8);
+  }
+
+  @FunctionalInterface
+  interface ConfigWriter {
+    void write(Path destination, String content) throws IOException;
+  }
+
+  static void migrate(FileConfiguration config, Path configPath, ConfigWriter writer)
+      throws IOException {
     if (!Files.isRegularFile(configPath, LinkOption.NOFOLLOW_LINKS)
         || Files.isSymbolicLink(configPath)) {
       throw new IOException("config.yml must be a regular non-symlink file");
     }
 
-    int schemaVersion = schemaVersion(config.get("schema-version"));
+    // The explicit-null overload bypasses attached Bukkit defaults, even when
+    // copyDefaults is enabled. A bundled marker is not a persisted disk marker.
+    Object persistedMarker = config.get("schema-version", null);
+    int schemaVersion = schemaVersion(persistedMarker);
     if (schemaVersion < 0 || schemaVersion > PanelSettings.CURRENT_SCHEMA_VERSION) {
       throw new IllegalArgumentException(
           "Unsupported config.yml schema-version " + schemaVersion);
@@ -44,7 +57,14 @@ public final class ConfigMigration {
     }
 
     config.set("schema-version", PanelSettings.CURRENT_SCHEMA_VERSION);
-    AtomicFiles.writeUtf8(configPath, config.saveToString());
+    try {
+      writer.write(configPath, config.saveToString());
+    } catch (IOException | RuntimeException failure) {
+      // A failed publication must not make this in-memory object appear migrated
+      // on a retry. The original disk file and the first backup remain authoritative.
+      config.set("schema-version", persistedMarker);
+      throw failure;
+    }
   }
 
   private static int schemaVersion(Object raw) {
