@@ -1,0 +1,30 @@
+{
+  "contractVersion": 1,
+  "protocolVersion": 3,
+  "paperSchemaVersion": 5,
+  "hostSchemaVersion": 5,
+  "instanceKeyPattern": "^[a-z][a-z0-9-]{0,31}$",
+  "serverNameMaximumLength": 64,
+  "maximumFleetConnections": 16,
+  "nodeAuthority": "HOST",
+  "fixtures": [
+    {
+      "serverId": "20000000-0000-4000-8000-000000000001",
+      "nodeId": "10000000-0000-4000-8000-000000000001",
+      "instanceKey": "plexoncraft",
+      "serverName": "PlexonCraft"
+    },
+    {
+      "serverId": "20000000-0000-4000-8000-000000000002",
+      "nodeId": "10000000-0000-4000-8000-000000000001",
+      "instanceKey": "server2",
+      "serverName": "Second server"
+    },
+    {
+      "serverId": "20000000-0000-4000-8000-000000000003",
+      "nodeId": "10000000-0000-4000-8000-000000000002",
+      "instanceKey": "remote-server",
+      "serverName": "Remote server"
+    }
+  ]
+}
