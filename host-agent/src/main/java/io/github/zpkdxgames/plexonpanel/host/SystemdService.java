@@ -10,6 +10,7 @@ import java.util.function.LongPredicate;
 public final class SystemdService {
   private final String service;
   private final CommandRunner runner;
+  private final ServiceResourceSampler resources = new ServiceResourceSampler();
 
   @FunctionalInterface
   interface CommandRunner { String run(List<String> arguments, int timeoutSeconds) throws Exception; }
@@ -41,7 +42,7 @@ public final class SystemdService {
                 "/usr/bin/systemctl",
                 "show",
                 "--no-pager",
-                "--property=ActiveState,SubState,MainPID",
+                "--property=ActiveState,SubState,MainPID,CPUUsageNSec,MemoryCurrent",
                 service),
             10);
     Map<String, String> values = new HashMap<>();
@@ -66,7 +67,9 @@ public final class SystemdService {
         "service",
         service,
         "hostConnected",
-        true);
+        true,
+        "resources",
+        resources.sample(values, pid, System.nanoTime(), java.time.Instant.now()));
   }
 
   /**

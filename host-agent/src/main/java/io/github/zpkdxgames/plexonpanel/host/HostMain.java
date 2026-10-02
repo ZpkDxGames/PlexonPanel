@@ -346,6 +346,7 @@ public final class HostMain {
           if (!connection.authenticated()) return;
           try {
             var status = new HashMap<>(service.status());
+            if (config.fleetIdentity() != null) status.put("nodeId", config.fleetIdentity().nodeId().toString());
             status.put("paperConnected", paper.get());
             status.put("authorizationMirror", authorization.status());
             status.put(
