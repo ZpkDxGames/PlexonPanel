@@ -34,6 +34,26 @@ public final class HostMain {
   }
 
   static void run(String[] args) throws Exception {
+    if (args.length == 2 && (args[0].equals("--plan-provider-reseed") || args[0].equals("--reseed-provider"))) {
+      if (!System.getProperty("os.name").equals("Linux") || !ProcessHandle.current().info().user().orElse("").equals("root"))
+        throw new SecurityException("LOCAL_ADMINISTRATOR_REQUIRED");
+      var layout = new InstanceLayout(args[1]); HostConfig config = HostConfig.load(layout.hostConfig());
+      if (HostConfigMigration.schemaVersion(layout.hostConfig()) != 5 || !layout.instanceKey().equals(config.fleet().instanceKey()))
+        throw new SecurityException("FLEET_SCHEMA_REQUIRED");
+      InstanceFilePolicy.validate(config, layout.hostConfig()); NodeInstanceRegistry.readDefault().require(config.fleetIdentity());
+      Path provider = layout.stateDirectory().resolve("provider"); InstanceLayout.rejectSymlinks(provider);
+      if (args[0].equals("--plan-provider-reseed")) {
+        System.out.println(new com.google.gson.Gson().toJson(Map.of("serverId", config.serverId(), "instanceKey", layout.instanceKey(),
+            "providerStatePresent", Files.exists(provider, LinkOption.NOFOLLOW_LINKS), "operation", "PRESERVE_OFFLINE_PROVIDER_STATE")));
+      } else {
+        String state = String.valueOf(new SystemdService(layout.hostUnit()).status().get("state"));
+        if (!Set.of("inactive", "failed").contains(state)) throw new SecurityException("PROVIDER_RESEED_REQUIRES_INACTIVE_HOST");
+        Path archive = ProviderReseed.preserve(layout.stateDirectory(), layout.hostUser());
+        System.out.println(new com.google.gson.Gson().toJson(Map.of("serverId", config.serverId(), "instanceKey", layout.instanceKey(),
+            "preservedState", archive.toString(), "nextStep", "VALIDATE_NODE_THEN_START_PAIRED_HOST")));
+      }
+      return;
+    }
     if (args.length == 1 && args[0].equals("--validate-node")) {
       if (!System.getProperty("os.name").equals("Linux") || !ProcessHandle.current().info().user().orElse("").equals("root"))
         throw new SecurityException("LOCAL_ADMINISTRATOR_REQUIRED");
@@ -150,6 +170,7 @@ public final class HostMain {
           .claim(config.fleetIdentity(), identity.fingerprint());
     }
     final FleetBindingStore.Lease activeFleetLease = fleetLease;
+    HostConfig backupRuntimeConfig = fleetSchema ? ProviderRuntimeConfiguration.prepare(config) : config;
 
     Path legacyAccessRegistry = Path.of(config.accessRegistry()).toAbsolutePath().normalize();
     HostAuthorizationMirror authorization =
@@ -168,15 +189,15 @@ public final class HostMain {
 
     FullRestorePointManager fullBackups =
         new FullRestorePointManager(
-            config,
+            backupRuntimeConfig,
             service,
             minecraftReadiness::probeNow,
             operationLock,
             progress -> connection.send("backup.progress", progress, MessagePriority.EVENT));
-    FullBackupPreflight fullPreflight = new FullBackupPreflight(config, fullBackups);
+    FullBackupPreflight fullPreflight = new FullBackupPreflight(backupRuntimeConfig, fullBackups);
     MaintenanceManager maintenance =
         new MaintenanceManager(
-            config, service, commands, operationLock, audit, connection, fullBackups);
+            backupRuntimeConfig, service, commands, operationLock, audit, connection, fullBackups);
     BackupTransfers transfers = new BackupTransfers();
 
     if (args.length == 2) {

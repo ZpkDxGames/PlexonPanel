@@ -10,7 +10,7 @@ Schema 5 runtime and `--validate-fleet <key>` read existing authority without ch
 | Host configuration directory and launcher | root / pph-key | 0750 | Paired Host reads/traverses; Minecraft denied |
 | Host state and instance backup directory | pph-key / pph-key | 0700 | Private to that Host |
 | RCON secret | pph-key / pph-key | 0600 | Matches the existing owner-only RCON reader |
-| Immutable rclone configuration, when configured | root / pph-key | 0640 | Paired Host reads; mutable provider-state handling is dependent work |
+| Immutable rclone configuration, when configured | root / pph-key | 0640 | Paired Host reads; refreshed credentials use private Host provider state |
 
 Root-owned ancestors must not be writable by other accounts or groups. Symlinks and non-regular private files are rejected. Named ACLs may not grant Minecraft, another Host or global groups access to private files/directories. Host supplementary groups are limited to its own instance group and the fixed `plexonpanel-backup` coordination group. Global journal/admin/root and other instance groups are rejected.
 
@@ -31,4 +31,4 @@ sudo /usr/bin/java -jar /opt/plexonpanel/releases/5.0.0/plexonpanel-host-5.0.0.j
 sudo -u pph-plexoncraft /usr/bin/java -jar /opt/plexonpanel/releases/5.0.0/plexonpanel-host-5.0.0.jar --validate-fleet plexoncraft
 ```
 
-These commands describe future deployment validation. They have not run on the VPS, do not authorize destructive cleanup and do not imply a stable artifact is published. Port/password validation and private metadata/ACL/group tests execute locally; actual production file/account/service boundaries remain NOT_EXECUTED. Final service templates remain gated on the complete provisioning, provider-state and Paper migration entry-point contracts.
+These commands describe future deployment validation. They have not run on the VPS, do not authorize destructive cleanup and do not imply a stable artifact is published. Port/password validation and private metadata/ACL/group tests execute locally; actual production file/account/service boundaries remain NOT_EXECUTED. Final service templates remain gated on the complete provisioning and Paper migration activation contracts. See PROVIDER_RUNTIME_STATE.md for private refresh/reseed state.
