@@ -43,6 +43,12 @@ jobs:
       - name: Verify exact instance control authorization
         run: node scripts/test-instance-polkit.mjs
 
+      - name: Verify pinned inode read authority and actual cross-account denial
+        run: sudo env PYTHONDONTWRITEBYTECODE=1 python3 scripts/test-instance-read-authority.py --require-isolation
+
+      - name: Parse coordinated instance service templates
+        run: systemd-analyze verify host-agent/examples/fleet/*.service
+
       - uses: gradle/actions/setup-gradle@v6
 
       - name: Verify Linux runner architecture

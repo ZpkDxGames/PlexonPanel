@@ -1,0 +1,43 @@
+[Unit]
+Description=Minecraft Paper instance %i
+After=network-online.target plexonpanel-backup-read@%i.service
+Wants=network-online.target plexonpanel-backup-read@%i.service
+
+[Service]
+Type=simple
+User=mc-%i
+Group=mc-%i
+WorkingDirectory=/srv/plexonpanel/servers/%i/server
+ExecStart=/usr/bin/java @/srv/plexonpanel/servers/%i/server/jvm.args -jar /srv/plexonpanel/servers/%i/server/server.jar --nogui
+KillSignal=SIGTERM
+KillMode=mixed
+TimeoutStopSec=90s
+SuccessExitStatus=143
+Restart=on-failure
+RestartSec=10s
+UMask=0077
+CPUAccounting=true
+MemoryAccounting=true
+MemoryHigh=7G
+MemoryMax=8G
+LogNamespace=plexonpanel-%i
+StandardOutput=journal
+StandardError=journal
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectHome=true
+ProtectSystem=strict
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+CapabilityBoundingSet=
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+ReadWritePaths=/srv/plexonpanel/servers/%i/server
+InaccessiblePaths=/etc/plexonpanel/instances /var/lib/plexonpanel/instances /var/backups/plexonpanel
+
+[Install]
+WantedBy=multi-user.target

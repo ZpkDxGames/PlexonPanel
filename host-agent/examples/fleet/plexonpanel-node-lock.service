@@ -1,0 +1,24 @@
+[Unit]
+Description=PlexonPanel stable shared node backup lock
+After=local-fs.target
+Before=plexonpanel-host@.service
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+ExecStart=/usr/bin/python3 /usr/local/lib/plexonpanel/instance-read-authority.py prepare-lock
+RemainAfterExit=true
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+RestrictAddressFamilies=AF_UNIX
+IPAddressDeny=any
+CapabilityBoundingSet=CAP_CHOWN CAP_FOWNER
+ReadWritePaths=/run
+
+[Install]
+WantedBy=multi-user.target
