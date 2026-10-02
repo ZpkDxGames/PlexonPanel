@@ -81,7 +81,9 @@ public final class HostMain {
           "Legacy Host config accepted read-only; run the local --migrate-config operation before release certification.");
     long configLoadedMtime = Files.getLastModifiedTime(configPath, LinkOption.NOFOLLOW_LINKS).toMillis();
     HostConfig config = HostConfig.load(configPath);
-    if (HostConfigMigration.schemaVersion(configPath) == 5) {
+    boolean fleetSchema = HostConfigMigration.schemaVersion(configPath) == 5;
+    String journalNamespace = fleetSchema ? new InstanceLayout(config.fleet().instanceKey()).journalNamespace() : null;
+    if (fleetSchema) {
       var layout = new InstanceLayout(config.fleet().instanceKey());
       InstanceLayout.requirePath(configPath.toString(), layout.hostConfig());
       if (!layout.hostUser().equals(ProcessHandle.current().info().user().orElse("")))
@@ -112,8 +114,8 @@ public final class HostMain {
     DeviceRegistry devices = authorization.registry();
     LocalAudit audit = new LocalAudit(data.resolve("audit"), 30);
     audit.clean();
-    HostConnection connection = new HostConnection(config, identity);
-    HostConsoleHistory consoleHistory = new HostConsoleHistory(config.serviceName(), config.console());
+    HostConnection connection = new HostConnection(config, identity, journalNamespace);
+    HostConsoleHistory consoleHistory = new HostConsoleHistory(config.serviceName(), config.console(), journalNamespace);
     SystemdService service = new SystemdService(config.serviceName());
     MinecraftCommandChannel commands = new RconMinecraftCommandChannel(config.commandChannel());
     AtomicBoolean paper = new AtomicBoolean();

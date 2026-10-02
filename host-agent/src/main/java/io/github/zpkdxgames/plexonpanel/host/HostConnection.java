@@ -49,9 +49,13 @@ public final class HostConnection implements MessageSink, AutoCloseable {
   private volatile Runnable connected = () -> {};
 
   public HostConnection(HostConfig config, DeviceIdentity identity) {
+    this(config, identity, null);
+  }
+
+  HostConnection(HostConfig config, DeviceIdentity identity, String journalNamespace) {
     this.config = config;
     this.identity = identity;
-    this.console = new HostConsoleStreamService(config, this);
+    this.console = new HostConsoleStreamService(config, this, journalNamespace);
   }
 
   public void handlers(Consumer<DecodedMessage> handler, Runnable connected) {
