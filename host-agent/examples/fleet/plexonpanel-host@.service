@@ -1,0 +1,45 @@
+[Unit]
+Description=PlexonPanel 5.0 Host instance %i
+Wants=network-online.target
+Requires=plexonpanel-node-lock.service plexonpanel-backup-read@%i.service plexonpanel-journal-read@%i.service
+After=network-online.target plexonpanel-node-lock.service plexonpanel-backup-read@%i.service plexonpanel-journal-read@%i.service
+
+[Service]
+Type=simple
+User=pph-%i
+Group=pph-%i
+SupplementaryGroups=plexonpanel-backup
+WorkingDirectory=/var/lib/plexonpanel/instances/%i
+ExecStart=/usr/bin/java -Xms32m -Xmx256m -jar /srv/plexonpanel/servers/%i/host/plexonpanel-host-5.0.0.jar /etc/plexonpanel/instances/%i/host-config.json
+KillSignal=SIGTERM
+KillMode=mixed
+TimeoutStopSec=75s
+SuccessExitStatus=143
+Restart=on-failure
+RestartSec=10s
+UMask=0077
+CPUAccounting=true
+MemoryAccounting=true
+MemoryMax=512M
+LogNamespace=plexonpanel-host-%i
+StandardOutput=journal
+StandardError=journal
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectHome=true
+ProtectSystem=strict
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+CapabilityBoundingSet=
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+ReadWritePaths=/var/lib/plexonpanel/instances/%i /var/backups/plexonpanel/instances/%i /run/plexonpanel/locks
+ReadOnlyPaths=/srv/plexonpanel/servers/%i/server /etc/plexonpanel/instances/%i
+InaccessiblePaths=-/opt/plexoncraft -/opt/plexonpanel-host -/etc/plexonpanel-host -/var/lib/plexonpanel-host
+
+[Install]
+WantedBy=multi-user.target
