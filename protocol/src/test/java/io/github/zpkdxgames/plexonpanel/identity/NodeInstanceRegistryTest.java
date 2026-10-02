@@ -61,7 +61,7 @@ class NodeInstanceRegistryTest {
     assertEquals(1, NodeInstanceRegistry.read(path).instances().size());
   }
   private Process child(Path path, UUID node, String key) throws Exception {
-    String cp = java.util.stream.Stream.of(NodeInstanceRegistryTest.class, Gson.class)
+    String cp = java.util.stream.Stream.of(NodeInstanceRegistryTest.class, NodeInstanceRegistry.class, Gson.class)
         .map(c -> { try { return Path.of(c.getProtectionDomain().getCodeSource().getLocation().toURI()).toString(); }
           catch (Exception failure) { throw new RuntimeException(failure); } }).distinct().collect(java.util.stream.Collectors.joining(java.io.File.pathSeparator));
     return new ProcessBuilder(Path.of(System.getProperty("java.home"), "bin/java").toString(), "-cp", cp,
