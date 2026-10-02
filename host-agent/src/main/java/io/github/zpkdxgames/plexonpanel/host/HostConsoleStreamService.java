@@ -39,6 +39,7 @@ public final class HostConsoleStreamService implements AutoCloseable {
   private final HostConfig config;
   private final HostConfig.ConsoleConfig settings;
   private final HostConnection connection;
+  private final JournalSource source;
   private final ConsoleClassifier classifier = new ConsoleClassifier();
   private final ConsoleRedactor redactor;
   private final ConsoleStateStore stateStore;
@@ -68,7 +69,12 @@ public final class HostConsoleStreamService implements AutoCloseable {
   private volatile long lastConsoleEventAt;
 
   public HostConsoleStreamService(HostConfig config, HostConnection connection) {
+    this(config, connection, null);
+  }
+
+  HostConsoleStreamService(HostConfig config, HostConnection connection, String namespace) {
     this.config = config;
+    this.source = new JournalSource(config.serviceName(), namespace);
     this.settings = config.console();
     this.connection = connection;
     this.redactor = new ConsoleRedactor(settings.redactPatterns());
@@ -92,6 +98,18 @@ public final class HostConsoleStreamService implements AutoCloseable {
         TimeUnit.MILLISECONDS);
   }
 
+  static List<String> journalCommand(JournalSource source, HostConfig.ConsoleConfig settings, String cursor) {
+    List<String> command = new ArrayList<>();
+    command.add(settings.journalExecutable());
+    command.addAll(source.arguments());
+    command.add("--output=json");
+    command.add("--no-pager");
+    command.add("--follow");
+    if (cursor != null && !cursor.isBlank()) command.add("--after-cursor=" + cursor);
+    else command.add("--lines=" + settings.initialReplayLines());
+    return List.copyOf(command);
+  }
+
   private void sourceLoop() {
     String resumeCursor = lastCursor;
     long backoff = 1000L;
@@ -99,18 +117,7 @@ public final class HostConsoleStreamService implements AutoCloseable {
       boolean parsed = false;
       boolean cursorFailure = false;
       try {
-        List<String> command = new ArrayList<>();
-        command.add(settings.journalExecutable());
-        command.add("--unit");
-        command.add(config.serviceName());
-        command.add("--output=json");
-        command.add("--no-pager");
-        command.add("--follow");
-        if (resumeCursor != null && !resumeCursor.isBlank()) {
-          command.add("--after-cursor=" + resumeCursor);
-        } else {
-          command.add("--lines=" + settings.initialReplayLines());
-        }
+        List<String> command = journalCommand(source, settings, resumeCursor);
         Process started = new ProcessBuilder(command).redirectErrorStream(true).start();
         process = started;
         setSourceState("FOLLOWING", true);

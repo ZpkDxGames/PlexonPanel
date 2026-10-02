@@ -114,13 +114,19 @@ final class HostConsoleHistory {
       String nextCursor, int scanned, int rawBytes) {}
 
   private final String serviceName;
+  private final JournalSource source;
   private final HostConfig.ConsoleConfig settings;
   private final ConsoleClassifier classifier = new ConsoleClassifier();
   private final ConsoleRedactor redactor;
   private final Gson gson = new Gson();
 
   HostConsoleHistory(String serviceName, HostConfig.ConsoleConfig settings) {
+    this(serviceName, settings, null);
+  }
+
+  HostConsoleHistory(String serviceName, HostConfig.ConsoleConfig settings, String namespace) {
     this.serviceName = Objects.requireNonNull(serviceName, "serviceName");
+    this.source = new JournalSource(serviceName, namespace);
     this.settings = Objects.requireNonNull(settings, "settings");
     this.redactor = new ConsoleRedactor(settings.redactPatterns());
   }
@@ -215,8 +221,7 @@ final class HostConsoleHistory {
   List<String> command(Query query, int scanLines) {
     List<String> command = new ArrayList<>();
     command.add(settings.journalExecutable());
-    command.add("--unit");
-    command.add(serviceName);
+    command.addAll(source.arguments());
     command.add("--output=json");
     command.add(
         "--output-fields=MESSAGE,__CURSOR,__REALTIME_TIMESTAMP,_SYSTEMD_UNIT,_SYSTEMD_INVOCATION_ID,_PID,PRIORITY");

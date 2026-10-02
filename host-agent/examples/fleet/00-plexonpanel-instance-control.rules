@@ -1,0 +1,15 @@
+/* Root-owned rule. A Host account may control only its paired canonical unit. */
+polkit.addRule(function(action, subject) {
+    if (typeof subject.user !== "string" || subject.user.indexOf("pph-") !== 0)
+        return;
+    if (typeof action.id !== "string" || action.id.indexOf("org.freedesktop.systemd1.") !== 0)
+        return;
+    var match = /^pph-([a-z][a-z0-9-]{0,27})$/.exec(subject.user);
+    if (!match || action.id !== "org.freedesktop.systemd1.manage-units")
+        return polkit.Result.NO;
+    var verb = action.lookup("verb");
+    if (action.lookup("unit") === "minecraft@" + match[1] + ".service" &&
+        (verb === "start" || verb === "stop" || verb === "restart"))
+        return polkit.Result.YES;
+    return polkit.Result.NO;
+});

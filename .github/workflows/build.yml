@@ -36,6 +36,13 @@ jobs:
           distribution: temurin
           java-version: '25'
 
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+
+      - name: Verify exact instance control authorization
+        run: node scripts/test-instance-polkit.mjs
+
       - uses: gradle/actions/setup-gradle@v6
 
       - name: Verify Linux runner architecture
