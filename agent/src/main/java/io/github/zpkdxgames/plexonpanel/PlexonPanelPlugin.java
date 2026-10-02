@@ -21,6 +21,8 @@ import org.bukkit.plugin.java.JavaPlugin;
 public final class PlexonPanelPlugin extends JavaPlugin {
   private IdentityStore identityStore;
   private DeviceIdentity identity;
+  private io.github.zpkdxgames.plexonpanel.identity.FleetIdentity fleet;
+  private io.github.zpkdxgames.plexonpanel.identity.FleetBindingStore.Lease fleetLease;
   private PairingState pairingState;
   private Messages messages;
   private AgentRuntime runtime;
@@ -42,6 +44,15 @@ public final class PlexonPanelPlugin extends JavaPlugin {
       Path dataDirectory = getDataFolder().toPath();
       identityStore = new IdentityStore(dataDirectory);
       identity = identityStore.loadOrCreate();
+      PanelSettings initialSettings = PanelSettings.load(getConfig());
+      if (initialSettings.fleet() != null) {
+        fleet = initialSettings.fleet().identityFor(identity.serverId());
+        if (!fleet.nodeId().equals(io.github.zpkdxgames.plexonpanel.identity.NodeIdentity.readDefault()))
+          throw new java.io.IOException("PAPER_NODE_IDENTITY_MISMATCH");
+        fleetLease = new io.github.zpkdxgames.plexonpanel.identity.FleetBindingStore(
+            dataDirectory, Path.of(System.getProperty("user.dir", ".")))
+            .claim(fleet, identity.fingerprint());
+      }
       pairingState = new PairingState(dataDirectory);
       messages = new Messages(this);
       Path marker = dataDirectory.resolve("protocol-version.txt");
@@ -61,7 +72,7 @@ public final class PlexonPanelPlugin extends JavaPlugin {
       command.setExecutor(commandHandler);
       command.setTabCompleter(commandHandler);
 
-      startRuntime(PanelSettings.load(getConfig()));
+      startRuntime(initialSettings);
       registerPanelApi();
       coreBridge.markReady("Paper agent ready; protocol 3 control plane active");
       getLogger()
@@ -89,6 +100,12 @@ public final class PlexonPanelPlugin extends JavaPlugin {
     if (current != null) {
       current.close();
     }
+    if (fleetLease != null) {
+      try { fleetLease.close(); }
+      catch (java.io.IOException error) { getLogger().warning("FLEET_IDENTITY_LEASE_RELEASE_FAILED"); }
+      fleetLease = null;
+    }
+    fleet = null;
     unregisterPanelApi();
     if (coreBridge != null) {
       coreBridge.unregister();
@@ -100,6 +117,10 @@ public final class PlexonPanelPlugin extends JavaPlugin {
     ConfigMigration.migrate(this);
     reloadConfig();
     PanelSettings candidateSettings = PanelSettings.load(getConfig());
+    var candidateFleet = candidateSettings.fleet() == null ? null : candidateSettings.fleet().identityFor(identity.serverId());
+    if ((fleet == null) != (candidateFleet == null)
+        || (fleet != null && (!fleet.sameTarget(candidateFleet) || !fleet.instanceKey().equals(candidateFleet.instanceKey()))))
+      throw new java.io.IOException("FLEET_BINDING_CHANGE_REQUIRES_OFFLINE_MIGRATION");
     AgentRuntime next = createRuntime(candidateSettings, identity);
     AgentRuntime previous = runtime;
     runtime = null;
@@ -123,6 +144,7 @@ public final class PlexonPanelPlugin extends JavaPlugin {
   }
 
   public synchronized void rotateIdentity() throws Exception {
+    if (fleet != null) throw new java.io.IOException("FLEET_IDENTITY_ROTATION_REQUIRES_OFFLINE_REKEY");
     AgentRuntime previous = runtime;
     PanelSettings currentSettings = PanelSettings.load(getConfig());
     pairingState.clear();

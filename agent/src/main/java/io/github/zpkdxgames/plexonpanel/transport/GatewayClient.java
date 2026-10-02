@@ -47,6 +47,7 @@ public final class GatewayClient implements MessageSink, AutoCloseable {
   private final JavaPlugin plugin;
   private final PanelSettings.Gateway settings;
   private final DeviceIdentity identity;
+  private final io.github.zpkdxgames.plexonpanel.identity.FleetIdentity fleet;
   private final PairingState pairingState;
   private final ControlPolicy policy;
   private final DeviceRegistry devices;
@@ -100,6 +101,7 @@ public final class GatewayClient implements MessageSink, AutoCloseable {
     this.plugin = plugin;
     this.settings = panelSettings.gateway();
     this.identity = identity;
+    this.fleet = panelSettings.fleet() == null ? null : panelSettings.fleet().identityFor(identity.serverId());
     this.pairingState = pairingState;
     this.policy = policy;
     this.devices = devices;
@@ -225,7 +227,13 @@ public final class GatewayClient implements MessageSink, AutoCloseable {
     if (!authenticated.get() && !isPreAuthenticationMessage(type)) return false;
     String encoded;
     try {
-      encoded = codec.encodeSigned(type, wireSession.stamp(body), identity);
+      JsonObject stamped = wireSession.stamp(body);
+      if (fleet != null && "telemetry.system".equals(type)) {
+        stamped.addProperty("nodeId", fleet.nodeId().toString());
+        stamped.addProperty("metricScope", "NODE");
+        stamped.addProperty("processRole", "MINECRAFT");
+      }
+      encoded = codec.encodeSigned(type, stamped, identity);
     } catch (RuntimeException error) {
       plugin.getLogger().log(Level.WARNING, "Refused to encode outbound message " + type, error);
       return false;
@@ -337,7 +345,11 @@ public final class GatewayClient implements MessageSink, AutoCloseable {
             pairingState.isPaired(),
             capabilities,
             "PAPER",
-            policy.hostPublicKey());
+            policy.hostPublicKey(),
+            fleet == null ? null : io.github.zpkdxgames.plexonpanel.identity.FleetContract.ID,
+            fleet == null ? null : fleet.nodeId().toString(),
+            fleet == null ? null : fleet.instanceKey(),
+            fleet == null ? null : fleet.serverName());
     send("agent.hello", payload, MessagePriority.CRITICAL);
   }
 
