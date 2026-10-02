@@ -39,7 +39,7 @@ public final class ConfigMigration {
     // copyDefaults is enabled. A bundled marker is not a persisted disk marker.
     Object persistedMarker = config.get("schema-version", null);
     int schemaVersion = schemaVersion(persistedMarker);
-    if (schemaVersion < 0 || schemaVersion > PanelSettings.CURRENT_SCHEMA_VERSION) {
+    if (schemaVersion < 0 || schemaVersion > 5) {
       throw new IllegalArgumentException(
           "Unsupported config.yml schema-version " + schemaVersion);
     }

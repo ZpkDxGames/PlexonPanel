@@ -13,7 +13,6 @@ import io.github.zpkdxgames.plexonpanel.integration.core.CoreBridge;
 import io.github.zpkdxgames.plexonpanel.integration.core.CoreBridgeFactory;
 import java.nio.file.Path;
 import java.util.Objects;
-import java.util.logging.Level;
 import org.bukkit.command.PluginCommand;
 import org.bukkit.plugin.ServicePriority;
 import org.bukkit.plugin.java.JavaPlugin;
@@ -42,13 +41,24 @@ public final class PlexonPanelPlugin extends JavaPlugin {
     try {
       ConfigMigration.migrate(this);
       Path dataDirectory = getDataFolder().toPath();
+      PanelSettings initialSettings = PanelSettings.load(getConfig());
+      if (initialSettings.fleet() != null && !initialSettings.fleet().nodeId().equals(
+          io.github.zpkdxgames.plexonpanel.identity.NodeIdentity.readDefault()))
+        throw new java.io.IOException("PAPER_NODE_IDENTITY_MISMATCH");
+      if (getConfig().getInt("schema-version", 0) == 5) {
+        var layout = new io.github.zpkdxgames.plexonpanel.identity.InstanceLayout(initialSettings.fleet().instanceKey());
+        io.github.zpkdxgames.plexonpanel.identity.InstanceLayout.requirePath(
+            Path.of(System.getProperty("user.dir", ".")).toAbsolutePath().normalize().toString(), layout.serverRoot());
+        io.github.zpkdxgames.plexonpanel.identity.InstanceLayout.requirePath(
+            dataDirectory.toAbsolutePath().normalize().toString(), layout.serverRoot().resolve("plugins/PlexonPanel"));
+        io.github.zpkdxgames.plexonpanel.identity.InstanceLayout.rejectSymlinks(dataDirectory);
+        if (!layout.minecraftUser().equals(ProcessHandle.current().info().user().orElse("")))
+          throw new java.io.IOException("PAPER_INSTANCE_ACCOUNT_MISMATCH");
+      }
       identityStore = new IdentityStore(dataDirectory);
       identity = identityStore.loadOrCreate();
-      PanelSettings initialSettings = PanelSettings.load(getConfig());
       if (initialSettings.fleet() != null) {
         fleet = initialSettings.fleet().identityFor(identity.serverId());
-        if (!fleet.nodeId().equals(io.github.zpkdxgames.plexonpanel.identity.NodeIdentity.readDefault()))
-          throw new java.io.IOException("PAPER_NODE_IDENTITY_MISMATCH");
         fleetLease = new io.github.zpkdxgames.plexonpanel.identity.FleetBindingStore(
             dataDirectory, Path.of(System.getProperty("user.dir", ".")))
             .claim(fleet, identity.fingerprint());
@@ -87,8 +97,7 @@ public final class PlexonPanelPlugin extends JavaPlugin {
       if (coreBridge != null) {
         coreBridge.markFailed("PlexonPanel startup failed safely");
       }
-      getLogger()
-          .log(Level.SEVERE, "PlexonPanel could not start safely and will be disabled", error);
+      getLogger().severe("PlexonPanel startup failed safely: " + error.getClass().getSimpleName());
       getServer().getPluginManager().disablePlugin(this);
     }
   }

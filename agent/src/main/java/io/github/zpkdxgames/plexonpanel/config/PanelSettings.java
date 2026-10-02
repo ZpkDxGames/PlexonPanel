@@ -33,8 +33,13 @@ public record PanelSettings(
     public static PanelSettings load(FileConfiguration config) {
         Objects.requireNonNull(config, "config");
 
-        int schemaVersion = config.getInt("schema-version", 0);
-        if (schemaVersion != CURRENT_SCHEMA_VERSION) {
+        int schemaVersion;
+        try {
+            Object marker = config.get("schema-version", null);
+            if (!(marker instanceof Number)) throw new ArithmeticException();
+            schemaVersion = new java.math.BigDecimal(marker.toString()).intValueExact();
+        } catch (RuntimeException invalid) { throw new IllegalArgumentException("Invalid persisted config.yml schema-version"); }
+        if (schemaVersion != CURRENT_SCHEMA_VERSION && schemaVersion != 5) {
             throw new IllegalArgumentException(
                 "config.yml schema-version must be " + CURRENT_SCHEMA_VERSION
                     + " after migration (found " + schemaVersion + ")");
@@ -148,6 +153,7 @@ public record PanelSettings(
             // Validate presentation/key fields before activating any runtime or writing identity state.
             fleet.identityFor(java.util.UUID.fromString("00000000-0000-4000-8000-000000000001"));
         }
+        if (schemaVersion == 5 && fleet == null) throw new IllegalArgumentException("SCHEMA_5_REQUIRES_FLEET_IDENTITY");
         return new PanelSettings(gateway, telemetry, playerHistory, console, chat, remoteActions, audit, fleet);
     }
 
