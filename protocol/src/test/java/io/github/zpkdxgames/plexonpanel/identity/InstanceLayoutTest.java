@@ -17,6 +17,8 @@ class InstanceLayoutTest {
     assertThrows(IllegalArgumentException.class, () -> InstanceLayout.requirePath(second.serverRoot().toString(), first.serverRoot()));
     assertThrows(IllegalArgumentException.class, () -> InstanceLayout.requirePath(first.serverRoot()+"/../server", first.serverRoot()));
     assertThrows(IllegalArgumentException.class, () -> new InstanceLayout("../survival"));
+    assertEquals(32, new InstanceLayout("a".repeat(28)).hostUser().length());
+    assertThrows(IllegalArgumentException.class, () -> new InstanceLayout("a".repeat(29)));
   }
   @Test void symlinkedExistingAncestorsCannotRedirectAnOtherwiseCanonicalPath() throws Exception {
     var actual = Files.createDirectory(directory.resolve("actual"));

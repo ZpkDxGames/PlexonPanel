@@ -2,7 +2,7 @@
 
 This additive implementation prepares schema 5 while preserving the schema-4 defaults and component version 4.0.0 until coordinated activation. It is not runtime certification or a stable 5.0 release. Do not replace the deployed 3.5 relay during preparation.
 
-`InstanceLayout` derives directories, account names, unit names and journal namespace exclusively from the validated immutable instance key. Server display names select none of these. Host schema 5 requires a bound server/node/key identity and the exact prepared paths:
+`InstanceLayout` derives directories, account names, unit names and journal namespace exclusively from the validated immutable instance key. Server display names select none of these. Linux instance keys are limited to 28 characters so `pph-<key>` fits Ubuntu's 32-character username limit ([Ubuntu 24.04 useradd documentation](https://manpages.ubuntu.com/manpages/noble/man8/useradd.8.html)). The generic wire identity parser remains compatible with its existing 32-character key bound; the narrower Linux account constraint is enforced by both schema-5 instance runtimes. Host schema 5 requires a bound server/node/key identity and the exact prepared paths:
 
 | Purpose | Path for `plexoncraft` |
 | --- | --- |

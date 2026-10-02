@@ -6,7 +6,11 @@ import java.util.Objects;
 
 /** Canonical public layout. Names never select paths or service authorization. */
 public record InstanceLayout(String instanceKey) {
-  public InstanceLayout { new FleetIdentity(java.util.UUID.fromString("00000000-0000-4000-8000-000000000001"),
+  public static final int MAXIMUM_LINUX_INSTANCE_KEY_LENGTH = 28;
+  public InstanceLayout {
+    if (instanceKey == null || instanceKey.length() > MAXIMUM_LINUX_INSTANCE_KEY_LENGTH)
+      throw new IllegalArgumentException("LINUX_INSTANCE_KEY_LIMIT");
+    new FleetIdentity(java.util.UUID.fromString("00000000-0000-4000-8000-000000000001"),
       java.util.UUID.fromString("00000000-0000-4000-8000-000000000002"), instanceKey, "Layout"); }
   public Path serverRoot() { return Path.of("/srv/plexonpanel/servers", instanceKey, "server"); }
   public Path hostLauncher() { return Path.of("/srv/plexonpanel/servers", instanceKey, "host"); }
