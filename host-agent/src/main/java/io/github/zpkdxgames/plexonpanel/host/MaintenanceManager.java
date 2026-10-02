@@ -174,6 +174,7 @@ public final class MaintenanceManager implements AutoCloseable {
     result.put("jobStateContractVersion", 4);
     result.put("currentOperation", active == null ? Map.of() : active);
     result.put("provider", fullBackups.providerStatus());
+    result.put("nodeBackup", fullBackups.nodeBackupStatus());
     result.put("restoreRecoveryRequired", fullBackups.recoveryRequired());
     result.put("jobRecoveryRequired", state.recoveryRequired() != null);
     result.put(
@@ -506,12 +507,17 @@ public final class MaintenanceManager implements AutoCloseable {
     MaintenanceStateStore.Job job = original;
     boolean locked = false, stoppedByUs = false;
     AtomicBoolean stopBoundaryEntered = new AtomicBoolean();
+    NodeBackupCoordinator.Lease nodeLease = null;
     try {
       if (automatic) throw new IOException("AUTOMATIC_BACKUP_DISABLED");
       if (!operationLock.tryLock()) throw new SecurityException("BUSY");
       locked = true;
       if (fullBackups.recoveryRequired()) throw new IllegalStateException("RESTORE_RECOVERY_REQUIRED");
       MaintenanceSettings current = settings;
+      String waitingJobId = job.jobId();
+      nodeLease = fullBackups.acquireNodeBackupLease(() -> publish(
+          "maintenance.node.queued", Map.of("jobId", waitingJobId, "kind", "FULL_RESTORE_POINT")));
+
       if (!recoveringCountdown) {
         job = transition(job, "PREFLIGHT", null, 5, null, null, null, null, Map.of());
         Map<String, Object> preflight = fullBackupPreflight.check(current.fullRestorePoint());
@@ -719,7 +725,13 @@ public final class MaintenanceManager implements AutoCloseable {
       if (shouldStartAfterFullBackupFailure(destructiveBoundary, job.localBackupVerified()))
         tryStartAfterFailure();
     } finally {
-      if (locked) operationLock.unlock();
+      try {
+        if (nodeLease != null) nodeLease.close();
+      } catch (IOException closeFailure) {
+        publish("maintenance.node.release.failed", Map.of("errorCode", "NODE_LOCK_RELEASE_FAILED"));
+      } finally {
+        if (locked) operationLock.unlock();
+      }
     }
   }
 

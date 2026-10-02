@@ -2,6 +2,7 @@ package io.github.zpkdxgames.plexonpanel.host;
 
 import com.google.gson.*;
 import io.github.zpkdxgames.plexonpanel.console.ConsoleRedactor;
+import io.github.zpkdxgames.plexonpanel.identity.FleetIdentity;
 import io.github.zpkdxgames.plexonpanel.security.Scopes;
 import java.net.URI;
 import java.nio.file.*;
@@ -19,8 +20,25 @@ public record HostConfig(
     Map<String, Boolean> capabilities,
     BackupConfig backups,
     ConsoleConfig console,
-    CommandChannelConfig commandChannel) {
+    CommandChannelConfig commandChannel,
+    FleetConfig fleet) {
   static final int CURRENT_SCHEMA_VERSION = 4;
+  /** Additive preparation contract; schema 5 will require it for every instance. */
+  public record FleetConfig(String nodeId, String instanceKey) {}
+
+  public FleetIdentity fleetIdentity() {
+    return fleet == null ? null : FleetIdentity.parse(serverId, fleet.nodeId(), fleet.instanceKey(), serverName);
+  }
+
+  public HostConfig(
+      String serverId, String serverName, String relayUrl, String relayPublicKey,
+      String serverRoot, String dataDirectory, String accessRegistry, String serviceName,
+      Map<String, Boolean> capabilities, BackupConfig backups, ConsoleConfig console,
+      CommandChannelConfig commandChannel) {
+    this(serverId, serverName, relayUrl, relayPublicKey, serverRoot, dataDirectory,
+        accessRegistry, serviceName, capabilities, backups, console, commandChannel, null);
+  }
+
   /**
    * Network-reachable Host capabilities that would require write authority inside serverRoot.
    *
@@ -162,7 +180,8 @@ public record HostConfig(
             "capabilities",
             "backups",
             "console",
-            "commandChannel")
+            "commandChannel",
+            "fleet")
         .containsAll(raw.keySet()))
       throw new IllegalArgumentException("Unknown host configuration key");
     if (raw.has("schemaVersion")
@@ -184,6 +203,10 @@ public record HostConfig(
               .containsAll(commandRaw.getAsJsonObject().keySet()))
         throw new IllegalArgumentException("Unknown Host maintenance command-channel key");
     }
+    if (raw.has("fleet")
+        && (!raw.get("fleet").isJsonObject()
+            || !Set.of("nodeId", "instanceKey").equals(raw.getAsJsonObject("fleet").keySet())))
+      throw new IllegalArgumentException("Invalid Host fleet configuration");
     HostConfig parsed = new Gson().fromJson(raw, HostConfig.class);
     BackupConfig backups = parsed.backups;
     if (backups != null && backups.liveSnapshotExcludes == null) {
@@ -214,8 +237,12 @@ public record HostConfig(
             parsed.capabilities,
             backups,
             parsed.console == null ? ConsoleConfig.defaults() : parsed.console,
-            parsed.commandChannel == null ? CommandChannelConfig.defaults() : parsed.commandChannel);
-    UUID.fromString(c.serverId);
+            parsed.commandChannel == null ? CommandChannelConfig.defaults() : parsed.commandChannel,
+            parsed.fleet);
+    FleetIdentity.parseUuid(c.serverId, "serverId");
+    FleetIdentity fleet = c.fleetIdentity();
+    if (fleet != null && !fleet.minecraftUnit().equals(c.serviceName))
+      throw new IllegalArgumentException("Host fleet requires its exact Minecraft instance unit");
     if (c.serverName == null || c.serverName.length() > 64 || c.serverName.isBlank())
       throw new IllegalArgumentException("Invalid server label");
     URI uri = URI.create(c.relayUrl);
