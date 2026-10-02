@@ -1,6 +1,7 @@
 package io.github.zpkdxgames.plexonpanel.identity;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -70,5 +71,18 @@ class IdentityStoreTest {
 
     first.clear();
     assertFalse(new PairingState(temporaryDirectory).isPaired());
+  }
+  @Test
+  void registeredServerIdCreatesFreshIdentityButNeverRewritesAnExistingIdentity() throws Exception {
+    var registered = java.util.UUID.randomUUID();
+    var store = new IdentityStore(temporaryDirectory);
+    var first = store.loadOrCreate(registered);
+    assertEquals(registered, first.serverId());
+    byte[] key = Files.readAllBytes(temporaryDirectory.resolve("identity/device.key"));
+    byte[] metadata = Files.readAllBytes(temporaryDirectory.resolve("identity/device.json"));
+    assertEquals(first.fingerprint(), store.loadOrCreate(registered).fingerprint());
+    assertThrows(java.io.IOException.class, () -> store.loadOrCreate(java.util.UUID.randomUUID()));
+    assertArrayEquals(key, Files.readAllBytes(temporaryDirectory.resolve("identity/device.key")));
+    assertArrayEquals(metadata, Files.readAllBytes(temporaryDirectory.resolve("identity/device.json")));
   }
 }
