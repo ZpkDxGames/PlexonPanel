@@ -23,6 +23,7 @@ class FleetConfigMigrationTest {
     FleetConfigMigration.migrate(defaults, path, identity);
     var persisted = YamlConfiguration.loadConfiguration(path.toFile()); assertEquals(5, persisted.getInt("schema-version"));
     assertEquals("preserve-me", persisted.getString("operator.nested")); assertEquals(identity.nodeId(), PanelSettings.load(persisted).fleet().nodeId());
+    assertEquals("/srv/plexonpanel/servers/plexoncraft/server", persisted.getString("files.roots.server.path"));
     assertEquals(original, Files.readString(root.resolve("config.yml.pre-v5-backup")));
     String migrated = Files.readString(path);
     FleetConfigMigration.migrate(defaults, path, identity, (p, text) -> fail("Idempotent migration must not publish again"));
@@ -33,7 +34,7 @@ class FleetConfigMigrationTest {
     Path path = root.resolve("config.yml"); String original = "schema-version: 4\noperator-note: preserve-me\n"; Files.writeString(path, original);
     var defaults = defaults(); var identity = identity();
     assertThrows(IOException.class, () -> FleetConfigMigration.migrate(defaults, path, identity, (p, text) -> { throw new IOException("SIMULATED_PUBLICATION_FAILURE"); }));
-    assertEquals(original, Files.readString(path)); assertEquals(4, defaults.getInt("schema-version"));
+    assertEquals(original, Files.readString(path)); assertEquals(PanelSettings.CURRENT_SCHEMA_VERSION, defaults.getInt("schema-version"));
     FleetConfigMigration.migrate(defaults, path, identity);
     assertEquals(original, Files.readString(root.resolve("config.yml.pre-v5-backup")));
   }

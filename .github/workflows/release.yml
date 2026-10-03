@@ -35,6 +35,16 @@ jobs:
           distribution: temurin
           java-version: '25'
 
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+
+      - name: Validate isolated service authority
+        run: |
+          node scripts/test-instance-polkit.mjs
+          sudo env PYTHONDONTWRITEBYTECODE=1 python3 scripts/test-instance-read-authority.py --require-isolation
+          systemd-analyze verify host-agent/examples/fleet/*.service
+
       - uses: gradle/actions/setup-gradle@v6
 
       - name: Verify Linux runner architecture
@@ -98,6 +108,16 @@ jobs:
           distribution: temurin
           java-version: '25'
 
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+
+      - name: Validate isolated service authority
+        run: |
+          node scripts/test-instance-polkit.mjs
+          sudo env PYTHONDONTWRITEBYTECODE=1 python3 scripts/test-instance-read-authority.py --require-isolation
+          systemd-analyze verify host-agent/examples/fleet/*.service
+
       - uses: gradle/actions/setup-gradle@v6
 
       - name: Provision PlexonCore 2.0.4 API
@@ -109,9 +129,7 @@ jobs:
             --output "${core_jar}" \
             "https://github.com/ZpkDxGames/PlexonCore/releases/download/v2.0.4/PlexonCore-2.0.4.jar"
           echo "61d625a717da9f46ee9231e1970d84b4c317ae12cf4090cdf7c9d39b6a1a9baf  ${core_jar}" | sha256sum --check
-          mvn -B -ntp org.apache.maven.plugins:maven-install-plugin:3.1.4:install-file \
-            -Dfile="${core_jar}" -DgroupId=com.zpkdxgames -DartifactId=PlexonCore \
-            -Dversion=2.0.4 -Dpackaging=jar -DgeneratePom=true
+          python3 scripts/provision-core-api.py "${core_jar}"
 
       - name: Read project version
         id: project
@@ -151,6 +169,8 @@ jobs:
           version=os.environ['VERSION']
           gates=json.loads(Path(f'docs/release-gates-{version}.json').read_text())
           required=('source','ci','security','runtime','backup','console','history','restartRecovery')
+          if version == '5.0.0':
+              required += ('migration','deployment','offVpsBackup','rollback','browser')
           failed={name:gates['certification'].get(name) for name in required if gates['certification'].get(name) != 'PASS'}
           if failed:
               raise SystemExit(f'Stable release gates are not PASS: {failed}')

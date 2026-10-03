@@ -67,6 +67,9 @@ public final class FleetConfigMigration {
     config.set("fleet.node-id", identity.nodeId().toString());
     config.set("fleet.instance-key", identity.instanceKey());
     config.set("fleet.server-name", identity.serverName());
+    String existingRoot = source.getString("files.roots.server.path", "");
+    if (existingRoot.isBlank() || existingRoot.equals("/opt/plexoncraft/server") || existingRoot.equals("@INSTANCE_SERVER_ROOT@"))
+      config.set("files.roots.server.path", new InstanceLayout(identity.instanceKey()).serverRoot().toString());
     try { PanelSettings.load(config); }
     catch (RuntimeException invalid) { throw new IOException("PAPER_MIGRATION_CONFIG_INVALID"); }
     return config;

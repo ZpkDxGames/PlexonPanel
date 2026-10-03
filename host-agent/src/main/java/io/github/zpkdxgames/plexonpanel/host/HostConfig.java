@@ -23,7 +23,7 @@ public record HostConfig(
     ConsoleConfig console,
     CommandChannelConfig commandChannel,
     FleetConfig fleet) {
-  static final int CURRENT_SCHEMA_VERSION = 4;
+  static final int CURRENT_SCHEMA_VERSION = 5;
   /** Additive preparation contract; schema 5 will require it for every instance. */
   public record FleetConfig(String nodeId, String instanceKey) {}
 
@@ -203,7 +203,7 @@ public record HostConfig(
           throw new ArithmeticException();
         schema = raw.get("schemaVersion").getAsBigDecimal().intValueExact();
       } catch (RuntimeException invalid) { throw new IllegalArgumentException("Unsupported Host configuration schemaVersion"); }
-      if (schema != CURRENT_SCHEMA_VERSION && schema != 5) throw new IllegalArgumentException("Unsupported Host configuration schemaVersion");
+      if (schema != 4 && schema != CURRENT_SCHEMA_VERSION) throw new IllegalArgumentException("Unsupported Host configuration schemaVersion");
     }
     if (raw.has("commandChannel")) {
       JsonElement commandRaw = raw.get("commandChannel");

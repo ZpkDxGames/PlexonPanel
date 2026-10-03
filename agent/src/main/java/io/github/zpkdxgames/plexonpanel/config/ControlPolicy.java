@@ -102,7 +102,13 @@ public record ControlPolicy(
             roots.put(name, Path.of(section.getString(name + ".path", "/opt/plexoncraft/server")));
           if (section.getBoolean(name + ".write", false)) writable.add(name);
         }
-      if (roots.isEmpty()) roots.put("server", Path.of("/opt/plexoncraft/server"));
+      if (settings.fleet() != null) {
+        Path serverRoot = new io.github.zpkdxgames.plexonpanel.identity.InstanceLayout(settings.fleet().instanceKey()).serverRoot();
+        if (roots.isEmpty()) roots.put("server", serverRoot);
+        for (Path root : roots.values())
+          if (!root.isAbsolute() || !root.equals(root.normalize()) || !root.startsWith(serverRoot))
+            throw new java.io.IOException("PAPER_FLEET_FILE_ROOT_OUTSIDE_INSTANCE");
+      } else if (roots.isEmpty()) roots.put("server", Path.of("/opt/plexoncraft/server"));
       files = new SafeFiles(new PathPolicy(roots, List.of(data)), writable);
       for (String action :
           List.of("list", "read", "download", "write", "create", "rename", "delete", "upload"))

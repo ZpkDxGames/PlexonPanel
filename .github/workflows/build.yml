@@ -130,8 +130,10 @@ jobs:
           assert manifest['dashboardSourceCommit'] == contract['dashboardCommit']
           assert manifest['relaySourceCommit'] == contract['dashboardCommit']
           assert manifest['dashboardCiRun'] == contract['dashboardCiRun']
-          assert manifest['rollback']['plexonPanelCommit'] == '40a1c94892f83bdd3c7e82ec89196fcae8ced371'
-          assert manifest['rollback']['dashboardCommit'] == '5d25671bc73569e18599be1e9034291d1f87d171'
+          assert manifest['rollback'] == contract['rollback']
+          if version == '5.0.0':
+              assert manifest['fleetContract'] == contract['fleetContract']
+              assert manifest['configurationSchemas'] == {'paper': 5, 'host': 5}
           assert manifest['certification'] == contract['certification']
           assert manifest['hostArtifactType'] == 'architecture-neutral-java-jar'
           assert manifest['hostSupportedPlatforms'] == ['linux-x64', 'linux-arm64']
@@ -139,6 +141,13 @@ jobs:
           jar=Path(f'build/release/PlexonPanel-{version}.jar')
           host=Path(f'build/release/plexonpanel-host-{version}.jar')
           assert jar.is_file() and host.is_file()
+          if version == '5.0.0':
+              with zipfile.ZipFile(f'build/release/PlexonPanel-{version}-examples.zip') as examples:
+                  names=set(examples.namelist())
+                  required={'host-agent/examples/fleet/minecraft@.service', 'host-agent/examples/fleet/plexonpanel-host@.service',
+                      'host-agent/examples/fleet/instance-read-authority.py', 'docs/INSTANCE_CLONE_REKEY.md', 'docs/release-gates-5.0.0.json'}
+                  assert required <= names
+                  assert 'host-agent/examples/plexonpanel-host.service' not in names
 
           def major(path, entry):
               with zipfile.ZipFile(path) as z:

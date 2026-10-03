@@ -18,17 +18,18 @@ import java.nio.file.attribute.PosixFileAttributes;
 
 /** Adds the Host configuration schema marker without rewriting identities or operator keys. */
 final class HostConfigMigration {
+  private static final int LEGACY_SCHEMA_VERSION = 4;
   private HostConfigMigration() {}
 
   static boolean needsMigration(Path configPath) throws IOException {
-    return schema(read(configPath)) < HostConfig.CURRENT_SCHEMA_VERSION;
+    return schema(read(configPath)) < LEGACY_SCHEMA_VERSION;
   }
   static int schemaVersion(Path configPath) throws IOException { return schema(read(configPath)); }
 
   static void migrate(Path configPath) throws IOException {
     JsonObject raw = read(configPath);
     int schema = schema(raw);
-    if (schema >= HostConfig.CURRENT_SCHEMA_VERSION) return;
+    if (schema >= LEGACY_SCHEMA_VERSION) return;
     PosixFileAttributes original =
         Files.readAttributes(configPath, PosixFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
 
@@ -40,7 +41,7 @@ final class HostConfigMigration {
       throw new IOException("Refusing to replace an unsafe Host config migration backup");
     }
 
-    raw.addProperty("schemaVersion", HostConfig.CURRENT_SCHEMA_VERSION);
+    raw.addProperty("schemaVersion", LEGACY_SCHEMA_VERSION);
     AtomicFiles.writeUtf8(
         configPath, new GsonBuilder().setPrettyPrinting().create().toJson(raw) + "\n");
     Files.setOwner(configPath, original.owner());

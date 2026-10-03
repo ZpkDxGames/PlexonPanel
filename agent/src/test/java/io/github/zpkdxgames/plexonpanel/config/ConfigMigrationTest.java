@@ -35,7 +35,7 @@ class ConfigMigrationTest {
     String legacy = "gateway:\n  enabled: false\noperator:\n  nested: keep-me\n";
     Files.writeString(configPath, legacy);
     YamlConfiguration config = withBundledDefaults(legacy, false);
-    assertEquals(4, config.getInt("schema-version"));
+    assertEquals(PanelSettings.CURRENT_SCHEMA_VERSION, config.getInt("schema-version"));
     assertNull(config.get("schema-version", null));
 
     ConfigMigration.migrate(config, configPath);
@@ -54,7 +54,7 @@ class ConfigMigrationTest {
     String legacy = "operator-note: keep-me\n";
     Files.writeString(configPath, legacy);
     YamlConfiguration config = withBundledDefaults(legacy, true);
-    assertEquals(4, config.getInt("schema-version"));
+    assertEquals(PanelSettings.CURRENT_SCHEMA_VERSION, config.getInt("schema-version"));
     assertNull(config.get("schema-version", null));
 
     ConfigMigration.migrate(config, configPath);

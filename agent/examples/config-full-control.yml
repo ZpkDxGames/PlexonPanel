@@ -1,4 +1,4 @@
-# PlexonPanel 4.0.0 — PlexonCraft full local capability preset
+# PlexonPanel 5.0.0 — PlexonCraft full local capability preset
 #
 # This file intentionally enables every capability that the Paper agent can
 # truthfully execute. It is NOT the public default. Copy only the settings you
@@ -10,7 +10,8 @@
 # mandatory. Existing paired devices do not gain newly added scopes; re-pair an
 # intended Owner device after applying this policy when its grant is stale.
 
-schema-version: 4
+schema-version: 5
+# Registered fleet node/key/name are supplied by validated startup.
 
 gateway:
   enabled: false
@@ -122,7 +123,7 @@ files:
   enabled: true
   roots:
     server:
-      path: /opt/plexoncraft/server
+      path: "@INSTANCE_SERVER_ROOT@"
       read: true
       write: true
   permissions:

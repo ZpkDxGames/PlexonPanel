@@ -23,9 +23,14 @@ class ControlPolicyTest {
   private ControlPolicy load(Path source) throws Exception {
     YamlConfiguration config = YamlConfiguration.loadConfiguration(source.toFile());
     if (config.getBoolean("files.enabled", false)) {
+      config.set("schema-version", 4); // Legacy capability fixture with a disposable Files root.
       Path serverRoot = temporary.resolve("server");
       Files.createDirectories(serverRoot);
       config.set("files.roots.server.path", serverRoot.toString());
+    } else if (config.getInt("schema-version") == 5) {
+      config.set("fleet.node-id", UUID.randomUUID().toString());
+      config.set("fleet.instance-key", "plexoncraft");
+      config.set("fleet.server-name", "Test fixture");
     }
     return ControlPolicy.load(config, PanelSettings.load(config), temporary.resolve("panel-data"));
   }
@@ -96,6 +101,7 @@ class ControlPolicyTest {
   void paperConsoleFallbackRequiresExplicitEnablement() throws Exception {
     Path source = fixture("examples/config-full-control.yml", "agent/examples/config-full-control.yml");
     YamlConfiguration config = YamlConfiguration.loadConfiguration(source.toFile());
+    config.set("schema-version", 4);
     Path serverRoot = temporary.resolve("server");
     Files.createDirectories(serverRoot);
     config.set("files.roots.server.path", serverRoot.toString());
@@ -118,6 +124,7 @@ class ControlPolicyTest {
   void legacyPaperBackupKeysCannotRestoreBackupAuthority() throws Exception {
     Path source = fixture("examples/config-full-control.yml", "agent/examples/config-full-control.yml");
     YamlConfiguration config = YamlConfiguration.loadConfiguration(source.toFile());
+    config.set("schema-version", 4);
     Path serverRoot = temporary.resolve("server");
     Files.createDirectories(serverRoot);
     config.set("files.roots.server.path", serverRoot.toString());
@@ -133,6 +140,7 @@ class ControlPolicyTest {
   void pluginReloadIsAdvertisedOnlyWhenItsConfiguredCommandIsActuallyAllowed() throws Exception {
     Path source = fixture("examples/config-full-control.yml", "agent/examples/config-full-control.yml");
     YamlConfiguration config = YamlConfiguration.loadConfiguration(source.toFile());
+    config.set("schema-version", 4);
     Path serverRoot = temporary.resolve("server");
     Files.createDirectories(serverRoot);
     config.set("files.roots.server.path", serverRoot.toString());
@@ -167,5 +175,17 @@ class ControlPolicyTest {
             "server.stop",
             "server.restart"))
       assertFalse(policy.capabilities().get(scope), () -> "Public default became dangerous: " + scope);
+  }
+
+  @Test void schemaFiveFilesCannotReadAnOutsideOrOtherInstanceRoot() throws Exception {
+    Path source = fixture("examples/config-full-control.yml", "agent/examples/config-full-control.yml");
+    var config = YamlConfiguration.loadConfiguration(source.toFile());
+    config.set("fleet.node-id", UUID.randomUUID().toString());
+    config.set("fleet.instance-key", "plexoncraft"); config.set("fleet.server-name", "Test");
+    for (String outside : List.of(temporary.toString(), "/srv/plexonpanel/servers/other/server", "/srv/plexonpanel/servers/plexoncraft/server/../host")) {
+      config.set("files.roots.server.path", outside);
+      var error = assertThrows(java.io.IOException.class, () -> ControlPolicy.load(config, PanelSettings.load(config), temporary));
+      assertEquals("PAPER_FLEET_FILE_ROOT_OUTSIDE_INSTANCE", error.getMessage());
+    }
   }
 }

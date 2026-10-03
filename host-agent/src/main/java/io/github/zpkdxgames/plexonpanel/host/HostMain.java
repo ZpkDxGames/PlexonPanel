@@ -141,6 +141,8 @@ public final class HostMain {
     long configLoadedMtime = Files.getLastModifiedTime(configPath, LinkOption.NOFOLLOW_LINKS).toMillis();
     HostConfig config = HostConfig.load(configPath);
     boolean fleetSchema = HostConfigMigration.schemaVersion(configPath) == 5;
+    if (HostConfig.CURRENT_SCHEMA_VERSION == 5 && !fleetSchema)
+      throw new SecurityException("HOST_FIVE_REQUIRES_EXPLICIT_FLEET_MIGRATION");
     String journalNamespace = fleetSchema ? new InstanceLayout(config.fleet().instanceKey()).journalNamespace() : null;
     if (fleetSchema) {
       var layout = new InstanceLayout(config.fleet().instanceKey());
