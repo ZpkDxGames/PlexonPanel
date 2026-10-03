@@ -1,112 +1,27 @@
-# PlexonPanel 4.0.0
+# PlexonPanel 5.0.0
 
-PlexonPanel is an outbound-only control room agent for Paper 26.2 on Java 25 with an optional non-root Linux Host Companion. The 4.0.0 line preserves signed **Protocol 3**, `/v1` routes, existing identities/device grants, and the Paper/Host authority split while adding real backup progress and verified temporary-ZIP cleanup.
+PlexonPanel coordinates multiple Paper 26.2 servers on Java 25 with one non-root Linux Host per instance, a browser Dashboard, and a coordination-only Worker or standalone relay. Signed Protocol 3 carries the shared fleet contract; Paper/Host configuration schemas are 5. Server UUID, node UUID and immutable instance key determine routing, authorization, paths and units. Display names can change independently.
 
-## Matched Java pair
+Source is prepared for 5.0.0. Stable publication and production deployment remain held by recorded migration/runtime/security gates. Preserve the original 4.0 installation and the deployed VPS relay 3.5.0 until coordinated activation and verified rollback are ready.
 
-Install the Paper and Host artifacts from the same release:
+## Matched components
 
-- `PlexonPanel-4.0.0.jar`
-- `plexonpanel-host-4.0.0.jar`
+Build/install the coordinated `PlexonPanel-5.0.0.jar`, `plexonpanel-host-5.0.0.jar`, Dashboard 5.0.0 and Relay 5.0.0. The Host JAR is architecture-neutral Java and CI executes Linux x64/ARM64. [Dashboard/Relay repository](https://github.com/ZpkDxGames/PlexonPanel-Dashboard) owns the corresponding control-plane components. Exact source revisions, CI runs, hashes and unexecuted certification states are recorded in release manifests.
 
-Do not mix Java bundle versions when replacing the production pair. Preserve the existing `plugins/PlexonPanel/` identity/access state and Host identity/configuration during upgrades.
+Paper owns pairing/device authority, Minecraft/JVM telemetry, players/chat and command execution. Host owns its exact Minecraft systemd service, cgroup accounting, private backups/provider state and retained namespace journal history. Healthy Host console is preferred; an explicitly enabled Paper fallback remains bounded, redacted and live-only. Host has read access to its paired server, no server-directory write access and no global journal group.
 
-## Host authority
+## Instance setup and migration
 
-When the optional Host Companion is installed and its console policy is enabled, it can stream the configured `plexoncraft.service` journald output through the existing signed Protocol 3 relay.
+Use the canonical per-instance paths/accounts and units in [service deployment](docs/INSTANCE_SERVICE_DEPLOYMENT.md). Initialize the public node UUID once; allocate unique server UUIDs, keys and game/RCON ports in the root-controlled [node registry](docs/NODE_INSTANCE_REGISTRY.md). Host configuration planning/apply is an explicit local operation; [Paper bootstrap](docs/PAPER_FLEET_BOOTSTRAP.md) validates public authority before migrating configuration or creating keys. [Private configuration validation](docs/INSTANCE_CONFIGURATION_VALIDATION.md) checks owners/modes/ACLs, allowed groups and RCON consistency without printing secrets.
 
-- Host journald is preferred only while the Host is authenticated and its console source reports healthy.
-- When Host journal authority is unavailable, an explicitly enabled Paper fallback can stream
-  only new, bounded and redacted `latest.log` lines; it never supplies retained history.
-- Paper remains the **only** `console.execute` authority. Host console access is read-only and `console.execute.allowed` is forced false on the Host.
-- Console visibility still requires the device scope and local capability to both allow it.
-- Existing Host configs remain valid: if the new `console` object is omitted, Host console starts disabled.
+The [exact service/journal rule](docs/INSTANCE_AUTHORIZATION.md), stable shared node lock, bounded JVM shutdown, pinned read-authority helper and [private provider state](docs/PROVIDER_RUNTIME_STATE.md) are supplied in `host-agent/examples/fleet/`. All Hosts on one node obey one backup lease through archive/upload/recovery. Runtime token refresh uses isolated writable state; root-controlled provider seeds stay protected.
 
-The Host source uses the fixed `/usr/bin/journalctl` executable, bounded replay/history/queues/batches, cursor/invocation persistence, restart backoff, shared severity classification, and pre-transport redaction. See [4.0.0 release notes](RELEASE_NOTES_4.0.0.md).
+Ordinary restarts retain identities and device grants. [Intentional clone/rekey](docs/INSTANCE_CLONE_REKEY.md) allocates a new instance and preserves old/copied private state outside server backup includes. Pair each server independently; revocation/selection/confirmation/completion remain bound to the original server and signed session.
 
-## Protocol and security
+## Release gates and rollback
 
-Wire protocol remains **3**. Paper and Host use signed `/v1` transport and preserve the existing Ed25519 identities, device generations/revisions, replay/sequence protections, bounded queues, local policy intersection, high-risk confirmation, and audit rules.
+[Release preparation](docs/release-5.0.0.md) and [gate states](docs/release-gates-5.0.0.json) are authoritative for readiness. Execute actual two-server controls/telemetry, backup contention/integrity/upload, namespace/service/filesystem denial, graceful recovery, browser interaction, migration and rollback before publishing stable. OCI backup remains intentionally skipped by operator decision; current operational/off-VPS backup verification and rollback rehearsal remain required.
 
-Paper remains authoritative for Paper/JVM telemetry, players, chat, Paper actions, command execution, pairing, device state, and the optional live-only console fallback. Host remains authoritative for Linux telemetry, systemd lifecycle, Host files/backups, Host-local policy, and retained Linux journald console history. The relay verifies/routes signed protocol traffic and selects the healthy source; the Dashboard is the browser presentation/control surface.
+Original 4.0 binaries, private configuration, service paths, relay coordination and Caddy/certificate state must remain recoverable. Historical [4.0 source README](https://github.com/ZpkDxGames/PlexonPanel/blob/9efa8fcaf3d75d859e01fd712a2826aa8f974f29/README.md) describes that retained installation. No source merge grants permission to delete those materials or replace the standalone relay in isolation.
 
-The 4.0.0 maintenance extension adds only optional Protocol 3 event fields; it does not require a Protocol 4 migration, identity reset, or automatic re-pair.
-
-See [protocol 3](docs/PROTOCOL.md), [access/scopes](docs/ACCESS.md), [privacy](PRIVACY.md), and [operations](docs/OPERATIONS.md).
-
-## Backups and automatic restarts
-
-**Fully Backup Now** remains manual and Host-authoritative. The operator chooses a 30-, 15-, 10-, or 5-minute initial player countdown. The Host validates and durably stores the complete warning plan, requires `save-all flush`, proves the configured Minecraft service stopped, creates and locally verifies a cold archive, uploads/promotes/verifies it through the configured Google Drive/rclone remote, removes the temporary VPS ZIP only after verified promotion, and automatically restores Minecraft availability. Upload failure retains the local ZIP for safe retry.
-
-Restart-only scheduling uses the same safe countdown presets and remains independent from full backups. Daily, weekly, and selected-weekday schedules are supported.
-
-The stable Host service mounts `serverRoot` read-only. Network-reachable server-tree file mutation and direct restore capabilities are forced off even if legacy configuration keys remain present. Backup read access is supported through the bounded read contract; Host data and backup destinations remain writable. A provider connectivity test updates only test state and can no longer masquerade as a successfully verified remote backup.
-
-See [Backups & Maintenance](docs/BACKUPS.md), [backup read contract](docs/BACKUP_READ_CONTRACT.md), and [4.0.0 release notes](RELEASE_NOTES_4.0.0.md).
-
-## PlexonCore mode
-
-The Paper plugin registers module ID `panel` when a compatible PlexonCore API is available.
-
-- Supported Core API: `>=1.0 <3.0`
-- CI compile boundary: PlexonCore `2.0.4`
-- Core remains a Paper soft dependency and is not shaded into the Panel JAR.
-- Without a compatible Core service, Panel continues in `STANDALONE` mode.
-
-PlexonCore owns only local module registration/diagnostics for this integration. It does not gain authority over Panel pairing, immutable device grants, transport, remote actions, files, backups, console authority, or identity.
-
-See [PlexonCore integration](docs/PLEXONCORE.md) and [local API](docs/API.md).
-
-## Paper performance model
-
-Paper captures Bukkit-owned state on the primary thread and uses bounded workers for serialization/storage/transport. Listener-driven plugin/world/roster invalidations are debounced and coalesced rather than scheduling an immediate full snapshot for every event in a burst. Existing bounded queues, in-flight snapshot coalescing, slower reconciliation timers, and holder-owned GUI routing remain.
-
-## Host configuration
-
-The conservative example keeps Host console disabled:
-
-- `host-agent/examples/host-config.json`
-
-The full-control PlexonCraft example enables Host console viewing and includes bounded journald settings:
-
-- `host-agent/examples/host-config-full-control.json`
-
-Host console configuration supports source/executable selection constrained to the supported journald path, initial replay size, recent-history size, queue capacity, batch size/interval, maximum line size, cursor persistence cadence, and optional extra redaction patterns.
-
-## Build and package
-
-CI runs the repository suite on Ubuntu 24.04 x64 and ARM64 with Java 25, provisions the pinned PlexonCore 2.0.4 API artifact, and builds both Java agents:
-
-```sh
-./gradlew --no-daemon clean test check javadoc :agent:jar :host-agent:jar
-python3 scripts/summarize-tests.py
-python3 scripts/package-release.py
-```
-
-The release package contains:
-
-- `PlexonPanel-4.0.0.jar`
-- `plexonpanel-host-4.0.0.jar`
-- `PlexonPanel-4.0.0-examples.zip`
-- `release-manifest.json`
-- `SHA256SUMS.txt`
-- `test-summary.txt`
-
-The contract verifies Java 25/class major 69, Protocol 3, Paper metadata, required API/Core bridge classes, matched versioning, non-shading of PlexonCore, the pinned Dashboard/Relay provenance reference, and checksums.
-
-## Upgrade
-
-1. Stop Minecraft and the Host Companion if installed.
-2. Back up `plugins/PlexonPanel/` and Host identity/configuration.
-3. Replace both Java artifacts with the matching 4.0.0 release pair. While Host is stopped, run its
-   local `--migrate-config` operation against the root-owned policy file.
-4. Do not delete identity/access files and do not re-pair as an upgrade workaround.
-5. If Host console viewing is desired, add its `console` object and view capabilities. Enable Paper `console.fallback-enabled` only if bounded live fallback is desired; it is disabled in the public default and enabled in the full-control preset.
-6. Start the Host Companion and Paper server.
-7. Verify `/plexon modules`, `/plexonpanel status`, `/plexonpanel capabilities`, and `/plexonpanel diagnostics`; confirm UUID/fingerprint and browser credential continuity.
-
-`/plexon reload` remains transport-neutral. `/plexonpanel reload` remains the Panel-owned runtime reload path.
-
-## Release and runtime certification
-
-Repository CI is source evidence, not production acceptance. Do not mark runtime/security certification `PASS` until the final Paper JAR, Host JAR, relay and Dashboard are deployed and exercised on the authorized Linux host, including the selected countdown, `save-all flush`, cold archive, live transfer reporting, Google Drive verification, temporary-ZIP cleanup, automatic restart, reconnect, and failure/recovery gates.
+See [Protocol 3](docs/PROTOCOL.md), [privacy](PRIVACY.md), [changelog](CHANGELOG.md) and the synchronized Dashboard deployment gate for operational details.

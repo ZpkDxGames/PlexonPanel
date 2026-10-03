@@ -1,5 +1,14 @@
 # Changelog
 
+## 5.0.0 — coordinated multi-server source and release preparation
+
+- Fix the Paper defaults-aware physical-marker migration before atomic schema-5 activation.
+- Bind every Paper/Host pair to immutable server/node UUIDs and exact canonical instance accounts, paths, units and registered ports.
+- Add signed fleet association/telemetry authority, per-server Dashboard selection and completion binding, shared-node totals and device isolation.
+- Provide node-wide kernel backup exclusion, isolated writable provider credentials, bounded shutdown and per-instance polkit/journal/filesystem authority.
+- Supply canonical systemd templates, pinned read-ACL helpers and an intentional clone/rekey preservation procedure.
+- Build coordinated 5.0 internal artifacts with explicit contracts and truthful unexecuted production gates; stable publishing/deployment remains held.
+
 ## 4.0.0 — coordinated release identity, migration and durable operations
 
 - Coordinate Paper, Host, Dashboard and Worker/standalone relay version identity on Protocol 3.

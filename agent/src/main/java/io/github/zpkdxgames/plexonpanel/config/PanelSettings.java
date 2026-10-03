@@ -17,7 +17,7 @@ public record PanelSettings(
     Audit audit,
     FleetSettings fleet
 ) {
-    public static final int CURRENT_SCHEMA_VERSION = 4;
+    public static final int CURRENT_SCHEMA_VERSION = 5;
 
     public PanelSettings(Gateway gateway, Telemetry telemetry, PlayerHistory playerHistory,
         Console console, Chat chat, RemoteActions remoteActions, Audit audit) {
@@ -39,7 +39,7 @@ public record PanelSettings(
             if (!(marker instanceof Number)) throw new ArithmeticException();
             schemaVersion = new java.math.BigDecimal(marker.toString()).intValueExact();
         } catch (RuntimeException invalid) { throw new IllegalArgumentException("Invalid persisted config.yml schema-version"); }
-        if (schemaVersion != CURRENT_SCHEMA_VERSION && schemaVersion != 5) {
+        if (schemaVersion != 4 && schemaVersion != CURRENT_SCHEMA_VERSION) {
             throw new IllegalArgumentException(
                 "config.yml schema-version must be " + CURRENT_SCHEMA_VERSION
                     + " after migration (found " + schemaVersion + ")");

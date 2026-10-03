@@ -1,13 +1,13 @@
 {
-  "schemaVersion": 4,
-  "serverId": "REPLACE_WITH_EXISTING_PAPER_SERVER_UUID",
+  "schemaVersion": 5,
+  "serverId": "REPLACE_WITH_ALLOCATED_SERVER_UUID",
   "serverName": "PlexonCraft",
   "relayUrl": "wss://YOUR-RELAY.workers.dev/v1/agent",
   "relayPublicKey": "REPLACE_WITH_RELAY_PUBLIC_KEY",
-  "serverRoot": "/opt/plexoncraft/server",
-  "dataDirectory": "/var/lib/plexonpanel-host",
-  "accessRegistry": "/opt/plexoncraft/server/plugins/PlexonPanel/access/devices.json",
-  "serviceName": "plexoncraft.service",
+  "serverRoot": "/srv/plexonpanel/servers/plexoncraft/server",
+  "dataDirectory": "/var/lib/plexonpanel/instances/plexoncraft",
+  "accessRegistry": "/var/lib/plexonpanel/instances/plexoncraft/access/devices.json",
+  "serviceName": "minecraft@plexoncraft.service",
   "capabilities": {
     "telemetry.view": true,
     "server.status": true,
@@ -43,7 +43,7 @@
   },
   "backups": {
     "enabled": false,
-    "directory": "/var/lib/plexonpanel-host/backups",
+    "directory": "/var/backups/plexonpanel/instances/plexoncraft",
     "include": [
       "world",
       "world_nether",
@@ -59,7 +59,7 @@
     "restoreEnabled": false,
     "rcloneExecutable": "/usr/bin/rclone",
     "rcloneRemote": "",
-    "rcloneConfig": "/var/lib/plexonpanel-host/rclone/rclone.conf",
+    "rcloneConfig": "/etc/plexonpanel/instances/plexoncraft/rclone.conf",
     "liveSnapshotExcludes": [
       "logs",
       "crash-reports",
@@ -86,8 +86,12 @@
     "enabled": false,
     "host": "127.0.0.1",
     "port": 25575,
-    "secretFile": "",
+    "secretFile": "/etc/plexonpanel/instances/plexoncraft/rcon.secret",
     "commandTimeoutMillis": 5000,
     "readinessTimeoutSeconds": 180
+  },
+  "fleet": {
+    "nodeId": "REPLACE_WITH_PUBLIC_NODE_UUID",
+    "instanceKey": "plexoncraft"
   }
 }

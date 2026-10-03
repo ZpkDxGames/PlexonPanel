@@ -15,6 +15,7 @@ class FleetSettingsTest {
 
   @Test void legacyRemainsUnchangedAndFleetIdentityIsSeparateFromItsName() {
     var config = config();
+    config.set("schema-version", 4); // Explicit legacy parsing remains available for planning.
     assertNull(PanelSettings.load(config).fleet());
     String node = UUID.randomUUID().toString();
     config.set("fleet.node-id", node);

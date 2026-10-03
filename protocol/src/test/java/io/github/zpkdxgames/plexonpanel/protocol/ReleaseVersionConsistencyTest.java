@@ -9,7 +9,7 @@ import java.util.regex.Pattern;
 import org.junit.jupiter.api.Test;
 
 class ReleaseVersionConsistencyTest {
-  private static final String EXPECTED_VERSION = "4.0.0";
+  private static final String EXPECTED_VERSION = "5.0.0";
 
   @Test
   void stableArtifactNamesAgreeWithRootVersionWithoutRewritingHistoricalAcceptance() throws Exception {
@@ -28,6 +28,11 @@ class ReleaseVersionConsistencyTest {
     assertTrue(packager.contains("PlexonPanel-{version}-examples.zip"));
 
     assertEquals(3, ProtocolCodec.VERSION);
+    assertTrue(read(root, "agent/src/main/resources/config.yml").contains("schema-version: 5"));
+    var gate = com.google.gson.JsonParser.parseString(read(root, "docs/release-gates-5.0.0.json")).getAsJsonObject();
+    assertEquals(version, gate.get("version").getAsString());
+    assertEquals(io.github.zpkdxgames.plexonpanel.identity.FleetContract.ID, gate.get("fleetContract").getAsString());
+    assertTrue(read(root, "docs/release-gates-4.0.0.json").contains("\"version\": \"4.0.0\""));
     assertTrue(read(root, "docs/release-gates.json").contains("\"version\": \"3.1.0\""));
   }
 
