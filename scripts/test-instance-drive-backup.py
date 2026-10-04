@@ -80,6 +80,13 @@ class DriveSetupTest(unittest.TestCase):
 
     @unittest.skipUnless(os.geteuid() == 0, 'Disposable root-owned policy fixture requires root')
     def test_atomic_apply_preserves_rollback_and_never_touches_provider_or_archives(self):
+        self.apply_fixture(False)
+
+    @unittest.skipUnless(os.geteuid() == 0, 'Disposable root-owned policy fixture requires root')
+    def test_failed_config_replace_restores_both_policy_and_seed(self):
+        self.apply_fixture(True)
+
+    def apply_fixture(self, fail_after_config):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp); policy = root / 'policy'; policy.mkdir(mode=0o700)
             path = policy / 'host-config.json'; original = (json.dumps(CONFIG) + '\n').encode(); path.write_bytes(original); path.chmod(0o640)
@@ -95,7 +102,23 @@ class DriveSetupTest(unittest.TestCase):
             with patch.object(setup, 'host_stopped', return_value=True), patch.object(setup, 'safe_path', side_effect=route), patch.object(setup.pwd, 'getpwnam', side_effect=account), patch.object(setup.grp, 'getgrnam', return_value=SimpleNamespace(gr_gid=0)):
                 # /usr/bin/rclone may not exist locally; only this fixed executable readiness check is stubbed.
                 with patch.object(Path, 'is_file', autospec=True, side_effect=lambda p: True if str(p) == '/usr/bin/rclone' else p.exists()), patch.object(setup.os, 'access', return_value=True):
-                    result = setup.apply(KEY, path, original, updated, seed)
+                    real_write = setup.atomic_write
+                    failed_once = False
+                    def write(target, raw, gid, mode):
+                        nonlocal failed_once
+                        real_write(target, raw, gid, mode)
+                        if fail_after_config and target == path and not failed_once:
+                            failed_once = True
+                            raise OSError('synthetic directory fsync failure after replace')
+                    with patch.object(setup, 'atomic_write', side_effect=write):
+                        if fail_after_config:
+                            with self.assertRaises(OSError): setup.apply(KEY, path, original, updated, seed)
+                            self.assertEqual(path.read_bytes(), original)
+                            self.assertEqual(immutable.read_bytes(), b'')
+                            self.assertEqual(archive.read_bytes(), b'untouched')
+                            self.assertFalse(provider.exists())
+                            return
+                        result = setup.apply(KEY, path, original, updated, seed)
             self.assertEqual(json.loads(path.read_bytes()), updated)
             self.assertEqual(immutable.read_bytes(), seed)
             rollback = Path(result['rollbackDirectory'])

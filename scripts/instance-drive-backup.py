@@ -192,8 +192,11 @@ def apply(key, path, old, updated, seed):
     atomic_write(immutable, seed, gid, 0o640)
     try: atomic_write(path, (json.dumps(updated, indent=2) + '\n').encode(), gid, 0o640)
     except Exception:
-        if prior is not None: atomic_write(immutable, prior, gid, 0o640)
-        else: immutable.unlink(missing_ok=True)
+        # A directory fsync may fail after replace; restore policy as well as seed.
+        try: atomic_write(path, old, gid, 0o640)
+        finally:
+            if prior is not None: atomic_write(immutable, prior, gid, 0o640)
+            else: immutable.unlink(missing_ok=True)
         raise
     return {'result': 'CONFIGURED_HOST_RESTART_REQUIRED', 'instanceKey': key,
             'remote': updated['backups']['rcloneRemote'], 'rollbackDirectory': str(rollback),

@@ -71,8 +71,8 @@ Validate using the **existing** Host JAR before starting it:
 
 ```bash
 sudo /usr/bin/java -jar "/srv/plexonpanel/servers/$PP_KEY/host/plexonpanel-host-5.0.0.jar" \
-  --validate-fleet "$PP_KEY"
-sudo systemctl start "plexonpanel-host@$PP_KEY.service"
+  --validate-fleet "$PP_KEY" && \
+  sudo systemctl start "plexonpanel-host@$PP_KEY.service"
 ```
 
 On startup, the existing Host seeds its private writable provider configuration under `/var/lib/plexonpanel/instances/<key>/provider/`, mode 0700 with config/marker 0600. Token refresh is isolated there; the immutable `/etc` directory remains non-writable by the Host. No Host JAR replacement is required for this setup.
