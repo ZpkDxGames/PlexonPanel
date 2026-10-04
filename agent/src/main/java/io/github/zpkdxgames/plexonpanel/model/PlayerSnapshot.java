@@ -19,6 +19,7 @@ public record PlayerSnapshot(
     String sessionId,
     String sessionStartedAt,
     String firstSeenAt,
-    String lastLoginAt) {
+    String lastLoginAt,
+    String skinTextureId) {
   public record Position(double x, double y, double z, float yaw, float pitch) {}
 }
