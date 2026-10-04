@@ -89,7 +89,26 @@ def validated_config(config, key):
             and len(set(includes)) == len(includes), 'BACKUP_INCLUDE_INVALID')
     return server_id
 
-def proposal(config, key, folder, credentials):
+def modern_world_includes(config, key):
+    validated_config(config, key)
+    includes = config['backups']['include']
+    require('world' in includes, 'WORLD_INCLUDE_REQUIRED')
+    root = safe_path(config['serverRoot'])
+    for name in ('overworld', 'the_nether', 'the_end'):
+        dimension = safe_path(root / 'world' / 'dimensions' / 'minecraft' / name)
+        try: info = dimension.lstat()
+        except FileNotFoundError: raise SetupError('MODERN_DIMENSION_LAYOUT_NOT_CONFIRMED') from None
+        require(stat.S_ISDIR(info.st_mode), 'MODERN_DIMENSION_LAYOUT_NOT_CONFIRMED')
+    removed = set()
+    # Explicitly named obsolete defaults only. Never skip an arbitrary missing source.
+    for name in ('world_nether', 'world_the_end', 'permissions.yml'):
+        if name not in includes: continue
+        candidate = safe_path(root / name)
+        try: candidate.lstat()
+        except FileNotFoundError: removed.add(name)
+    return [name for name in includes if name not in removed]
+
+def proposal(config, key, folder, credentials, modern_world_layout=False):
     server_id = validated_config(config, key)
     root = folder_id(folder)
     ini = configparser.ConfigParser(interpolation=None, strict=True)
@@ -105,6 +124,8 @@ def proposal(config, key, folder, credentials):
     updated = copy.deepcopy(config)
     updated['backups'].update(enabled=True, rcloneRemote=f'gdrive:plexonpanel/{server_id}',
                               rcloneConfig=f'/etc/plexonpanel/instances/{key}/rclone.conf')
+    if modern_world_layout:
+        updated['backups']['include'] = modern_world_includes(config, key)
     return updated, out.getvalue().encode('utf-8')
 
 def load_config(key):
@@ -171,6 +192,10 @@ def check(key):
 
 def apply(key, path, old, updated, seed):
     require(host_stopped(key), 'STOP_ONLY_THE_SELECTED_HOST_FIRST')
+    original = json.loads(old)
+    if updated['backups']['include'] != original['backups']['include']:
+        require(updated['backups']['include'] == modern_world_includes(original, key),
+                'INCLUDE_CORRECTION_CHANGED_REVIEW_AGAIN')
     provider = safe_path(f'/var/lib/plexonpanel/instances/{key}/provider')
     require(not provider.exists(), 'EXISTING_PROVIDER_STATE_REQUIRES_OFFLINE_RESEED')
     require(not json.loads(old)['backups'].get('rcloneRemote', '').strip(), 'EXISTING_PROVIDER_REQUIRES_MANUAL_REVIEW')
@@ -208,6 +233,8 @@ def main():
     parser.add_argument('instance', nargs='?', choices=KEYS)
     parser.add_argument('--folder', help='Existing Drive folder URL or ID (never a credential).')
     parser.add_argument('--credential-file', help='Private mode-0600 rclone OAuth file containing only [gdrive].')
+    parser.add_argument('--modern-world-layout', action='store_true',
+                        help='Verify all three dimensions under world; remove only absent legacy world folders and permissions.yml from includes.')
     args = parser.parse_args()
     require(os.geteuid() == 0, 'LOCAL_ROOT_REQUIRED')
     if args.operation == 'check':
@@ -219,7 +246,7 @@ def main():
     require(args.instance and args.folder and args.credential_file, 'INSTANCE_FOLDER_AND_CREDENTIAL_FILE_REQUIRED')
     path, old, config = load_config(args.instance)
     credentials = read_private(args.credential_file)
-    updated, seed = proposal(config, args.instance, args.folder, credentials)
+    updated, seed = proposal(config, args.instance, args.folder, credentials, args.modern_world_layout)
     other = KEYS[1] if args.instance == KEYS[0] else KEYS[0]
     other_seed = safe_path(f'/etc/plexonpanel/instances/{other}/rclone.conf')
     if other_seed.exists():
@@ -228,6 +255,9 @@ def main():
     if args.operation == 'plan':
         print(json.dumps({'instanceKey': args.instance, 'remote': updated['backups']['rcloneRemote'],
                           'immutableSeed': updated['backups']['rcloneConfig'], 'minecraftStateChanged': False,
+                          'backupIncludes': updated['backups']['include'],
+                          'removedAbsentIncludes': [name for name in config['backups']['include']
+                                                   if name not in updated['backups']['include']],
                           'hostRestartRequired': True, 'existingArchivesPreserved': True}))
     else: print(json.dumps(apply(args.instance, path, old, updated, seed)))
 

@@ -71,6 +71,60 @@ class DriveSetupTest(unittest.TestCase):
             os.link(source, root / 'hardlink')
             with self.assertRaises(setup.SetupError): setup.read_private(source)
 
+    def modern_fixture(self, root):
+        config = copy.deepcopy(CONFIG)
+        config['backups']['include'] = ['world', 'world_nether', 'world_the_end', 'plugins', 'permissions.yml', 'required-other-file']
+        for name in ('overworld', 'the_nether', 'the_end'):
+            (root / 'world' / 'dimensions' / 'minecraft' / name).mkdir(parents=True)
+        actual_safe_path = setup.safe_path
+        def route(value):
+            path = Path(value)
+            prefix = Path(CONFIG['serverRoot'])
+            return actual_safe_path(root / path.relative_to(prefix)) if path.is_relative_to(prefix) else actual_safe_path(path)
+        return config, route
+
+    def test_modern_layout_removes_only_absent_legacy_defaults_and_preserves_required_sources(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp); config, route = self.modern_fixture(root)
+            before = copy.deepcopy(config)
+            with patch.object(setup, 'safe_path', side_effect=route):
+                updated, _ = setup.proposal(config, KEY, FOLDER, CREDENTIALS, modern_world_layout=True)
+            self.assertEqual(updated['backups']['include'], ['world', 'plugins', 'required-other-file'])
+            self.assertEqual(config, before)
+            self.assertFalse((root / 'world_nether').exists())
+            self.assertEqual(len(list((root / 'world' / 'dimensions' / 'minecraft').iterdir())), 3)
+
+    def test_modern_layout_preserves_existing_legacy_data_and_permission_file(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp); config, route = self.modern_fixture(root)
+            (root / 'world_nether').mkdir(); (root / 'world_the_end').mkdir()
+            (root / 'permissions.yml').write_text('fixture: true\n')
+            with patch.object(setup, 'safe_path', side_effect=route):
+                self.assertEqual(setup.modern_world_includes(config, KEY), config['backups']['include'])
+
+    def test_modern_layout_requires_world_all_dimensions_and_no_symlinks(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp); config, route = self.modern_fixture(root)
+            with patch.object(setup, 'safe_path', side_effect=route):
+                config['backups']['include'].remove('world')
+                with self.assertRaisesRegex(setup.SetupError, 'WORLD_INCLUDE_REQUIRED'):
+                    setup.modern_world_includes(config, KEY)
+                config['backups']['include'].insert(0, 'world')
+                end = root / 'world' / 'dimensions' / 'minecraft' / 'the_end'; end.rmdir()
+                with self.assertRaisesRegex(setup.SetupError, 'MODERN_DIMENSION_LAYOUT_NOT_CONFIRMED'):
+                    setup.modern_world_includes(config, KEY)
+                end.symlink_to(root / 'world' / 'dimensions' / 'minecraft' / 'overworld')
+                with self.assertRaisesRegex(setup.SetupError, 'SYMLINK_DENIED'):
+                    setup.modern_world_includes(config, KEY)
+
+    def test_apply_revalidates_include_correction_before_any_writes(self):
+        updated, seed = setup.proposal(CONFIG, KEY, FOLDER, CREDENTIALS)
+        updated['backups']['include'] = ['world']
+        with patch.object(setup, 'host_stopped', return_value=True), patch.object(setup, 'modern_world_includes', return_value=['world', 'plugins']), patch.object(setup, 'atomic_write') as writer:
+            with self.assertRaisesRegex(setup.SetupError, 'INCLUDE_CORRECTION_CHANGED_REVIEW_AGAIN'):
+                setup.apply(KEY, Path('/unused'), json.dumps(CONFIG).encode(), updated, seed)
+            writer.assert_not_called()
+
     def test_apply_refuses_running_host_before_writes(self):
         updated, seed = setup.proposal(CONFIG, KEY, FOLDER, CREDENTIALS)
         with patch.object(setup, 'host_stopped', return_value=False), patch.object(setup, 'atomic_write') as writer:

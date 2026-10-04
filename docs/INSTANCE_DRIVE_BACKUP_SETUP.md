@@ -25,6 +25,14 @@ Open each existing Drive folder and copy its URL. The screenshot does not contai
 
 The UUID subdirectory is required by schema 5 and is read from the existing Host identity. Existing manually uploaded archives in the folder are untouched; they do not automatically become verified PlexonPanel history. The setup helper refuses to assign the same known folder ID to both instances.
 
+## Confirmed TonimSMP include correction
+
+The operator's 2026-10-04 read-only inspection found all three dimension directories at `world/dimensions/minecraft/{overworld,the_nether,the_end}`. The configured top-level `world_nether`, `world_the_end` and `permissions.yml` are absent. Including `world` recursively covers the nested dimensions, players and shared world metadata. The current Host intentionally rejects any missing configured source; connecting Drive alone does not fix this include mismatch.
+
+After confirming that exact layout, add **`--modern-world-layout` to both plan and apply** below for TonimSMP. This opt-in correction requires `world` included and all three ordinary dimension directories present with no symlink ancestors. It removes only the three named defaults when they are genuinely absent. Existing legacy folders/permission files remain included, and arbitrary missing/unreadable sources are never silently removed. Plan prints the proposed include list and removed names. Apply rechecks the correction before writes and retains the original include list in the private rollback copy. No world directory is moved, created or deleted.
+
+Do not add this flag to another instance without confirming its own layout. The correction and Drive binding are applied together during the same stopped-Host setup window. Minecraft can remain online while preparing OAuth and reviewing a plan. Warn the operator before any Host stop/start; a real cold-backup job is a separate explicitly scheduled Minecraft shutdown/restart.
+
 ## First-time setup, one instance at a time
 
 Install Ubuntu's rclone package if `/usr/bin/rclone` is missing. Keep the executable fixed to `/usr/bin/rclone`:
