@@ -85,6 +85,25 @@ sudo /usr/bin/java -jar "/srv/plexonpanel/servers/$PP_KEY/host/plexonpanel-host-
 
 On startup, the existing Host seeds its private writable provider configuration under `/var/lib/plexonpanel/instances/<key>/provider/`, mode 0700 with config/marker 0600. Token refresh is isolated there; the immutable `/etc` directory remains non-writable by the Host. No Host JAR replacement is required for this setup.
 
+## Initialize the first backup namespace
+
+The local setup helper deliberately makes no network calls. It does **not** create the remote `plexonpanel/<server UUID>` directory. The Host connectivity test lists that exact directory; a new instance can therefore have valid OAuth and local permissions yet fail preflight because its namespace does not exist.
+
+After the Host starts and its private runtime configuration is present, create only the reviewed instance namespace using that instance's Host account and runtime credentials. Keep Minecraft and the Host running; this step has no service control or archive upload. Do not use the immutable seed or another instance's credentials for token refresh.
+
+```bash
+PP_SERVER_ID="$(sudo python3 -c \
+  'import json, sys; print(json.load(open(sys.argv[1]))["serverId"])' \
+  "/etc/plexonpanel/instances/$PP_KEY/host-config.json")" && \
+sudo -u "pph-$PP_KEY" /usr/bin/rclone mkdir \
+  "gdrive:plexonpanel/$PP_SERVER_ID" \
+  --config "/var/lib/plexonpanel/instances/$PP_KEY/provider/rclone.conf"
+```
+
+Rclone `mkdir` creates the path if absent; rerunning it preserves an existing directory. The configured Drive `root_folder_id` keeps this path inside the selected server's existing Drive folder. Existing manually uploaded archives and the other server's namespace are untouched. A successful folder creation establishes directory access, not a verified backup or restore.
+
+If connectivity fails, separately list `gdrive:` and `gdrive:plexonpanel/<server UUID>` with the same Host account/runtime config. Root access succeeding while the namespace reports `directory not found` identifies the missing directory; it is not evidence that local credential or source permissions need broadening. Keep OAuth content, raw debug logs and directory listings out of chat. After creating the namespace, run **Test Google Drive** in the Dashboard and refresh **backup preflight** before planning a real cold backup.
+
 ## Existing provider recovery and rollback
 
 For `EXISTING_PROVIDER_STATE_REQUIRES_OFFLINE_RESEED` or `EXISTING_PROVIDER_REQUIRES_MANUAL_REVIEW`, do not delete the provider directory or copy another instance's state. Preserve the current configuration and use the existing administrator CLI `--plan-provider-reseed <key>` / `--reseed-provider <key>` only after following `PROVIDER_RUNTIME_STATE.md`. The first-time helper deliberately cannot overwrite refreshed credentials.
@@ -102,4 +121,4 @@ Apply reports a private rollback directory. Before the Host has been started wit
 
 The fixture tests validate argument/identity/path policy, private file reads, symlink/hardlink rejection, immutable proposal behavior, inactive-Host enforcement, atomic policy/seed installation and private rollback preservation. They do not certify Google OAuth, network access, uploads, token refresh, actual systemd control, or a Minecraft cold backup.
 
-Primary references: [rclone Drive root folder ID](https://rclone.org/drive/#root-folder-id), [headless setup](https://rclone.org/remote_setup/), [private token state](PROVIDER_RUNTIME_STATE.md), [cold backup contract](BACKUPS.md).
+Primary references: [rclone Drive root folder ID](https://rclone.org/drive/#root-folder-id), [create an absent remote directory](https://rclone.org/commands/rclone_mkdir/), [headless setup](https://rclone.org/remote_setup/), [private token state](PROVIDER_RUNTIME_STATE.md), [cold backup contract](BACKUPS.md).
