@@ -94,5 +94,53 @@ if '--require-isolation' in sys.argv:
         assert permission(host, log, 'rb') == 0 and permission(host, log, 'ab') == 13
         assert permission(other, log, 'rb') == 13 and permission(host, skipped, 'rb') == 13
         print('PASS: actual paired Host read, Host write denial, unrelated Host denial, masked-principal preservation, root-hardlink denial and scoped journal read/denial')
+        uploader = 61004
+        plugins = root / 'plugins'; plugins.mkdir(mode=0o700); os.chown(plugins, mc, mc)
+        uploaded = plugins / 'Example.jar'; uploaded.write_bytes(b'disposable plugin fixture')
+        uploaded.chmod(0o600); os.chown(uploaded, uploader, uploader)
+        unrelated = plugins / 'Unrelated.jar'; unrelated.write_bytes(b'foreign fixture')
+        unrelated.chmod(0o600); os.chown(unrelated, other, other)
+        secret = plugins / 'operator-secret.key'; secret.write_bytes(b'disposable secret fixture')
+        secret.chmod(0o600); os.chown(secret, uploader, uploader)
+        (plugins / 'Outside.jar').symlink_to(sensitive)
+        os.link(sensitive, plugins / 'Hardlink.jar')
+        nested = plugins / 'Nested'; nested.mkdir(mode=0o700); os.chown(nested, mc, mc)
+        nested_jar = nested / 'Private.jar'; nested_jar.write_bytes(b'nested fixture')
+        nested_jar.chmod(0o600); os.chown(nested_jar, uploader, uploader)
+        module.scan(root, mc, host, 'backup', acl)
+        assert permission(mc, uploaded, 'rb') == 13 and permission(host, uploaded, 'rb') == 13
+        replace_acl(uploaded, f'user::rw-\nuser:{other}:r--\ngroup::---\nmask::---\nother::---\n')
+        protected_before = {p: text(p) for p in (sensitive, unrelated, secret, nested_jar)}
+        counts = module.scan_plugin_uploads(root, mc, host, uploader, acl)
+        assert counts['updated'] == 1
+        assert permission(mc, uploaded, 'rb') == 0 and permission(host, uploaded, 'rb') == 0
+        assert permission(host, uploaded, 'ab') == 13 and permission(other, uploaded, 'rb') == 13
+        assert uploaded.stat().st_uid == uploader and uploaded.read_bytes() == b'disposable plugin fixture'
+        for p, before in protected_before.items(): assert text(p) == before
+        assert module.scan_plugin_uploads(root, mc, host, uploader, acl)['updated'] == 0
+        uploaded.chmod(0o600)
+        assert permission(mc, uploaded, 'rb') == 13
+        module.scan_plugin_uploads(root, mc, host, uploader, acl)
+        assert permission(mc, uploaded, 'rb') == 0 and permission(host, uploaded, 'rb') == 0
+        replacement = plugins / 'upload.tmp'; replacement.write_bytes(b'atomic replacement fixture')
+        replacement.chmod(0o600); os.chown(replacement, uploader, uploader); replacement.replace(uploaded)
+        module.scan_plugin_uploads(root, mc, host, uploader, acl)
+        assert permission(mc, uploaded, 'rb') == 0 and permission(host, uploaded, 'rb') == 0
+        previous = base / 'previous-plugin'
+        class SubstitutingAcl:
+            changed = False
+            def grant(self, fd, user, directory):
+                if not self.changed:
+                    self.changed = True; uploaded.rename(previous); uploaded.symlink_to(sensitive)
+                return acl.grant(fd, user, directory)
+        module.scan_plugin_uploads(root, mc, host, uploader, SubstitutingAcl())
+        assert text(sensitive) == protected_before[sensitive]
+        assert f'user:{host}:r--' in text(previous)
+        uploaded.unlink()
+        mc_jar = plugins / 'MinecraftOwned.jar'; mc_jar.write_bytes(b'minecraft-owned fixture')
+        mc_jar.chmod(0o200); os.chown(mc_jar, mc, mc)
+        module.scan_plugin_uploads(root, mc, host, uploader, acl)
+        assert permission(mc, mc_jar, 'rb') == 0 and permission(host, mc_jar, 'ab') == 13
+        print('PASS: operator plugin JAR read repair, masked ACL and atomic replacement repair, original ownership/content preserved, no Host write/foreign reads, no nested/config/symlink/hardlink modification, pinned-inode substitution')
 else:
     print('NOT_EXECUTED: multi-UID authorization (requires disposable privileged CI runner)')

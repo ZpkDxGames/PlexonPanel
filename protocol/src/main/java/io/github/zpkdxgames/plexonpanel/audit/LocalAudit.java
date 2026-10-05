@@ -10,8 +10,7 @@ import java.time.*;
 import java.util.*;
 
 /**
- * Synchronous durable audit, called only on the bounded operations worker. Failures deny privileged
- * work.
+ * Synchronized durable audit shared by bounded control workers. Failures deny privileged work.
  */
 public final class LocalAudit {
   private final Path directory;

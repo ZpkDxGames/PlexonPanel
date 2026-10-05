@@ -96,12 +96,14 @@ if version == "5.0.0":
         "host-agent/examples/host-config.json", "host-agent/examples/host-config-full-control.json",
         *["host-agent/examples/fleet/" + name for name in [
             "minecraft@.service", "plexonpanel-host@.service", "plexonpanel-backup-read@.service",
+            "plexonpanel-plugin-read@.service",
             "plexonpanel-journal-read@.service", "plexonpanel-node-lock.service", "jvm.args",
             "instance-read-authority.py", "00-plexonpanel-instance-control.rules",
         ]],
         *["docs/" + name for name in [
             "PAPER_FLEET_BOOTSTRAP.md", "NODE_INSTANCE_REGISTRY.md", "INSTANCE_CONFIGURATION_VALIDATION.md",
             "INSTANCE_SERVICE_DEPLOYMENT.md", "INSTANCE_CLONE_REKEY.md", "INSTANCE_AUTHORIZATION.md",
+            "PLUGIN_UPLOAD_PERMISSIONS.md", "HOST_LIFECYCLE_RESPONSIVENESS.md",
             "PROVIDER_RUNTIME_STATE.md", "PROTOCOL.md", "release-5.0.0.md", "release-gates-5.0.0.json",
         ]],
         "scripts/verify-host-portability.py", "README.md", "CHANGELOG.md", "PRIVACY.md",
