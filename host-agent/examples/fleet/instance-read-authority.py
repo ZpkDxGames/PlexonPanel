@@ -160,6 +160,50 @@ def scan(root, owner_uid, host_uid, mode, acl=None):
         os.close(root_fd)
     return counts
 
+def scan_plugin_uploads(root, mc_uid, host_uid, uploader_uid, acl=None):
+    """Repair only top-level plugin JARs from the explicitly trusted local uploader."""
+    acl = acl or Acl()
+    counts = {'visited': 0, 'updated': 0, 'skipped': 0}
+    server_fd = os.open(root, OPEN | os.O_DIRECTORY)
+    plugins_fd = None
+    try:
+        server = os.fstat(server_fd)
+        if server.st_uid != mc_uid: deny('PLUGIN_SERVER_OWNER_INVALID')
+        plugins_fd = os.open('plugins', OPEN | os.O_DIRECTORY, dir_fd=server_fd)
+        plugins = os.fstat(plugins_fd)
+        if plugins.st_uid != mc_uid or plugins.st_dev != server.st_dev:
+            deny('PLUGIN_DIRECTORY_OWNER_INVALID')
+        for name in os.listdir(plugins_fd):
+            counts['visited'] += 1
+            if counts['visited'] > 2000: deny('PLUGIN_UPLOAD_ENTRY_LIMIT')
+            if not name.lower().endswith('.jar'):
+                counts['skipped'] += 1; continue
+            child = None
+            try:
+                child = os.open(name, OPEN, dir_fd=plugins_fd)
+                info = os.fstat(child)
+                if (not stat.S_ISREG(info.st_mode) or info.st_nlink != 1
+                        or info.st_dev != server.st_dev or info.st_uid not in (mc_uid, uploader_uid)):
+                    counts['skipped'] += 1; continue
+                changed = False
+                if info.st_uid == mc_uid:
+                    if not info.st_mode & stat.S_IRUSR:
+                        os.fchmod(child, stat.S_IMODE(info.st_mode) | stat.S_IRUSR)
+                        changed = True
+                else:
+                    changed = acl.grant(child, mc_uid, False)
+                changed = acl.grant(child, host_uid, False) or changed
+                counts['updated'] += int(changed)
+            except OSError as error:
+                if error.errno not in (errno.ENOENT, errno.ELOOP, errno.ENXIO, errno.EACCES, errno.ENOTDIR): raise
+                counts['skipped'] += 1
+            finally:
+                if child is not None: os.close(child)
+    finally:
+        if plugins_fd is not None: os.close(plugins_fd)
+        os.close(server_fd)
+    return counts
+
 def prepare_lock():
     node = node_id()
     for directory in (Path('/run/plexonpanel'), Path('/run/plexonpanel/locks')):
@@ -225,6 +269,18 @@ def main():
         prepare_lock(); print('{"ok":true,"operation":"prepare-lock"}'); return
     if len(sys.argv) == 3 and sys.argv[1] == 'prepare-journal':
         prepare_journal(sys.argv[2]); print('{"ok":true,"operation":"prepare-journal"}'); return
+    if len(sys.argv) in (4, 5) and sys.argv[1] == 'plugins':
+        if len(sys.argv) == 5 and sys.argv[4] != '--once': deny('READ_AUTHORITY_ARGUMENTS_INVALID')
+        key = sys.argv[2]; mc, host = scope(key)
+        uploader = pwd.getpwnam(sys.argv[3]).pw_uid
+        if uploader in (0, mc, host): deny('PLUGIN_UPLOADER_INVALID')
+        root = Path('/srv/plexonpanel/servers') / key / 'server'
+        trusted(root.parent, True)
+        while True:
+            counts = scan_plugin_uploads(root, mc, host, uploader)
+            if len(sys.argv) == 5:
+                print(json.dumps({'ok': True, 'instanceKey': key, 'mode': 'plugins', **counts})); return
+            time.sleep(1)
     if len(sys.argv) not in (3, 4) or sys.argv[1] not in ('backup', 'journal') or (len(sys.argv) == 4 and sys.argv[3] != '--once'):
         deny('READ_AUTHORITY_ARGUMENTS_INVALID')
     mode, key = sys.argv[1:3]; mc, host = scope(key)

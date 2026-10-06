@@ -1,0 +1,34 @@
+[Unit]
+Description=PlexonPanel local plugin upload read authority %i
+After=local-fs.target
+
+[Service]
+Type=simple
+User=root
+Group=root
+# ubuntu is the explicitly trusted VS Code uploader on this VPS.
+# Change this root-owned unit before installing on a machine with a different uploader.
+ExecStartPre=/usr/bin/python3 /usr/local/lib/plexonpanel/instance-read-authority.py plugins %i ubuntu --once
+ExecStart=/usr/bin/python3 /usr/local/lib/plexonpanel/instance-read-authority.py plugins %i ubuntu
+Restart=on-failure
+RestartSec=5s
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+RestrictAddressFamilies=AF_UNIX
+IPAddressDeny=any
+CapabilityBoundingSet=CAP_DAC_READ_SEARCH CAP_FOWNER
+ReadWritePaths=/srv/plexonpanel/servers/%i/server/plugins
+
+[Install]
+WantedBy=multi-user.target

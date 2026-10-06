@@ -44,6 +44,8 @@ Browser sends `{type:"dashboard.action",requestId,action,parameters,agentKind?}`
 
 `dashboard.action_queued` acknowledges routing only. Private `server.event` with eventType `action.result` returns final data/status only to the requesting device. Status includes SUCCESS, CONFLICT, DENIED, FAILED or NOT_AVAILABLE. Disconnect/timeout requires local outcome verification and is never automatically replayed. A completed operation whose result audit fails explicitly requests verification before retrying.
 
+Host lifecycle dispatch uses a dedicated worker with no lifecycle queue, separate from bulk I/O and bounded status/audit workers. Concurrent lifecycle or backup/restore conflicts return `BUSY` without retaining the command for later execution. Paper keeps ordered serial dispatch. All workers share the same authorization, confirmation, replay/rate and durable audit enforcement; see `HOST_LIFECYCLE_RESPONSIVENESS.md`.
+
 Parameters: at most 16 keys / 49,152 bytes. Per-device limits: 20 actions or 160 chunks per 10 seconds, 32 pending requests; room limit 64 pending. Agents have independent bounded gates. Intent UUIDs survive process restart through the local audit replay window. Commands/messages/file bodies are excluded from audit parameters.
 
 Inventory batches use `snapshotId`, `capturedAt`, `offset`, `complete`, and `truncated`, targeting ≤48 KiB. Clients stage a snapshot until its complete batch, discard mismatched/out-of-order batches, replay only newer presence deltas, and clear online players at an authenticated-session boundary. Recipient filters independently remove player location/address, history-only fields, full-console levels, and disabled events. Host cannot spoof Paper telemetry or player presence.

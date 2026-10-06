@@ -423,7 +423,8 @@ public final class HostMain {
             },
             connection,
             connection::authenticated,
-            config.serverId());
+            config.serverId(),
+            ControlEngine.DispatchMode.HOST);
 
     Runnable fastSnapshot =
         () -> {

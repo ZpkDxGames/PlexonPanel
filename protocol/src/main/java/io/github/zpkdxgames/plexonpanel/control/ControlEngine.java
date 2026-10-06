@@ -18,6 +18,14 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.*;
 
 public final class ControlEngine implements AutoCloseable {
+  /** Paper retains ordered dispatch; Host separates lifecycle and short status work from I/O. */
+  public enum DispatchMode { SERIAL, HOST }
+
+  private static final Set<String> LIFECYCLE_ACTIONS =
+      Set.of("server.start", "server.stop", "server.restart");
+  private static final Set<String> HOST_STATUS_ACTIONS =
+      Set.of("server.status", "maintenance.status", "provider.status", "audit.list", "audit.self");
+
   @FunctionalInterface
   public interface Backend {
     Map<String, Object> execute(String action, JsonObject parameters, DeviceRegistry.Device device)
@@ -34,6 +42,9 @@ public final class ControlEngine implements AutoCloseable {
   private final String serverId;
   private final RequestGate gate = new RequestGate();
   private final AtomicBoolean closing = new AtomicBoolean();
+  private final DispatchMode dispatchMode;
+  private final ThreadPoolExecutor lifecycleWorker;
+  private final ThreadPoolExecutor statusWorker;
   private final ThreadPoolExecutor worker =
       new ThreadPoolExecutor(
           1,
@@ -57,6 +68,20 @@ public final class ControlEngine implements AutoCloseable {
       MessageSink sink,
       BooleanSupplier authenticated,
       String serverId) {
+    this(devices, capabilities, audit, files, backend, sink, authenticated, serverId,
+        DispatchMode.SERIAL);
+  }
+
+  public ControlEngine(
+      DeviceRegistry devices,
+      Map<String, Boolean> capabilities,
+      LocalAudit audit,
+      SafeFiles files,
+      Backend backend,
+      MessageSink sink,
+      BooleanSupplier authenticated,
+      String serverId,
+      DispatchMode dispatchMode) {
     this.devices = devices;
     this.capabilities = Map.copyOf(capabilities);
     this.audit = audit;
@@ -65,6 +90,17 @@ public final class ControlEngine implements AutoCloseable {
     this.sink = sink;
     this.authenticated = authenticated;
     this.serverId = serverId;
+    this.dispatchMode = Objects.requireNonNull(dispatchMode);
+    // Never retain a lifecycle intent behind an upload or a previous lifecycle operation.
+    // The Host backend's existing tryLock still rejects backup/restore conflicts immediately.
+    this.lifecycleWorker = dispatchMode == DispatchMode.HOST
+        ? new ThreadPoolExecutor(1, 1, 0, TimeUnit.SECONDS, new SynchronousQueue<>(),
+            new NamedThreadFactory("plexonpanel-lifecycle"), new ThreadPoolExecutor.AbortPolicy())
+        : null;
+    this.statusWorker = dispatchMode == DispatchMode.HOST
+        ? new ThreadPoolExecutor(2, 2, 0, TimeUnit.SECONDS, new ArrayBlockingQueue<>(8),
+            new NamedThreadFactory("plexonpanel-status"), new ThreadPoolExecutor.AbortPolicy())
+        : null;
   }
 
   public void accept(DecodedMessage message) {
@@ -72,7 +108,7 @@ public final class ControlEngine implements AutoCloseable {
       return;
     JsonObject body = message.body().deepCopy();
     try {
-      worker.execute(() -> execute(body));
+      dispatcher(body).execute(() -> execute(body));
     } catch (RejectedExecutionException busy) {
       try {
         reply(
@@ -81,11 +117,23 @@ public final class ControlEngine implements AutoCloseable {
             text(body, "deviceId", 36),
             "NOT_AVAILABLE",
             "BUSY",
-            "The operations queue is full.",
+            dispatchMode == DispatchMode.HOST && LIFECYCLE_ACTIONS.contains(text(body, "action", 64))
+                ? "Another lifecycle request is running. This request was not queued."
+                : "The operations queue is full.",
             Map.of());
       } catch (RuntimeException ignored) {
       }
     }
+  }
+
+  private ThreadPoolExecutor dispatcher(JsonObject body) {
+    if (dispatchMode != DispatchMode.HOST) return worker;
+    JsonElement raw = body.get("action");
+    if (!(raw instanceof JsonPrimitive primitive) || !primitive.isString()) return worker;
+    String action = primitive.getAsString();
+    if (LIFECYCLE_ACTIONS.contains(action)) return lifecycleWorker;
+    if (HOST_STATUS_ACTIONS.contains(action)) return statusWorker;
+    return worker;
   }
 
   private void execute(JsonObject body) {
@@ -119,6 +167,9 @@ public final class ControlEngine implements AutoCloseable {
           && !device.role().equals("Owner")) throw new SecurityException("OWNER_REQUIRED");
       audit.begin(
           entry(id, deviceId, device, action, parameters, "STARTED", "INTENT", started, Map.of()));
+      if (dispatchMode == DispatchMode.HOST && LIFECYCLE_ACTIONS.contains(action))
+        System.err.printf("PlexonPanel lifecycle started requestId=%s action=%s%n",
+            safeLog(id), safeLog(action));
       Map<String, Object> data = local(action, parameters, device);
       if (data == null) data = backend.execute(action, parameters, device);
       operationCompleted = true;
@@ -136,6 +187,9 @@ public final class ControlEngine implements AutoCloseable {
         if (data.containsKey(key)) metadata.put(key, data.get(key));
       audit.append(
           entry(id, deviceId, device, action, parameters, "SUCCESS", "OK", started, metadata));
+      if (dispatchMode == DispatchMode.HOST && LIFECYCLE_ACTIONS.contains(action))
+        System.err.printf("PlexonPanel lifecycle completed requestId=%s action=%s durationMillis=%d%n",
+            safeLog(id), safeLog(action), (System.nanoTime() - started) / 1000000);
       if (new Gson().toJson(data).getBytes(StandardCharsets.UTF_8).length > 56000)
         reply(
             id,
@@ -198,7 +252,10 @@ public final class ControlEngine implements AutoCloseable {
                     case "STALE_FILE" -> "The file changed. Reload it and review your edits.";
                     case "DUPLICATE_REQUEST" ->
                         "This request ID was already used; the action was not repeated.";
-                    case "RATE_LIMITED", "BUSY" -> "Too many requests. Wait before trying again.";
+                    case "BUSY" -> LIFECYCLE_ACTIONS.contains(action)
+                        ? "A backup, restore or lifecycle operation is running. This request was not queued."
+                        : "Too many requests. Wait before trying again.";
+                    case "RATE_LIMITED" -> "Too many requests. Wait before trying again.";
                     default ->
                         "The operation could not be completed. Check local policy, parameters and the"
                             + " server log.";
@@ -378,11 +435,22 @@ public final class ControlEngine implements AutoCloseable {
   }
 
   public void beginClose() {
-    if (closing.compareAndSet(false, true)) worker.shutdownNow();
+    if (closing.compareAndSet(false, true)) {
+      worker.shutdownNow();
+      if (lifecycleWorker != null) lifecycleWorker.shutdownNow();
+      if (statusWorker != null) statusWorker.shutdownNow();
+    }
   }
 
   public boolean awaitClosed(Duration timeout) {
+    if (timeout.isNegative() || timeout.compareTo(Duration.ofMinutes(10)) > 0)
+      throw new IllegalArgumentException("Invalid drain timeout");
+    long deadline = System.nanoTime() + timeout.toNanos();
     boolean drained = ExecutorDrain.await(worker, timeout);
+    if (lifecycleWorker != null)
+      drained &= ExecutorDrain.await(lifecycleWorker, ExecutorDrain.remaining(deadline));
+    if (statusWorker != null)
+      drained &= ExecutorDrain.await(statusWorker, ExecutorDrain.remaining(deadline));
     if (drained) transfers.clear();
     return drained;
   }
