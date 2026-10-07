@@ -127,7 +127,17 @@ public final class PaperSnapshotCollector {
               metadata.sessionId(),
               metadata.sessionStartedAt(),
               metadata.firstSeenAt(),
-              metadata.lastLoginAt());
+              metadata.lastLoginAt(),
+              skinTextureId(player));
+  }
+
+  private static String skinTextureId(Player player) {
+    try {
+      return PlayerSkin.textureId(player.getPlayerProfile().getTextures().getSkin());
+    } catch (RuntimeException ignored) {
+      // Optional profile metadata must not prevent the rest of the player snapshot.
+      return null;
+    }
   }
 
   public List<java.util.Map<String, Object>> worldSnapshots() {
