@@ -112,6 +112,34 @@ class HostAuthorizationMirrorTest {
   }
 
   @Test
+  void twoInstancesKeepIndependentDurableGrantsEvenForTheSameBrowserDevice() throws Exception {
+    String secondId = UUID.randomUUID().toString();
+    String browserId = UUID.randomUUID().toString();
+    Path firstPath = root.resolve("plexoncraft/access");
+    Path secondPath = root.resolve("tonimsmp/access");
+    var first = new HostAuthorizationMirror(firstPath, serverId);
+    var second = new HostAuthorizationMirror(secondPath, secondId);
+    var owner = device("Owner", browserId);
+    var observer = device("Observer", browserId);
+    var firstState = new DeviceRegistry.State(3, serverId, 44, 7, List.of(owner));
+    var secondState = new DeviceRegistry.State(3, secondId, 44, 7, List.of(observer));
+    first.apply(gson.toJsonTree(firstState).getAsJsonObject());
+    second.apply(gson.toJsonTree(secondState).getAsJsonObject());
+    var secondBytes = Files.readAllBytes(secondPath.resolve("devices.json"));
+
+    assertThrows(java.io.IOException.class, () -> second.apply(gson.toJsonTree(firstState).getAsJsonObject()));
+    assertArrayEquals(secondBytes, Files.readAllBytes(secondPath.resolve("devices.json")));
+    first.apply(gson.toJsonTree(new DeviceRegistry.State(3, serverId, 44, 8, List.of())).getAsJsonObject());
+
+    var restartedFirst = new HostAuthorizationMirror(firstPath, serverId);
+    var restartedSecond = new HostAuthorizationMirror(secondPath, secondId);
+    assertThrows(SecurityException.class, () -> restartedFirst.registry().authorize(browserId, 44, "server.status", Map.of("server.status", true)));
+    assertEquals(observer, restartedSecond.registry().authorize(browserId, 44, "server.status", Map.of("server.status", true)));
+    assertThrows(SecurityException.class, () -> restartedSecond.registry().authorize(browserId, 44, "backup.view", Map.of("backup.view", true)));
+    assertArrayEquals(secondBytes, Files.readAllBytes(secondPath.resolve("devices.json")));
+  }
+
+  @Test
   void hostMirrorUsesPrivatePosixModeWhenSupported() throws Exception {
     HostAuthorizationMirror mirror = new HostAuthorizationMirror(root.resolve("host/access"), serverId);
     try {
