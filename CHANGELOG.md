@@ -1,5 +1,12 @@
 # Changelog
 
+## 5.0.1 — backup recovery preflight consistency
+
+- Make Host backup preflight combine durable maintenance-job recovery with interrupted-restore recovery instead of reporting only the restore journal.
+- Expose `jobRecoveryRequired` and `restoreRecoveryRequired` separately while keeping the aggregate `recoveryRequired` fail-closed.
+- Apply the same combined recovery gate to Host service status so Dashboard readiness and runtime health cannot contradict the Host journal.
+- Preserve Protocol 3, fleet identity, immutable device grants, manual-only full-backup authority and the existing cold-backup/rclone safety contract.
+
 ## 5.0.0 — coordinated multi-server source and release preparation
 
 - Fix the Paper defaults-aware physical-marker migration before atomic schema-5 activation.
