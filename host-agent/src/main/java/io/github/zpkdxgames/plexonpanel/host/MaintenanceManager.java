@@ -145,6 +145,11 @@ public final class MaintenanceManager implements AutoCloseable {
     return settings;
   }
 
+  /** True when the durable maintenance journal blocks another destructive operation. */
+  public boolean recoveryRequired() throws IOException {
+    return state.recoveryRequired() != null;
+  }
+
   public synchronized MaintenanceSettings updateSettings(JsonElement value) throws IOException {
     MaintenanceSettings next = MaintenanceSettings.fromJson(value);
     next.save(settingsPath);
