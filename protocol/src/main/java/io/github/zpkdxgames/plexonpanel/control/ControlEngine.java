@@ -262,9 +262,10 @@ public final class ControlEngine implements AutoCloseable {
                   };
       String phase = failure == null ? "" : failure.phase();
       String path = failure == null || failure.safeRelativePath() == null ? "" : failure.safeRelativePath();
-      System.err.printf(
-          "PlexonPanel control failure requestId=%s action=%s code=%s phase=%s exception=%s path=%s%n",
-          safeLog(id), safeLog(action), safeLog(code), safeLog(phase), error.getClass().getSimpleName(), safeLog(path));
+      if (!"CONFIRMATION_REQUIRED".equals(code))
+        System.err.printf(
+            "PlexonPanel control failure requestId=%s action=%s code=%s phase=%s exception=%s path=%s%n",
+            safeLog(id), safeLog(action), safeLog(code), safeLog(phase), error.getClass().getSimpleName(), safeLog(path));
       reply(id, action, deviceId, status, code, message, safeFailureData);
     }
   }
