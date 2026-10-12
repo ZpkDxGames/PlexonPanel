@@ -85,6 +85,12 @@ remote-actions:
     # local policy; it does not give Paper read authority over server-console history.
     allow:
       - "^(tps|mspt)(\\s.*)?$"
+      - "^list$"
+      - "^save-all( flush)?$"
+      - "^weather (clear|rain|thunder)( [0-9]+)?$"
+      - "^whitelist (list|reload|on)$"
+      - "^say .{1,256}$"
+      - "^time (query [a-z_]+|set (day|noon|night|midnight))$"
       - "^paper version$"
       - "^spark (health|tps)(\\s.*)?$"
       - "^plexonpanel reload$"

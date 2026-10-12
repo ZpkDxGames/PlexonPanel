@@ -19,7 +19,7 @@ import java.util.concurrent.locks.ReentrantLock;
 
 public final class HostMain {
   private static final long FAST_TELEMETRY_MILLIS = 250L;
-  private static final long SERVICE_STATUS_SECONDS = 5L;
+  private static final long SERVICE_STATUS_SECONDS = 1L;
 
   private HostMain() {}
 
@@ -456,6 +456,7 @@ public final class HostMain {
           if (!connection.authenticated()) return;
           try {
             var status = new HashMap<>(service.status());
+            status.put("sourceIntervalMillis", TimeUnit.SECONDS.toMillis(SERVICE_STATUS_SECONDS));
             if (config.fleetIdentity() != null) status.put("nodeId", config.fleetIdentity().nodeId().toString());
             status.put("paperConnected", paper.get());
             status.put("authorizationMirror", authorization.status());

@@ -343,7 +343,10 @@ public final class TelemetryService implements Listener, AutoCloseable {
     if (closed.get() || !settings.enabled()) return;
     long epoch = transportEpoch.get();
     try {
-      Object snapshot = systemCollector.collect();
+      Map<String, Object> snapshot = new LinkedHashMap<>(systemCollector.collect());
+      snapshot.put(
+          "sourceIntervalMillis",
+          Math.multiplyExact(settings.systemIntervalSeconds(), 1000L));
       if (epoch == transportEpoch.get() && !closed.get())
         sink.send("telemetry.system", snapshot, MessagePriority.TELEMETRY);
     } catch (Exception error) {

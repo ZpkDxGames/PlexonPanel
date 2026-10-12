@@ -66,7 +66,8 @@ public final class PaperSnapshotCollector {
         tickMillis.length == 0 ? 0.0 : round(tickMillis[0]),
         round(p95),
         round(maximum),
-        server.getCurrentTick());
+        server.getCurrentTick(),
+        Math.multiplyExact(settings.serverIntervalTicks(), 50L));
   }
 
   public List<PlayerSnapshot> playerSnapshots() {
