@@ -1,6 +1,6 @@
 # Changelog
 
-## 5.0.1 — backup recovery preflight consistency
+## Unreleased — backup recovery preflight consistency
 
 - Make Host backup preflight combine durable maintenance-job recovery with interrupted-restore recovery instead of reporting only the restore journal.
 - Expose `jobRecoveryRequired` and `restoreRecoveryRequired` separately while keeping the aggregate `recoveryRequired` fail-closed.
