@@ -256,7 +256,13 @@ public final class HostMain {
                   result.put("backupMode", "MANUAL_FULL_ONLY");
                   result.put("hostAuthenticated", connection.authenticated());
                   result.put("operationBusy", operationLock.isLocked());
-                  result.put("recoveryRequired", fullBackups.recoveryRequired());
+                  boolean restoreRecoveryRequired = fullBackups.recoveryRequired();
+                  boolean jobRecoveryRequired = maintenance.recoveryRequired();
+                  result.put("restoreRecoveryRequired", restoreRecoveryRequired);
+                  result.put("jobRecoveryRequired", jobRecoveryRequired);
+                  result.put(
+                      "recoveryRequired",
+                      backupRecoveryRequired(restoreRecoveryRequired, jobRecoveryRequired));
                   result.put(
                       "backupRootWritable", Files.isDirectory(directory) && Files.isWritable(directory));
                   result.put("commandChannelConfigured", commands.enabled());
@@ -390,7 +396,10 @@ public final class HostMain {
                       "minecraftReady",
                       minecraftReadiness.observeServiceState(
                           "active".equals(status.get("state"))));
-                  status.put("recoveryRequired", fullBackups.recoveryRequired());
+                  status.put(
+                      "recoveryRequired",
+                      backupRecoveryRequired(
+                          fullBackups.recoveryRequired(), maintenance.recoveryRequired()));
                   return status;
                 }
                 case "server.start", "server.stop", "server.restart" -> {
@@ -454,7 +463,10 @@ public final class HostMain {
                       "minecraftReady",
                       minecraftReadiness.observeServiceState(
                           "active".equals(status.get("state"))));
-            status.put("recoveryRequired", fullBackups.recoveryRequired());
+            status.put(
+                      "recoveryRequired",
+                      backupRecoveryRequired(
+                          fullBackups.recoveryRequired(), maintenance.recoveryRequired()));
             connection.send("service.status", status, MessagePriority.TELEMETRY);
           } catch (Exception e) {
             System.err.println("Host service snapshot unavailable: " + e.getClass().getSimpleName());
@@ -548,6 +560,11 @@ public final class HostMain {
       Thread.sleep(250);
     }
     throw new IllegalStateException("MINECRAFT_READINESS_TIMEOUT");
+  }
+
+  static boolean backupRecoveryRequired(
+      boolean restoreRecoveryRequired, boolean jobRecoveryRequired) {
+    return restoreRecoveryRequired || jobRecoveryRequired;
   }
 
   private static boolean configChanged(Path path, long loadedMtime) {
