@@ -98,6 +98,39 @@ class ControlPolicyTest {
   }
 
   @Test
+  void fullControlPresetAllowsDashboardQuickCommandsButKeepsExplicitDenies() throws Exception {
+    Path source =
+        fixture("examples/config-full-control.yml", "agent/examples/config-full-control.yml");
+    YamlConfiguration config = YamlConfiguration.loadConfiguration(source.toFile());
+    config.set("schema-version", 4);
+    Path serverRoot = temporary.resolve("server-console-policy");
+    Files.createDirectories(serverRoot);
+    config.set("files.roots.server.path", serverRoot.toString());
+
+    PanelSettings settings = PanelSettings.load(config);
+    var commands =
+        new io.github.zpkdxgames.plexonpanel.action.CommandPolicy(
+            settings.remoteActions().console().allowPatterns(),
+            settings.remoteActions().console().denyPatterns());
+
+    for (String command :
+        List.of(
+            "tps",
+            "list",
+            "save-all",
+            "save-all flush",
+            "weather clear",
+            "whitelist reload",
+            "say hello from dashboard",
+            "time set day",
+            "plexonpanel reload"))
+      assertTrue(commands.evaluate(command).allowed(), () -> "Expected allowed command: " + command);
+
+    for (String command : List.of("stop", "reload", "op Player", "lp user Player permission set *"))
+      assertFalse(commands.evaluate(command).allowed(), () -> "Expected denied command: " + command);
+  }
+
+  @Test
   void paperConsoleFallbackRequiresExplicitEnablement() throws Exception {
     Path source = fixture("examples/config-full-control.yml", "agent/examples/config-full-control.yml");
     YamlConfiguration config = YamlConfiguration.loadConfiguration(source.toFile());
