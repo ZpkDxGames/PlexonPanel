@@ -902,8 +902,8 @@ public final class MaintenanceManager implements AutoCloseable {
           outcome,
           code,
           outcome.equals("RECOVERY_REQUIRED")
-              ? "Maintenance failed after the Host may have stopped Minecraft; verify service state before retrying."
-              : "Maintenance failed before the destructive stop boundary.");
+              ? "Maintenance failed after the Host may have stopped Minecraft; verify service state before retrying." + sourceFailureDetail(error)
+              : "Maintenance failed before the destructive stop boundary." + sourceFailureDetail(error));
     } catch (Exception ignored) {
     }
     publish(
@@ -995,6 +995,12 @@ public final class MaintenanceManager implements AutoCloseable {
 
   private static String retryableOffsiteCode(String errorCode) {
     return errorCode == null || errorCode.isBlank() ? "REMOTE_UPLOAD_FAILED" : errorCode;
+  }
+
+  private static String sourceFailureDetail(Exception error) {
+    String relative = error instanceof FullBackupSource.SourceFailure source ? source.relativePath()
+        : error instanceof OperationFailure failure ? failure.safeRelativePath() : null;
+    return relative == null ? "" : " Source: " + relative;
   }
 
   private static String classify(Exception error) {

@@ -104,7 +104,10 @@ final class FullBackupPreflight {
     Objects.requireNonNull(failure);
     String message = failure.getMessage();
     String code = SAFE_FAILURE_CODES.contains(message) ? message : fallbackCode;
-    return preflightFailure(code, stage, !code.endsWith("INVALID"));
+    OperationFailure translated = preflightFailure(code, stage, !code.endsWith("INVALID"));
+    if (failure instanceof FullBackupSource.SourceFailure source && source.relativePath() != null)
+      return new OperationFailure(code, "PREFLIGHT", translated.getMessage(), translated.retryable(), source.relativePath());
+    return translated;
   }
 
   private static OperationFailure preflightFailure(

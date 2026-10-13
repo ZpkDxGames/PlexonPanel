@@ -42,7 +42,7 @@ public final class SystemdService {
                 "/usr/bin/systemctl",
                 "show",
                 "--no-pager",
-                "--property=ActiveState,SubState,MainPID,CPUUsageNSec,MemoryCurrent",
+                "--property=ActiveState,SubState,MainPID,CPUUsageNSec,MemoryCurrent,ExecMainStartTimestampMonotonic",
                 service),
             10);
     Map<String, String> values = new HashMap<>();

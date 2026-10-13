@@ -6,7 +6,7 @@ import java.util.Map;
 /** systemd cgroup accounting for the configured Minecraft unit, not the Host's own JVM. */
 final class ServiceResourceSampler {
   record Sample(String scope, String source, String cpuUnit, Double cpuPercent,
-      Long memoryBytes, boolean cpuAvailable, boolean memoryAvailable, String capturedAt) {}
+      Long memoryBytes, boolean cpuAvailable, boolean memoryAvailable, String capturedAt, String processSession) {}
   private long previousPid = -1, previousNanos, previousCpu;
   private boolean previousValid;
 
@@ -25,7 +25,8 @@ final class ServiceResourceSampler {
     previousNanos = nowNanos;
     previousCpu = usedCpu == null ? 0 : usedCpu;
     return new Sample("MINECRAFT_SERVICE", "SYSTEMD_CGROUP", "PERCENT_OF_ONE_CORE", cpu,
-        memory, cpu != null, memory != null, capturedAt.toString());
+        memory, cpu != null, memory != null, capturedAt.toString(),
+        pid + ":" + fields.getOrDefault("ExecMainStartTimestampMonotonic", "unknown"));
   }
 
   private static Long unsigned(String value) {
