@@ -13,6 +13,23 @@ final class FullBackupSource {
 
   private FullBackupSource() {}
 
+  /** Carries only a validated path relative to the configured source root. */
+  static final class SourceFailure extends IOException {
+    private final String relativePath;
+    SourceFailure(String code, Path relative, Throwable cause) {
+      super(code, cause);
+      String candidate = relative.toString().replace(File.separatorChar, '/');
+      String safe = null;
+      try {
+        safe = new io.github.zpkdxgames.plexonpanel.control.OperationFailure(
+            code, "ARCHIVING", "Backup source access failed.", true, candidate).safeRelativePath();
+      } catch (IllegalArgumentException ignored) { /* Non-public path remains redacted. */ }
+      relativePath = safe;
+    }
+    String relativePath() { return relativePath; }
+  }
+
+
   interface Visitor {
     default void visitDirectory(Path directory, Path relative) throws IOException {}
 
@@ -44,9 +61,9 @@ final class FullBackupSource {
       try {
         Files.readAttributes(source, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
       } catch (NoSuchFileException missing) {
-        throw new IOException("BACKUP_SOURCE_MISSING", missing);
+        throw new SourceFailure("BACKUP_SOURCE_MISSING", sourceRelative, missing);
       } catch (AccessDeniedException denied) {
-        throw new IOException("BACKUP_SOURCE_UNREADABLE", denied);
+        throw new SourceFailure("BACKUP_SOURCE_UNREADABLE", sourceRelative, denied);
       }
       Files.walkFileTree(
           source,
@@ -61,7 +78,7 @@ final class FullBackupSource {
               if (attributes.isSymbolicLink() || Files.isSymbolicLink(directory))
                 throw new IOException("BACKUP_SYMLINK_REJECTED");
               if (!Files.isReadable(directory))
-                throw new IOException("BACKUP_SOURCE_UNREADABLE");
+                throw new SourceFailure("BACKUP_SOURCE_UNREADABLE", relative, null);
               visitor.visitDirectory(directory, relative);
               return FileVisitResult.CONTINUE;
             }
@@ -73,8 +90,13 @@ final class FullBackupSource {
               if (excluded(relative, settings)) return FileVisitResult.CONTINUE;
               if (!attributes.isRegularFile() || attributes.isSymbolicLink() || Files.isSymbolicLink(file))
                 throw new IOException("BACKUP_SYMLINK_REJECTED");
-              if (!Files.isReadable(file)) throw new IOException("BACKUP_SOURCE_UNREADABLE");
-              visitor.visitFile(file, relative, attributes);
+              if (!Files.isReadable(file)) throw new SourceFailure("BACKUP_SOURCE_UNREADABLE", relative, null);
+              try {
+                visitor.visitFile(file, relative, attributes);
+              } catch (AccessDeniedException denied) {
+                throw new SourceFailure("BACKUP_SOURCE_UNREADABLE", relative, denied);
+              }
+
               return FileVisitResult.CONTINUE;
             }
 
@@ -87,9 +109,9 @@ final class FullBackupSource {
               // a failed backup source. Never apply this exception to an included path.
               if (excluded(root.relativize(file), settings)) return FileVisitResult.CONTINUE;
               if (failure instanceof NoSuchFileException)
-                throw new IOException("BACKUP_SOURCE_CHANGED", failure);
+                throw new SourceFailure("BACKUP_SOURCE_CHANGED", root.relativize(file), failure);
               if (failure instanceof AccessDeniedException)
-                throw new IOException("BACKUP_SOURCE_UNREADABLE", failure);
+                throw new SourceFailure("BACKUP_SOURCE_UNREADABLE", root.relativize(file), failure);
               throw failure;
             }
           });

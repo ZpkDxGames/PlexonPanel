@@ -23,6 +23,9 @@ class ServiceResourceSamplerTest {
     assertEquals("SYSTEMD_CGROUP", next.source());
     assertEquals(NOW.plusSeconds(2).toString(), next.capturedAt());
     assertTrue(next.memoryAvailable());
+    assertEquals("10:unknown", next.processSession());
+    var restarted = sampler.sample(Map.of("ActiveState", "active", "CPUUsageNSec", "100", "MemoryCurrent", "1024", "ExecMainStartTimestampMonotonic", "12345"), 10, 4_000_000_000L, NOW.plusSeconds(3));
+    assertEquals("10:12345", restarted.processSession());
   }
 
   @Test void restartCounterResetAndUnavailableAccountingDoNotInventConsumption() {
