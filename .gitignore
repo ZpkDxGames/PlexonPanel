@@ -36,3 +36,6 @@ mock-gateway/.gateway-key.json
 
 # Release archives
 PlexonPanel-*.zip
+
+__pycache__/
+*.py[cod]

@@ -30,7 +30,12 @@ final class HostConsoleHistory {
       Set.of("before", "after", "cursor", "limit", "invocationId", "levels");
 
   record Query(
-      Instant before, Instant after, String cursor, int limit, String invocationId, Set<String> levels) {
+      Instant before,
+      Instant after,
+      String cursor,
+      int limit,
+      String invocationId,
+      Set<String> levels) {
     static Query parse(JsonObject parameters) {
       if (parameters == null) parameters = new JsonObject();
       if (!PARAMETERS.containsAll(parameters.keySet()))
@@ -100,7 +105,8 @@ final class HostConsoleHistory {
           || !parameters.getAsJsonPrimitive(name).isString())
         throw new IllegalArgumentException("Invalid console history timestamp");
       String value = parameters.get(name).getAsString();
-      if (value.length() > 64) throw new IllegalArgumentException("Invalid console history timestamp");
+      if (value.length() > 64)
+        throw new IllegalArgumentException("Invalid console history timestamp");
       try {
         return Instant.parse(value);
       } catch (DateTimeParseException error) {
@@ -110,8 +116,18 @@ final class HostConsoleHistory {
   }
 
   record ReadResult(
-      List<ConsoleLine> lines, boolean hasMore, boolean stoppedEarly,
-      String nextCursor, int scanned, int rawBytes) {}
+      List<ConsoleLine> lines,
+      boolean hasMore,
+      boolean stoppedEarly,
+      String nextCursor,
+      int scanned,
+      int rawBytes) {}
+
+  private io.github.zpkdxgames.plexonpanel.host.storage.HostSessionStore sessionStore;
+
+  void sessionStore(io.github.zpkdxgames.plexonpanel.host.storage.HostSessionStore store) {
+    sessionStore = store;
+  }
 
   private final String serviceName;
   private final JournalSource source;
@@ -133,6 +149,16 @@ final class HostConsoleHistory {
 
   Map<String, Object> query(JsonObject parameters, boolean problemsOnly) {
     if (!settings.enabled()) throw new SecurityException("CAPABILITY_DISABLED");
+    if (sessionStore != null) {
+      try {
+        return sessionStore.consoleHistory(
+            parameters == null ? new JsonObject() : parameters, problemsOnly);
+      } catch (RuntimeException e) {
+        throw e;
+      } catch (Exception e) {
+        throw new IllegalStateException("SESSION_STORAGE_UNAVAILABLE", e);
+      }
+    }
     Query query = Query.parse(parameters);
     int scanLines = scanLines(query.limit());
     List<String> command = command(query, scanLines);
@@ -142,7 +168,8 @@ final class HostConsoleHistory {
       Process running = process;
       ReadResult read;
       try (ExecutorService reader = Executors.newVirtualThreadPerTaskExecutor()) {
-        Future<ReadResult> future = reader.submit(() -> read(running, query, problemsOnly, scanLines));
+        Future<ReadResult> future =
+            reader.submit(() -> read(running, query, problemsOnly, scanLines));
         try {
           read = future.get(QUERY_TIMEOUT_SECONDS, TimeUnit.SECONDS);
         } catch (TimeoutException timeout) {
@@ -178,8 +205,7 @@ final class HostConsoleHistory {
       Map<String, Object> result = new LinkedHashMap<>();
       result.put("lines", lines);
       result.put("hasMore", read.hasMore());
-      if (read.hasMore() && read.nextCursor() != null)
-        result.put("nextCursor", read.nextCursor());
+      if (read.hasMore() && read.nextCursor() != null) result.put("nextCursor", read.nextCursor());
       result.put("source", "HOST_JOURNAL");
       result.put("service", serviceName);
       result.put("retentionBounded", true);
@@ -230,12 +256,10 @@ final class HostConsoleHistory {
     command.add("--reverse");
     command.add("--lines=" + Math.min(MAX_SCAN_LINES + 2, Math.max(2, scanLines + 1)));
     if (query.cursor() != null) command.add("--cursor=" + query.cursor());
-    if (query.after() != null)
-      command.add("--since=" + journalTime(plusMicros(query.after(), 1)));
+    if (query.after() != null) command.add("--since=" + journalTime(plusMicros(query.after(), 1)));
     if (query.before() != null)
       command.add("--until=" + journalTime(plusMicros(query.before(), -1)));
-    if (query.invocationId() != null)
-      command.add("_SYSTEMD_INVOCATION_ID=" + query.invocationId());
+    if (query.invocationId() != null) command.add("_SYSTEMD_INVOCATION_ID=" + query.invocationId());
     return List.copyOf(command);
   }
 
@@ -250,7 +274,8 @@ final class HostConsoleHistory {
     String lastScannedCursor = null;
 
     try (BufferedReader reader =
-        new BufferedReader(new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8))) {
+        new BufferedReader(
+            new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8))) {
       String raw;
       while ((raw = reader.readLine()) != null) {
         rawBytes += raw.getBytes(StandardCharsets.UTF_8).length + 1;
@@ -292,8 +317,8 @@ final class HostConsoleHistory {
       }
     }
     Collections.reverse(accepted);
-    return new ReadResult(List.copyOf(accepted), hasMore, stoppedEarly,
-        lastScannedCursor, scanned, rawBytes);
+    return new ReadResult(
+        List.copyOf(accepted), hasMore, stoppedEarly, lastScannedCursor, scanned, rawBytes);
   }
 
   ConsoleLine parseJournalLine(String json) {

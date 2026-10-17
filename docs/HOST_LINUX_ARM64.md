@@ -1,6 +1,6 @@
 # PlexonPanel Host on Linux ARM64
 
-PlexonPanel Host supports 64-bit Linux on both `x86_64` and ARM64 (`aarch64`). The Host release is an architecture-neutral Java 25 JAR; it does not bundle JNI/shared-library payloads. The architecture-specific requirement is the installed Java 25 runtime.
+PlexonPanel Host supports 64-bit Linux on both `x86_64` and ARM64 (`aarch64`). The Host release is one Java 25 JAR containing Xerial SQLite JNI libraries for Linux x64 and ARM64 (glibc and musl). The portability verifier permits only those four upstream shared libraries and requires all four. A native Java 25 runtime and writable private temporary directory are required. Use `--enable-native-access=ALL-UNNAMED`. Native ARM64 execution remains a required CI gate; bundling its library is not runtime certification.
 
 ## Supported Host platforms
 
@@ -34,7 +34,7 @@ The repository and release examples include `scripts/verify-host-portability.py`
 - contains the Host main class and Host-local RCON implementation;
 - targets Java 25 bytecode;
 - has the expected executable JAR manifest;
-- contains no `.so`, `.dll`, `.dylib`, `.jnilib`, or native payload directory that would make the JAR architecture-specific;
+- contains exactly the four approved SQLite Linux shared libraries and rejects other native payloads;
 - is being verified on the requested Linux architecture.
 
 For an ARM64 VPS or ARM64 CI runner:
@@ -55,7 +55,7 @@ python3 scripts/verify-host-portability.py \
 
 ## Deployment rule
 
-The filename `plexonpanel-host-<version>.jar` is intentionally the same on x64 and ARM64 because the JAR is portable Java bytecode. Do not choose a Host JAR based only on the machine where it was downloaded. Instead:
+The filename `plexonpanel-host-<version>.jar` is intentionally the same on x64 and ARM64 because the JAR contains portable Java bytecode and both supported SQLite native architectures. Do not choose a Host JAR based only on the machine where it was downloaded. Instead:
 
 1. use a Host JAR produced from the same source commit as the Paper/plugin build you intend to run;
 2. verify `SHA256SUMS.txt` or the CI artifact digest;
@@ -70,7 +70,7 @@ A stale Host JAR can have the same semantic filename/version while lacking newer
 The service should invoke the native Java runtime directly; no architecture-specific wrapper is required:
 
 ```ini
-ExecStart=/usr/bin/java -Xms32m -Xmx256m -jar /opt/plexonpanel-host/plexonpanel-host-<version>.jar /etc/plexonpanel-host/host-config.json
+ExecStart=/usr/bin/java --enable-native-access=ALL-UNNAMED -Xms32m -Xmx256m -jar /opt/plexonpanel-host/plexonpanel-host-<version>.jar /etc/plexonpanel-host/host-config.json
 ```
 
 The Host must continue to run under its dedicated non-root service identity. ARM64 support does not change the existing filesystem, systemd, RCON, authorization, or secret-storage security requirements.
@@ -81,7 +81,7 @@ The Host must continue to run under its dedicated non-root service identity. ARM
 
 ```json
 {
-  "hostArtifactType": "architecture-neutral-java-jar",
+  "hostArtifactType": "multi-platform-java-jar-with-sqlite-jni",
   "hostSupportedPlatforms": ["linux-x64", "linux-arm64"]
 }
 ```

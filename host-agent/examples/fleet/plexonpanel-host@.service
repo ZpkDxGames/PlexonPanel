@@ -10,7 +10,7 @@ User=pph-%i
 Group=pph-%i
 SupplementaryGroups=plexonpanel-backup
 WorkingDirectory=/var/lib/plexonpanel/instances/%i
-ExecStart=/usr/bin/java -Xms32m -Xmx256m -jar /srv/plexonpanel/servers/%i/host/plexonpanel-host-5.0.0.jar /etc/plexonpanel/instances/%i/host-config.json
+ExecStart=/usr/bin/java -Xms32m -Xmx256m --enable-native-access=ALL-UNNAMED -jar /srv/plexonpanel/servers/%i/host/plexonpanel-host-5.0.0.jar /etc/plexonpanel/instances/%i/host-config.json
 KillSignal=SIGTERM
 KillMode=mixed
 TimeoutStopSec=75s

@@ -21,7 +21,7 @@ if not version_match:
     raise SystemExit("Cannot read the release version from build.gradle.kts")
 version = version_match.group(1)
 
-HOST_ARTIFACT_TYPE = "architecture-neutral-java-jar"
+HOST_ARTIFACT_TYPE = "multi-platform-java-jar-with-sqlite-jni"
 HOST_SUPPORTED_PLATFORMS = ["linux-x64", "linux-arm64"]
 
 contract_path = root / f"docs/release-gates-{version}.json"
@@ -99,12 +99,13 @@ if version == "5.0.0":
             "plexonpanel-plugin-read@.service",
             "plexonpanel-journal-read@.service", "plexonpanel-node-lock.service", "jvm.args",
             "instance-read-authority.py", "00-plexonpanel-instance-control.rules",
+            "session-storage.example.json", "maintenance-settings.example.json",
         ]],
         *["docs/" + name for name in [
             "PAPER_FLEET_BOOTSTRAP.md", "NODE_INSTANCE_REGISTRY.md", "INSTANCE_CONFIGURATION_VALIDATION.md",
             "INSTANCE_SERVICE_DEPLOYMENT.md", "INSTANCE_CLONE_REKEY.md", "INSTANCE_AUTHORIZATION.md",
             "PLUGIN_UPLOAD_PERMISSIONS.md", "HOST_LIFECYCLE_RESPONSIVENESS.md",
-            "PROVIDER_RUNTIME_STATE.md", "PROTOCOL.md", "release-5.0.0.md", "release-gates-5.0.0.json",
+            "PROVIDER_RUNTIME_STATE.md", "V5_SESSION_STORAGE_AND_SCHEDULES.md", "PROTOCOL.md", "release-5.0.0.md", "release-gates-5.0.0.json",
         ]],
         "scripts/verify-host-portability.py", "README.md", "CHANGELOG.md", "PRIVACY.md",
     ]]

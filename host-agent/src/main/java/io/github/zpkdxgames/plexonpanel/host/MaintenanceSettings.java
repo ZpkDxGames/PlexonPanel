@@ -10,12 +10,50 @@ import java.util.*;
 /**
  * Host-owned, non-secret maintenance configuration edited through the control plane.
  *
- * <p>Full backups are manual-only. Legacy {@code fullRestorePoint.schedule} and {@code liveSnapshot}
- * JSON members are intentionally absent from this model; Gson ignores those members when loading an
- * older settings file, so they cannot regain runtime authority after an upgrade.
+ * <p>Explicit v5 backup schedules are supported. Legacy {@code fullRestorePoint.schedule} and
+ * {@code liveSnapshot} JSON members are intentionally absent from this model; Gson ignores those
+ * members when loading an older settings file, so they cannot regain runtime authority after an
+ * upgrade.
  */
 public record MaintenanceSettings(
-    int schemaVersion, String timezone, Restart restart, FullRestorePoint fullRestorePoint) {
+    int schemaVersion,
+    String timezone,
+    Restart restart,
+    FullRestorePoint fullRestorePoint,
+    BackupScheduling schedule) {
+  public MaintenanceSettings {
+    if (schedule == null) schedule = new BackupScheduling(BackupSchedule.disabled());
+  }
+
+  public MaintenanceSettings(
+      int schemaVersion, String timezone, Restart restart, FullRestorePoint fullRestorePoint) {
+    this(schemaVersion, timezone, restart, fullRestorePoint, null);
+  }
+
+  public record BackupScheduling(BackupSchedule backups) {
+    public BackupScheduling {
+      if (backups == null) backups = BackupSchedule.disabled();
+    }
+  }
+
+  public record BackupSchedule(
+      boolean enabled,
+      String cadence,
+      List<String> weekdays,
+      String time,
+      int intervalHours,
+      int countdownMinutes,
+      boolean skipIfEmptySinceLastBackup,
+      int forceAfterHours) {
+    public BackupSchedule {
+      weekdays = weekdays == null ? List.of() : List.copyOf(weekdays);
+    }
+
+    public static BackupSchedule disabled() {
+      return new BackupSchedule(false, "DAILY", List.of(), "04:00", 24, 15, false, 168);
+    }
+  }
+
   private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
   static final List<String> REQUIRED_FULL_BACKUP_EXCLUDES =
       List.of(
@@ -51,8 +89,31 @@ public record MaintenanceSettings(
       int uploadTimeoutSeconds,
       String verificationMode,
       long maximumBytes,
-      List<String> excludes) {
+      List<String> excludes,
+      String localRetentionPolicy) {
+    public FullRestorePoint(
+        String retentionMode,
+        int retentionCount,
+        boolean restartAfter,
+        String canonicalFilename,
+        int uploadTimeoutSeconds,
+        String verificationMode,
+        long maximumBytes,
+        List<String> excludes) {
+      this(
+          retentionMode,
+          retentionCount,
+          restartAfter,
+          canonicalFilename,
+          uploadTimeoutSeconds,
+          verificationMode,
+          maximumBytes,
+          excludes,
+          "REMOTE_ONLY_AFTER_VERIFY");
+    }
+
     public FullRestorePoint {
+      if (localRetentionPolicy == null) localRetentionPolicy = "REMOTE_ONLY_AFTER_VERIFY";
       // Step 8 finalizes one operator-facing workflow: a manual full backup always restores
       // Minecraft availability after a successful or safely degraded operation. Keep the legacy
       // JSON field for rolling-upgrade compatibility, but normalize false to true so an older
@@ -86,8 +147,7 @@ public record MaintenanceSettings(
     if (!Files.exists(path)) return migratedDefaults();
     if (!Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS)
         || Files.isSymbolicLink(path)
-        || Files.size(path) > 65_536)
-      throw new IOException("Invalid maintenance settings file");
+        || Files.size(path) > 65_536) throw new IOException("Invalid maintenance settings file");
     MaintenanceSettings settings = GSON.fromJson(Files.readString(path), MaintenanceSettings.class);
     validate(settings);
     return settings;
@@ -112,6 +172,23 @@ public record MaintenanceSettings(
     if (settings.restart == null || settings.fullRestorePoint == null)
       throw new IllegalArgumentException("Incomplete maintenance settings");
     validateSchedule(settings.restart.schedule);
+    var b = settings.schedule.backups;
+    if (!Set.of("DAILY", "WEEKLY", "SELECTED_DAYS", "INTERVAL_HOURS").contains(b.cadence)
+        || b.intervalHours < 1
+        || b.intervalHours > 168
+        || !Set.of(30, 15, 10, 5).contains(b.countdownMinutes)
+        || b.forceAfterHours < 1
+        || b.forceAfterHours > 8760) throw new IllegalArgumentException("Invalid backup schedule");
+    LocalTime.parse(b.time);
+    if (b.weekdays.size() > 7 || new HashSet<>(b.weekdays).size() != b.weekdays.size())
+      throw new IllegalArgumentException("Invalid weekdays");
+    for (String day : b.weekdays) DayOfWeek.valueOf(day);
+    if (b.cadence.equals("WEEKLY") && b.weekdays.size() != 1
+        || b.cadence.equals("SELECTED_DAYS") && b.weekdays.isEmpty())
+      throw new IllegalArgumentException("Backup schedule requires weekdays");
+    if (!Set.of("REMOTE_ONLY_AFTER_VERIFY", "KEEP_LOCAL_ROTATING")
+        .contains(settings.fullRestorePoint.localRetentionPolicy))
+      throw new IllegalArgumentException("Invalid local retention policy");
     if (settings.restart.warningSeconds.size() > 16
         || settings.restart.warningSeconds.stream().anyMatch(v -> v == null || v < 0 || v > 86_400)
         || settings.restart.stopTimeoutSeconds < 30

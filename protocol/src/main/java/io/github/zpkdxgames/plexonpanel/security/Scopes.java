@@ -76,6 +76,7 @@ public final class Scopes {
           "backup.full.delete",
           "backup.full.restore",
           "maintenance.settings.update",
+          "maintenance.configure",
           "maintenance.restart.now",
           "maintenance.full-backup.create",
           "maintenance.recovery.resolve",
@@ -95,6 +96,8 @@ public final class Scopes {
     actions.put("files.download.chunk", "files.download");
     actions.put("files.transfer.cancel", "files.download");
     actions.put("console.execute", "console.execute.allowed");
+    actions.put("chat.history", "chat.view");
+    actions.put("events.session.list", "players.view");
     actions.put("console.history", "console.view.full");
     actions.put("console.history.errors", "console.view.errors");
     actions.put("chat.global.send", "chat.send");

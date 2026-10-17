@@ -67,7 +67,14 @@ public final class PaperSnapshotCollector {
         round(p95),
         round(maximum),
         server.getCurrentTick(),
-        Math.multiplyExact(settings.serverIntervalTicks(), 50L));
+        Math.multiplyExact(settings.serverIntervalTicks(), 50L),
+        tickMillis.length == 0 ? 0.0 : round(tickMillis[0]),
+        round(p95),
+        round(percentile(tickMillis, 0.99)),
+        round(maximum),
+        tickMillis.length,
+        server.getWorlds().stream().mapToInt(org.bukkit.World::getChunkCount).sum(),
+        server.getWorlds().stream().mapToInt(org.bukkit.World::getEntityCount).sum());
   }
 
   public List<PlayerSnapshot> playerSnapshots() {
@@ -81,54 +88,57 @@ public final class PaperSnapshotCollector {
   }
 
   public PlayerSnapshot playerSnapshot(Player player) {
-      Location location = player.getLocation();
-      PlayerSnapshot.Position position =
-          settings.includePlayerLocation()
-              ? new PlayerSnapshot.Position(
-                  round(location.getX()),
-                  round(location.getY()),
-                  round(location.getZ()),
-                  location.getYaw(),
-                  location.getPitch())
-              : null;
+    Location location = player.getLocation();
+    PlayerSnapshot.Position position =
+        settings.includePlayerLocation()
+            ? new PlayerSnapshot.Position(
+                round(location.getX()),
+                round(location.getY()),
+                round(location.getZ()),
+                location.getYaw(),
+                location.getPitch())
+            : null;
 
-      String address = null;
-      if (settings.includePlayerAddress()) {
-        InetSocketAddress socketAddress = player.getAddress();
-        if (socketAddress != null && socketAddress.getAddress() != null) {
-          address = socketAddress.getAddress().getHostAddress();
-        }
+    String address = null;
+    if (settings.includePlayerAddress()) {
+      InetSocketAddress socketAddress = player.getAddress();
+      if (socketAddress != null && socketAddress.getAddress() != null) {
+        address = socketAddress.getAddress().getHostAddress();
       }
+    }
 
-      AttributeInstance maxHealthAttribute = player.getAttribute(Attribute.MAX_HEALTH);
-      double maximumHealth =
-          maxHealthAttribute == null ? player.getHealth() : maxHealthAttribute.getValue();
-      PlayerPresenceService.SnapshotMetadata metadata =
-          presence.snapshotMetadata(player.getUniqueId().toString());
-      long onlineDurationMillis =
-          metadata.sessionStartedAt() == null
-              ? Math.max(0, clock.millis() - player.getLastLogin())
-              : Math.max(0, clock.millis() - java.time.Instant.parse(metadata.sessionStartedAt()).toEpochMilli());
-      return new PlayerSnapshot(
-              player.getUniqueId().toString(),
-              player.getName(),
-              bounded(plainText.serialize(player.displayName()), 128),
-              player.getWorld().getName(),
-              player.getGameMode().name(),
-              player.getPing(),
-              round(player.getHealth()),
-              round(maximumHealth),
-              player.getLevel(),
-              player.isOp(),
-              player.isWhitelisted(),
-              position,
-              address,
-              player.getFoodLevel(),
-              onlineDurationMillis,
-              metadata.sessionId(),
-              metadata.sessionStartedAt(),
-              metadata.firstSeenAt(),
-              metadata.lastLoginAt());
+    AttributeInstance maxHealthAttribute = player.getAttribute(Attribute.MAX_HEALTH);
+    double maximumHealth =
+        maxHealthAttribute == null ? player.getHealth() : maxHealthAttribute.getValue();
+    PlayerPresenceService.SnapshotMetadata metadata =
+        presence.snapshotMetadata(player.getUniqueId().toString());
+    long onlineDurationMillis =
+        metadata.sessionStartedAt() == null
+            ? Math.max(0, clock.millis() - player.getLastLogin())
+            : Math.max(
+                0,
+                clock.millis()
+                    - java.time.Instant.parse(metadata.sessionStartedAt()).toEpochMilli());
+    return new PlayerSnapshot(
+        player.getUniqueId().toString(),
+        player.getName(),
+        bounded(plainText.serialize(player.displayName()), 128),
+        player.getWorld().getName(),
+        player.getGameMode().name(),
+        player.getPing(),
+        round(player.getHealth()),
+        round(maximumHealth),
+        player.getLevel(),
+        player.isOp(),
+        player.isWhitelisted(),
+        position,
+        address,
+        player.getFoodLevel(),
+        onlineDurationMillis,
+        metadata.sessionId(),
+        metadata.sessionStartedAt(),
+        metadata.firstSeenAt(),
+        metadata.lastLoginAt());
   }
 
   public List<java.util.Map<String, Object>> worldSnapshots() {
@@ -140,9 +150,11 @@ public final class PaperSnapshotCollector {
                     "name",
                     world.getName(),
                     "loadedChunks",
-                    world.getLoadedChunks().length,
+                    world.getChunkCount(),
                     "entities",
                     world.getEntityCount(),
+                    "tileEntities",
+                    world.getTileEntityCount(),
                     "players",
                     world.getPlayerCount()))
         .toList();
