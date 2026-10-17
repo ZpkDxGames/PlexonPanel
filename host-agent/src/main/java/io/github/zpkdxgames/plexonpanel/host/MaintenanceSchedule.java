@@ -26,6 +26,22 @@ public final class MaintenanceSchedule {
     throw new IllegalStateException("Unable to calculate next maintenance occurrence");
   }
 
+  public static Instant nextBackup(
+      MaintenanceSettings.BackupSchedule schedule, ZoneId zone, Instant after) {
+    if (!schedule.enabled()) return null;
+    if (schedule.cadence().equals("INTERVAL_HOURS")) {
+      long seconds = Math.multiplyExact(schedule.intervalHours(), 3600L);
+      return Instant.ofEpochSecond(
+          Math.multiplyExact(Math.floorDiv(after.getEpochSecond(), seconds) + 1, seconds));
+    }
+    String type =
+        schedule.cadence().equals("SELECTED_DAYS") ? "SELECTED_WEEKDAYS" : schedule.cadence();
+    return next(
+        new MaintenanceSettings.Schedule(true, type, schedule.weekdays(), schedule.time()),
+        zone,
+        after);
+  }
+
   public static String occurrenceKey(String scheduleId, Instant occurrence) {
     if (scheduleId == null || !scheduleId.matches("[A-Za-z0-9_.-]{1,64}"))
       throw new IllegalArgumentException("Invalid schedule id");

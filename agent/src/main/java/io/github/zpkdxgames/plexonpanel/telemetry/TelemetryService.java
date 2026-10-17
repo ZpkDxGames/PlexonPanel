@@ -8,11 +8,11 @@ import io.github.zpkdxgames.plexonpanel.presence.PresenceTermination;
 import io.github.zpkdxgames.plexonpanel.protocol.MessagePriority;
 import io.github.zpkdxgames.plexonpanel.protocol.MessageSink;
 import io.github.zpkdxgames.plexonpanel.protocol.SnapshotBatches;
-import io.github.zpkdxgames.plexonpanel.util.NamedThreadFactory;
 import io.github.zpkdxgames.plexonpanel.util.ExecutorDrain;
+import io.github.zpkdxgames.plexonpanel.util.NamedThreadFactory;
 import java.nio.file.Path;
-import java.time.Instant;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -280,7 +280,8 @@ public final class TelemetryService implements Listener, AutoCloseable {
           try {
             List<?> previous = lastPluginInventory.getAndSet(plugins);
             if (epoch != transportEpoch.get() || closed.get()) return;
-            if (!force && settings.suppressUnchangedInventories() && plugins.equals(previous)) return;
+            if (!force && settings.suppressUnchangedInventories() && plugins.equals(previous))
+              return;
             for (Map<String, Object> batch :
                 SnapshotBatches.split("plugins", plugins, 256, capturedAt))
               sink.send("inventory.plugins", batch, MessagePriority.TELEMETRY);
@@ -322,7 +323,8 @@ public final class TelemetryService implements Listener, AutoCloseable {
           try {
             List<?> previous = lastWorldInventory.getAndSet(worlds);
             if (epoch != transportEpoch.get() || closed.get()) return;
-            if (!force && settings.suppressUnchangedInventories() && worlds.equals(previous)) return;
+            if (!force && settings.suppressUnchangedInventories() && worlds.equals(previous))
+              return;
             sink.send(
                 "telemetry.worlds",
                 Map.of("capturedAt", capturedAt, "worlds", worlds),
@@ -344,9 +346,10 @@ public final class TelemetryService implements Listener, AutoCloseable {
     long epoch = transportEpoch.get();
     try {
       Map<String, Object> snapshot = new LinkedHashMap<>(systemCollector.collect());
+      snapshot.put("processRole", "PAPER_JVM");
+      snapshot.put("metricScope", "PAPER_JVM");
       snapshot.put(
-          "sourceIntervalMillis",
-          Math.multiplyExact(settings.systemIntervalSeconds(), 1000L));
+          "sourceIntervalMillis", Math.multiplyExact(settings.systemIntervalSeconds(), 1000L));
       if (epoch == transportEpoch.get() && !closed.get())
         sink.send("telemetry.system", snapshot, MessagePriority.TELEMETRY);
     } catch (Exception error) {
@@ -412,6 +415,9 @@ public final class TelemetryService implements Listener, AutoCloseable {
             body.put("sessionDurationMillis", record.sessionDurationMillis());
             body.put("termination", record.termination().name());
             body.put("persistenceState", captured.persistenceState().name());
+            plugin
+                .getLogger()
+                .info("PLEXONPANEL_PRESENCE " + new com.google.gson.Gson().toJson(body));
             if (!sink.send("players.presence", body, MessagePriority.EVENT))
               droppedPresenceEvents.incrementAndGet();
           });
@@ -585,8 +591,7 @@ public final class TelemetryService implements Listener, AutoCloseable {
   private void warnSaturation(String message) {
     long now = System.currentTimeMillis();
     long next = nextSaturationWarning.get();
-    if (now >= next
-        && nextSaturationWarning.compareAndSet(next, now + SATURATION_WARNING_MILLIS))
+    if (now >= next && nextSaturationWarning.compareAndSet(next, now + SATURATION_WARNING_MILLIS))
       plugin.getLogger().warning("PlexonPanel: " + message);
   }
 

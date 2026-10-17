@@ -1,0 +1,52 @@
+{
+  "schemaVersion": 1,
+  "timezone": "America/Sao_Paulo",
+  "restart": {
+    "schedule": {
+      "enabled": false,
+      "type": "DAILY",
+      "weekdays": [],
+      "time": "04:00"
+    },
+    "warningSeconds": [
+      900,
+      300,
+      60,
+      30,
+      10
+    ],
+    "stopTimeoutSeconds": 180,
+    "startupTimeoutSeconds": 180
+  },
+  "schedule": {
+    "backups": {
+      "enabled": false,
+      "cadence": "DAILY",
+      "weekdays": [],
+      "time": "04:00",
+      "intervalHours": 24,
+      "countdownMinutes": 15,
+      "skipIfEmptySinceLastBackup": false,
+      "forceAfterHours": 168
+    }
+  },
+  "fullRestorePoint": {
+    "retentionMode": "SINGLE_CURRENT",
+    "retentionCount": 3,
+    "restartAfter": true,
+    "canonicalFilename": "Server-Latest.zip",
+    "uploadTimeoutSeconds": 1800,
+    "verificationMode": "SIZE_AND_HASH_WHEN_AVAILABLE",
+    "maximumBytes": 1099511627776,
+    "excludes": [
+      "logs",
+      "crash-reports",
+      "cache",
+      ".cache",
+      "plugins/PlexonPanel/audit",
+      "plugins/PlexonPanel/identity",
+      "plugins/spark/tmp"
+    ],
+    "localRetentionPolicy": "REMOTE_ONLY_AFTER_VERIFY"
+  }
+}

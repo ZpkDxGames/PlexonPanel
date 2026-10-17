@@ -10,3 +10,6 @@ PlexonPanel's Paper and host JARs include the following dependency:
 - License text: `licenses/Apache-2.0.txt` in the source distribution and `META-INF/licenses/gson-Apache-2.0.txt` in both JARs.
 
 Gson classes are bundled without source modifications so PlexonPanel has a predictable JSON runtime on Paper servers.
+
+## SQLite JDBC
+Host session persistence bundles org.xerial:sqlite-jdbc:3.53.4.0 and native SQLite libraries. Its upstream META-INF licenses are retained in the distribution. See https://github.com/xerial/sqlite-jdbc.

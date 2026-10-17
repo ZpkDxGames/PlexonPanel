@@ -6,8 +6,8 @@ import org.junit.jupiter.api.Test;
 
 class MaintenanceFullBackupFailurePolicyTest {
   @Test
-  void archiveFailureBeforeLocalVerificationFailsClosed() {
-    assertFalse(MaintenanceManager.shouldStartAfterFullBackupFailure(true, false));
+  void archiveFailureAfterStopStillRecoversAvailability() {
+    assertTrue(MaintenanceManager.shouldStartAfterFullBackupFailure(true, false));
   }
 
   @Test

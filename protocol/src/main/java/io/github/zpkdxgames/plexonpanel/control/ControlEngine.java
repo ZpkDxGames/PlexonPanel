@@ -7,11 +7,11 @@ import io.github.zpkdxgames.plexonpanel.audit.LocalAudit;
 import io.github.zpkdxgames.plexonpanel.files.*;
 import io.github.zpkdxgames.plexonpanel.protocol.*;
 import io.github.zpkdxgames.plexonpanel.security.*;
-import io.github.zpkdxgames.plexonpanel.util.NamedThreadFactory;
 import io.github.zpkdxgames.plexonpanel.util.ExecutorDrain;
+import io.github.zpkdxgames.plexonpanel.util.NamedThreadFactory;
 import java.nio.charset.StandardCharsets;
-import java.time.Instant;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -19,12 +19,24 @@ import java.util.function.*;
 
 public final class ControlEngine implements AutoCloseable {
   /** Paper retains ordered dispatch; Host separates lifecycle and short status work from I/O. */
-  public enum DispatchMode { SERIAL, HOST }
+  public enum DispatchMode {
+    SERIAL,
+    HOST
+  }
 
   private static final Set<String> LIFECYCLE_ACTIONS =
       Set.of("server.start", "server.stop", "server.restart");
   private static final Set<String> HOST_STATUS_ACTIONS =
-      Set.of("server.status", "maintenance.status", "provider.status", "audit.list", "audit.self");
+      Set.of(
+          "server.status",
+          "maintenance.status",
+          "provider.status",
+          "audit.list",
+          "audit.self",
+          "events.session.list",
+          "chat.history",
+          "console.history",
+          "console.history.errors");
 
   @FunctionalInterface
   public interface Backend {
@@ -68,7 +80,15 @@ public final class ControlEngine implements AutoCloseable {
       MessageSink sink,
       BooleanSupplier authenticated,
       String serverId) {
-    this(devices, capabilities, audit, files, backend, sink, authenticated, serverId,
+    this(
+        devices,
+        capabilities,
+        audit,
+        files,
+        backend,
+        sink,
+        authenticated,
+        serverId,
         DispatchMode.SERIAL);
   }
 
@@ -93,19 +113,34 @@ public final class ControlEngine implements AutoCloseable {
     this.dispatchMode = Objects.requireNonNull(dispatchMode);
     // Never retain a lifecycle intent behind an upload or a previous lifecycle operation.
     // The Host backend's existing tryLock still rejects backup/restore conflicts immediately.
-    this.lifecycleWorker = dispatchMode == DispatchMode.HOST
-        ? new ThreadPoolExecutor(1, 1, 0, TimeUnit.SECONDS, new SynchronousQueue<>(),
-            new NamedThreadFactory("plexonpanel-lifecycle"), new ThreadPoolExecutor.AbortPolicy())
-        : null;
-    this.statusWorker = dispatchMode == DispatchMode.HOST
-        ? new ThreadPoolExecutor(2, 2, 0, TimeUnit.SECONDS, new ArrayBlockingQueue<>(8),
-            new NamedThreadFactory("plexonpanel-status"), new ThreadPoolExecutor.AbortPolicy())
-        : null;
+    this.lifecycleWorker =
+        dispatchMode == DispatchMode.HOST
+            ? new ThreadPoolExecutor(
+                1,
+                1,
+                0,
+                TimeUnit.SECONDS,
+                new SynchronousQueue<>(),
+                new NamedThreadFactory("plexonpanel-lifecycle"),
+                new ThreadPoolExecutor.AbortPolicy())
+            : null;
+    this.statusWorker =
+        dispatchMode == DispatchMode.HOST
+            ? new ThreadPoolExecutor(
+                2,
+                2,
+                0,
+                TimeUnit.SECONDS,
+                new ArrayBlockingQueue<>(8),
+                new NamedThreadFactory("plexonpanel-status"),
+                new ThreadPoolExecutor.AbortPolicy())
+            : null;
   }
 
   public void accept(DecodedMessage message) {
-    if (closing.get() || !message.envelope().type().equals("action.request") || !authenticated.getAsBoolean())
-      return;
+    if (closing.get()
+        || !message.envelope().type().equals("action.request")
+        || !authenticated.getAsBoolean()) return;
     JsonObject body = message.body().deepCopy();
     try {
       dispatcher(body).execute(() -> execute(body));
@@ -117,7 +152,8 @@ public final class ControlEngine implements AutoCloseable {
             text(body, "deviceId", 36),
             "NOT_AVAILABLE",
             "BUSY",
-            dispatchMode == DispatchMode.HOST && LIFECYCLE_ACTIONS.contains(text(body, "action", 64))
+            dispatchMode == DispatchMode.HOST
+                    && LIFECYCLE_ACTIONS.contains(text(body, "action", 64))
                 ? "Another lifecycle request is running. This request was not queued."
                 : "The operations queue is full.",
             Map.of());
@@ -131,6 +167,13 @@ public final class ControlEngine implements AutoCloseable {
     JsonElement raw = body.get("action");
     if (!(raw instanceof JsonPrimitive primitive) || !primitive.isString()) return worker;
     String action = primitive.getAsString();
+    // Unconfirmed high-risk intents can only validate and fail; they never enter the
+    // destructive lane or contend with a completing lifecycle operation.
+    if (LIFECYCLE_ACTIONS.contains(action)
+        && Scopes.HIGH_RISK.contains(action)
+        && body.has("parameters")
+        && body.get("parameters").isJsonObject()
+        && !bool(body.getAsJsonObject("parameters"), "confirmed")) return statusWorker;
     if (LIFECYCLE_ACTIONS.contains(action)) return lifecycleWorker;
     if (HOST_STATUS_ACTIONS.contains(action)) return statusWorker;
     return worker;
@@ -168,8 +211,8 @@ public final class ControlEngine implements AutoCloseable {
       audit.begin(
           entry(id, deviceId, device, action, parameters, "STARTED", "INTENT", started, Map.of()));
       if (dispatchMode == DispatchMode.HOST && LIFECYCLE_ACTIONS.contains(action))
-        System.err.printf("PlexonPanel lifecycle started requestId=%s action=%s%n",
-            safeLog(id), safeLog(action));
+        System.err.printf(
+            "PlexonPanel lifecycle started requestId=%s action=%s%n", safeLog(id), safeLog(action));
       Map<String, Object> data = local(action, parameters, device);
       if (data == null) data = backend.execute(action, parameters, device);
       operationCompleted = true;
@@ -183,12 +226,12 @@ public final class ControlEngine implements AutoCloseable {
               "backupId",
               "phase",
               "warnings",
-              "skippedTransientCount"))
-        if (data.containsKey(key)) metadata.put(key, data.get(key));
+              "skippedTransientCount")) if (data.containsKey(key)) metadata.put(key, data.get(key));
       audit.append(
           entry(id, deviceId, device, action, parameters, "SUCCESS", "OK", started, metadata));
       if (dispatchMode == DispatchMode.HOST && LIFECYCLE_ACTIONS.contains(action))
-        System.err.printf("PlexonPanel lifecycle completed requestId=%s action=%s durationMillis=%d%n",
+        System.err.printf(
+            "PlexonPanel lifecycle completed requestId=%s action=%s durationMillis=%d%n",
             safeLog(id), safeLog(action), (System.nanoTime() - started) / 1000000);
       if (new Gson().toJson(data).getBytes(StandardCharsets.UTF_8).length > 56000)
         reply(
@@ -240,7 +283,7 @@ public final class ControlEngine implements AutoCloseable {
       String message =
           operationCompleted
               ? "The operation completed but its result could not be recorded. Verify local state"
-                    + " before retrying."
+                  + " before retrying."
               : failure != null
                   ? failure.getMessage()
                   : switch (code) {
@@ -252,20 +295,29 @@ public final class ControlEngine implements AutoCloseable {
                     case "STALE_FILE" -> "The file changed. Reload it and review your edits.";
                     case "DUPLICATE_REQUEST" ->
                         "This request ID was already used; the action was not repeated.";
-                    case "BUSY" -> LIFECYCLE_ACTIONS.contains(action)
-                        ? "A backup, restore or lifecycle operation is running. This request was not queued."
-                        : "Too many requests. Wait before trying again.";
+                    case "BUSY" ->
+                        LIFECYCLE_ACTIONS.contains(action)
+                            ? "A backup, restore or lifecycle operation is running. This request"
+                                + " was not queued."
+                            : "Too many requests. Wait before trying again.";
                     case "RATE_LIMITED" -> "Too many requests. Wait before trying again.";
                     default ->
-                        "The operation could not be completed. Check local policy, parameters and the"
-                            + " server log.";
+                        "The operation could not be completed. Check local policy, parameters and"
+                            + " the server log.";
                   };
       String phase = failure == null ? "" : failure.phase();
-      String path = failure == null || failure.safeRelativePath() == null ? "" : failure.safeRelativePath();
+      String path =
+          failure == null || failure.safeRelativePath() == null ? "" : failure.safeRelativePath();
       if (!"CONFIRMATION_REQUIRED".equals(code))
         System.err.printf(
-            "PlexonPanel control failure requestId=%s action=%s code=%s phase=%s exception=%s path=%s%n",
-            safeLog(id), safeLog(action), safeLog(code), safeLog(phase), error.getClass().getSimpleName(), safeLog(path));
+            "PlexonPanel control failure requestId=%s action=%s code=%s phase=%s exception=%s"
+                + " path=%s%n",
+            safeLog(id),
+            safeLog(action),
+            safeLog(code),
+            safeLog(phase),
+            error.getClass().getSimpleName(),
+            safeLog(path));
       reply(id, action, deviceId, status, code, message, safeFailureData);
     }
   }

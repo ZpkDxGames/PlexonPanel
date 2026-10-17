@@ -42,7 +42,12 @@ public final class ChatStreamService implements Listener, AutoCloseable {
   public ChatStreamService(JavaPlugin plugin, PanelSettings.Chat settings, MessageSink sink) {
     this.plugin = plugin;
     this.settings = settings;
-    this.sink = sink;
+    this.sink =
+        (type, body, priority) -> {
+          if (type.equals("chat.message"))
+            plugin.getLogger().info("PLEXONPANEL_CHAT " + new com.google.gson.Gson().toJson(body));
+          return sink.send(type, body, priority);
+        };
   }
 
   public void start() {
@@ -63,7 +68,9 @@ public final class ChatStreamService implements Listener, AutoCloseable {
   }
 
   private void initializePlexonChatsIntegration() {
-    if (!settings.streamEnabled() || !settings.capturePlexonChatsGlobal() || plexonListener != null) {
+    if (!settings.streamEnabled()
+        || !settings.capturePlexonChatsGlobal()
+        || plexonListener != null) {
       return;
     }
     Plugin plexonChats = plugin.getServer().getPluginManager().getPlugin(PLEXON_CHATS);

@@ -202,6 +202,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          python3 scripts/test-host-portability.py
           python3 scripts/summarize-tests.py
           python3 scripts/package-release.py
           python3 scripts/verify-host-portability.py \
@@ -226,7 +227,7 @@ jobs:
           assert manifest['securityReview'] == 'PASS'
           assert manifest['dashboardCandidateCommit'] == contract['dashboardCommit']
           assert manifest['dashboardCiRun'] == contract['dashboardCiRun']
-          assert manifest['hostArtifactType'] == 'architecture-neutral-java-jar'
+          assert manifest['hostArtifactType'] == 'multi-platform-java-jar-with-sqlite-jni'
           assert manifest['hostSupportedPlatforms'] == ['linux-x64', 'linux-arm64']
 
           paper=Path(f'build/release/PlexonPanel-{version}.jar')

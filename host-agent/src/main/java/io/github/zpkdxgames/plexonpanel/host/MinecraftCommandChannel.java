@@ -44,6 +44,10 @@ public interface MinecraftCommandChannel extends AutoCloseable {
 
   Result readinessProbe();
 
+  default Result emptyServerProbe() {
+    return Result.failed("PLAYER_COUNT_UNAVAILABLE");
+  }
+
   @Override
   default void close() {}
 }

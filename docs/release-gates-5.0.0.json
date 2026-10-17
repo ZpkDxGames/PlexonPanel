@@ -6,8 +6,8 @@
     "paper": 5,
     "host": 5
   },
-  "dashboardCommit": "da691360b39435d02a8671f45f2a2c4c49e3adbe",
-  "dashboardCiRun": 37080285428,
+  "dashboardCommit": "9c302a5d1f3071297ab773e9f6144ed6980c4346",
+  "dashboardCiRun": 39072322308,
   "certification": {
     "source": "SOURCE_IMPLEMENTED",
     "ci": "CI_PENDING_CURRENT_COMMIT",
@@ -18,10 +18,10 @@
     "history": "NOT_EXECUTED",
     "restartRecovery": "NOT_EXECUTED",
     "migration": "NOT_EXECUTED",
-    "deployment": "HELD_COORDINATION_GATES",
+    "deployment": "DASHBOARD_GIT_DEPLOYMENT_IN_PROGRESS_HOST_INSTALLATION_PENDING",
     "offVpsBackup": "NOT_VERIFIED",
     "rollback": "NOT_EXECUTED",
-    "browser": "BLOCKED_WORKSPACE_BROWSER_CAPABILITY"
+    "browser": "LOCAL_AND_DASHBOARD_PR_CI_PASS"
   },
   "ociBackup": "SKIPPED_OPERATOR_DECISION",
   "rollback": {
@@ -38,11 +38,12 @@
     "ci": null,
     "security": null,
     "runtime": null,
-    "dashboardCi": "https://github.com/ZpkDxGames/PlexonPanel-Dashboard/actions/runs/37080285428",
+    "dashboardCi": "https://github.com/ZpkDxGames/PlexonPanel-Dashboard/actions/runs/39072322308",
     "migration": null,
     "backup": null,
     "offVpsBackup": null,
     "rollback": null,
-    "browser": null
+    "browser": "https://github.com/ZpkDxGames/PlexonPanel-Dashboard/blob/9c302a5d1f3071297ab773e9f6144ed6980c4346/docs/v5/RELEASE_VERIFICATION.md",
+    "dashboardReviewCi": "https://github.com/ZpkDxGames/PlexonPanel-Dashboard/actions/runs/39072011387"
   }
 }

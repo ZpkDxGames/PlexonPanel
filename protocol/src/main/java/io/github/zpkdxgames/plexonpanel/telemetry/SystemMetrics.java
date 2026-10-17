@@ -11,6 +11,8 @@ public final class SystemMetrics {
   private LinuxMetrics.Cpu previous;
   private long scannedAt;
   private Long directoryBytes;
+  private long networkAt;
+  private long previousRx, previousTx;
 
   public SystemMetrics(Path root) {
     this.root = root;
@@ -38,6 +40,7 @@ public final class SystemMetrics {
       }
     } catch (Exception ignored) {
     }
+    r.put("nodeCpuPercent", host);
     r.put("hostCpuPercent", host);
     r.put("processCpuPercent", process);
     r.put("available", host != null);
@@ -54,6 +57,25 @@ public final class SystemMetrics {
       r.put("loadAverage5m", Double.parseDouble(loads[1]));
       r.put("loadAverage15m", Double.parseDouble(loads[2]));
     } catch (Exception ignored) {
+    }
+    try {
+      long rx = 0, tx = 0;
+      for (String line : Files.readAllLines(Path.of("/proc/net/dev"))) {
+        int colon = line.indexOf(':');
+        if (colon < 0 || line.substring(0, colon).trim().equals("lo")) continue;
+        String[] fields = line.substring(colon + 1).trim().split("\\s+");
+        rx += Long.parseLong(fields[0]);
+        tx += Long.parseLong(fields[8]);
+      }
+      long now = System.nanoTime();
+      if (networkAt > 0 && now > networkAt && rx >= previousRx && tx >= previousTx) {
+        r.put("networkRxBytesPerSecond", (rx - previousRx) * 1_000_000_000.0 / (now - networkAt));
+        r.put("networkTxBytesPerSecond", (tx - previousTx) * 1_000_000_000.0 / (now - networkAt));
+      }
+      networkAt = now;
+      previousRx = rx;
+      previousTx = tx;
+    } catch (Exception unavailable) {
     }
     var memory = ManagementFactory.getMemoryMXBean();
     var heap = memory.getHeapMemoryUsage();
@@ -79,6 +101,8 @@ public final class SystemMetrics {
       swapFree = mem.getOrDefault("SwapFree", swapFree);
     } catch (Exception ignored) {
     }
+    r.put("nodeMemTotalBytes", known(total));
+    r.put("nodeMemAvailBytes", known(available));
     r.put("physicalMemoryTotalBytes", known(total));
     r.put("physicalMemoryAvailableBytes", known(available));
     r.put("physicalMemoryUsedBytes", total >= 0 && available >= 0 ? total - available : null);
@@ -94,6 +118,7 @@ public final class SystemMetrics {
       var disk = Files.getFileStore(root);
       long diskTotal = disk.getTotalSpace(), free = disk.getUsableSpace();
       r.put("diskTotalBytes", diskTotal);
+      r.put("diskFreeBytes", free);
       r.put("diskUsableBytes", free);
       r.put("diskUnallocatedBytes", disk.getUnallocatedSpace());
       r.put("diskUsedBytes", diskTotal - free);

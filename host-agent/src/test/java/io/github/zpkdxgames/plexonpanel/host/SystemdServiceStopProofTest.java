@@ -12,8 +12,8 @@ class SystemdServiceStopProofTest {
   }
 
   @Test
-  void failedWithDeadMainPidIsProvenStopped() {
-    assertTrue(SystemdService.stopped(Map.of("state", "failed", "pid", 42L), pid -> false));
+  void failedWithRecordedMainPidDoesNotProveStop() {
+    assertFalse(SystemdService.stopped(Map.of("state", "failed", "pid", 42L), pid -> false));
   }
 
   @Test

@@ -14,7 +14,7 @@ import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.locks.ReentrantLock;
 
-/** Host-authoritative restart scheduler and manual-only cold full-backup orchestrator. */
+/** Host-authoritative restart scheduler and manual and scheduled cold full-backup orchestrator. */
 public final class MaintenanceManager implements AutoCloseable {
   private final HostConfig config;
   private final Path settingsPath;
@@ -89,24 +89,6 @@ public final class MaintenanceManager implements AutoCloseable {
   public void start() {
     try {
       MaintenanceStateStore.Job active = state.active();
-      if (active != null
-          && "FULL_RESTORE_POINT".equals(active.kind())
-          && active.automatic()
-          && !MaintenanceStateStore.terminal(active)) {
-        state.finish(
-            active,
-            "FAILED",
-            "AUTOMATIC_BACKUP_DISABLED",
-            "Automatic full backups are retired; start a new backup manually from the dashboard.");
-        publish(
-            "maintenance.failed",
-            Map.of(
-                "jobId", active.jobId(),
-                "kind", active.kind(),
-                "errorCode", "AUTOMATIC_BACKUP_DISABLED"));
-        active = null;
-      }
-
       boolean resumedCountdown = false;
       if (active != null && "COUNTDOWN".equals(active.phase())) {
         try {
@@ -141,6 +123,38 @@ public final class MaintenanceManager implements AutoCloseable {
     scheduler.scheduleWithFixedDelay(this::tickSafely, 2, 15, TimeUnit.SECONDS);
   }
 
+  private java.util.concurrent.Callable<String> lastJoin = () -> null;
+
+  public void playerActivity(java.util.concurrent.Callable<String> evidence) {
+    lastJoin = evidence;
+  }
+
+  private Path verifiedWatermark() {
+    return settingsPath.resolveSibling("last-verified-drive-backup.json");
+  }
+
+  private boolean skipEmpty(MaintenanceSettings.BackupSchedule backup, Instant now) {
+    if (!backup.skipIfEmptySinceLastBackup()) return false;
+    try {
+      Path path = verifiedWatermark();
+      if (Files.isSymbolicLink(path) || !Files.isRegularFile(path) || Files.size(path) > 4096)
+        return false;
+      String
+          verified =
+              com.google.gson.JsonParser.parseString(Files.readString(path))
+                  .getAsJsonObject()
+                  .get("verifiedAt")
+                  .getAsString(),
+          joined = lastJoin.call();
+      Instant at = Instant.parse(verified);
+      return joined != null
+          && !Instant.parse(joined).isAfter(at)
+          && now.isBefore(at.plus(Duration.ofHours(backup.forceAfterHours())));
+    } catch (Exception unavailable) {
+      return false;
+    }
+  }
+
   public MaintenanceSettings settings() {
     return settings;
   }
@@ -161,10 +175,10 @@ public final class MaintenanceManager implements AutoCloseable {
         false,
         "",
         "",
-        Map.of("timezone", next.timezone(), "fullBackupMode", "MANUAL_ONLY"));
+        Map.of("timezone", next.timezone(), "fullBackupMode", "MANUAL_AND_SCHEDULED"));
     publish(
         "maintenance.settings.updated",
-        Map.of("timezone", next.timezone(), "fullBackupMode", "MANUAL_ONLY"));
+        Map.of("timezone", next.timezone(), "fullBackupMode", "MANUAL_AND_SCHEDULED"));
     return next;
   }
 
@@ -177,7 +191,9 @@ public final class MaintenanceManager implements AutoCloseable {
     Map<String, Object> result = new LinkedHashMap<>();
     result.put("timezone", current.timezone());
     result.put("nextRestart", restart == null ? "" : restart.toString());
-    result.put("fullBackupMode", "MANUAL_ONLY");
+    result.put("fullBackupMode", "MANUAL_AND_SCHEDULED");
+    Instant nextBackup = MaintenanceSchedule.nextBackup(current.schedule().backups(), zone, now);
+    result.put("nextBackup", nextBackup == null ? "" : nextBackup.toString());
     result.put("jobStateContractVersion", 4);
     result.put("currentOperation", active == null ? Map.of() : active);
     result.put("provider", fullBackups.providerStatus());
@@ -185,8 +201,7 @@ public final class MaintenanceManager implements AutoCloseable {
     result.put("restoreRecoveryRequired", fullBackups.recoveryRequired());
     result.put("jobRecoveryRequired", state.recoveryRequired() != null);
     result.put(
-        "commandChannel",
-        Map.of("enabled", commandChannel.enabled(), "type", "HOST_LOCAL_RCON"));
+        "commandChannel", Map.of("enabled", commandChannel.enabled(), "type", "HOST_LOCAL_RCON"));
     if (active != null && "COUNTDOWN".equals(active.phase())) {
       try {
         MaintenanceStateStore.Countdown countdown = state.countdown(active);
@@ -216,7 +231,7 @@ public final class MaintenanceManager implements AutoCloseable {
   public String fullRestorePointNow(DeviceRegistry.Device device, int countdownSeconds)
       throws Exception {
     try {
-      MaintenanceCountdown.fullBackupWarnings(countdownSeconds);
+      if (countdownSeconds != 0) MaintenanceCountdown.fullBackupWarnings(countdownSeconds);
     } catch (IllegalArgumentException invalid) {
       throw new OperationFailure(
           "COUNTDOWN_INVALID",
@@ -225,6 +240,7 @@ public final class MaintenanceManager implements AutoCloseable {
           false,
           Map.of("supportedCountdownSeconds", "1800,900,600,300"));
     }
+    if (countdownSeconds == 0) requireSuccess(commandChannel.emptyServerProbe());
     return queue("FULL_RESTORE_POINT", null, device, false, false, countdownSeconds);
   }
 
@@ -237,8 +253,7 @@ public final class MaintenanceManager implements AutoCloseable {
       throws Exception {
     if (closed.get()) throw new IllegalStateException("HOST_OFFLINE");
     MaintenanceStateStore.Job recovery = state.recoveryRequired();
-    if (recovery == null)
-      return Map.of("resolved", false, "state", "NONE");
+    if (recovery == null) return Map.of("resolved", false, "state", "NONE");
 
     Map<String, Object> serviceStatus = service.status();
     if (!"active".equals(serviceStatus.get("state")))
@@ -258,7 +273,8 @@ public final class MaintenanceManager implements AutoCloseable {
       throw new OperationFailure(
           "RECOVERY_STATE_NOT_VERIFIED",
           "RECOVERY_REQUIRED",
-          "Minecraft must pass the Host-local readiness probe before maintenance recovery can be acknowledged.",
+          "Minecraft must pass the Host-local readiness probe before maintenance recovery can be"
+              + " acknowledged.",
           true,
           Map.of("jobId", recovery.jobId(), "state", recovery.phase()));
 
@@ -268,10 +284,14 @@ public final class MaintenanceManager implements AutoCloseable {
     publish(
         "maintenance.recovery.resolved",
         Map.of(
-            "jobId", recovery.jobId(),
-            "kind", recovery.kind(),
-            "result", "FAILED",
-            "errorCode", originalCode == null ? "" : originalCode));
+            "jobId",
+            recovery.jobId(),
+            "kind",
+            recovery.kind(),
+            "result",
+            "FAILED",
+            "errorCode",
+            originalCode == null ? "" : originalCode));
     audit(
         "maintenance.recovery.resolve",
         "SUCCESS",
@@ -281,9 +301,12 @@ public final class MaintenanceManager implements AutoCloseable {
         recovery.backupId(),
         Map.of("verifiedServiceState", "active", "readinessVerified", true));
     return Map.of(
-        "resolved", true,
-        "jobId", recovery.jobId(),
-        "state", resolved == null ? "FAILED" : resolved.phase());
+        "resolved",
+        true,
+        "jobId",
+        recovery.jobId(),
+        "state",
+        resolved == null ? "FAILED" : resolved.phase());
   }
 
   private synchronized String queue(
@@ -295,20 +318,14 @@ public final class MaintenanceManager implements AutoCloseable {
       Integer fullBackupCountdownSeconds)
       throws Exception {
     if (closed.get()) throw new IllegalStateException("HOST_OFFLINE");
-    if ("FULL_RESTORE_POINT".equals(kind) && automatic)
-      throw new OperationFailure(
-          "AUTOMATIC_BACKUP_DISABLED",
-          "QUEUED",
-          "Full backups are manual-only and cannot be started by a scheduler.",
-          false);
-
     MaintenanceStateStore.Job recovery = state.recoveryRequired();
     if (recovery != null) throw conflict("RECOVERY_REQUIRED", recovery, false);
     if (fullBackups.recoveryRequired())
       throw new OperationFailure(
           "RESTORE_RECOVERY_REQUIRED",
           "RECOVERY_REQUIRED",
-          "A previous full-restore operation requires Host recovery before maintenance can continue.",
+          "A previous full-restore operation requires Host recovery before maintenance can"
+              + " continue.",
           false);
 
     MaintenanceStateStore.Job active = state.blocking();
@@ -352,12 +369,7 @@ public final class MaintenanceManager implements AutoCloseable {
       runRestart(job, device, automatic, skipCountdown, recoveringCountdown);
     else if ("FULL_RESTORE_POINT".equals(job.kind()))
       runFull(
-          job,
-          device,
-          automatic,
-          skipCountdown,
-          recoveringCountdown,
-          fullBackupCountdownSeconds);
+          job, device, automatic, skipCountdown, recoveringCountdown, fullBackupCountdownSeconds);
     else
       fail(
           job,
@@ -381,6 +393,13 @@ public final class MaintenanceManager implements AutoCloseable {
     MaintenanceSettings current = settings;
     ZoneId zone = ZoneId.of(current.timezone());
     Instant now = timeSource.instant(), windowStart = now.minus(Duration.ofMinutes(10));
+    var backup = current.schedule().backups();
+    Instant occurrence = MaintenanceSchedule.nextBackup(backup, zone, windowStart);
+    if (occurrence != null && !occurrence.isAfter(now) && state.claim("backups", occurrence)) {
+      if (!skipEmpty(backup, now))
+        queue("FULL_RESTORE_POINT", occurrence, null, true, false, backup.countdownMinutes() * 60);
+      return;
+    }
     Due restart = due("restart", current.restart().schedule(), zone, windowStart, now);
     if (restart != null && state.claim(restart.scheduleId, restart.occurrence))
       queue("RESTART", restart.occurrence, null, true, false, null);
@@ -410,7 +429,8 @@ public final class MaintenanceManager implements AutoCloseable {
     try {
       if (!operationLock.tryLock()) throw new SecurityException("BUSY");
       locked = true;
-      if (fullBackups.recoveryRequired()) throw new IllegalStateException("RESTORE_RECOVERY_REQUIRED");
+      if (fullBackups.recoveryRequired())
+        throw new IllegalStateException("RESTORE_RECOVERY_REQUIRED");
       if (!recoveringCountdown)
         job = transition(job, "PREFLIGHT", null, 5, null, null, null, null, Map.of());
       if (service.stopped()) {
@@ -419,10 +439,14 @@ public final class MaintenanceManager implements AutoCloseable {
         publish(
             "maintenance.completed",
             Map.of(
-                "jobId", job.jobId(),
-                "kind", job.kind(),
-                "result", "SKIPPED",
-                "errorCode", "SERVER_ALREADY_STOPPED"));
+                "jobId",
+                job.jobId(),
+                "kind",
+                job.kind(),
+                "result",
+                "SKIPPED",
+                "errorCode",
+                "SERVER_ALREADY_STOPPED"));
         audit(
             "maintenance.restart",
             "SKIPPED",
@@ -458,15 +482,7 @@ public final class MaintenanceManager implements AutoCloseable {
               () -> {
                 MaintenanceStateStore.Job stopping =
                     transition(
-                        beforeStop,
-                        "STOPPING_SERVER",
-                        null,
-                        35,
-                        null,
-                        null,
-                        null,
-                        null,
-                        Map.of());
+                        beforeStop, "STOPPING_SERVER", null, 35, null, null, null, null, Map.of());
                 stopBoundaryEntered.set(true);
                 service.action("stop");
                 return stopping;
@@ -492,7 +508,9 @@ public final class MaintenanceManager implements AutoCloseable {
           "",
           Map.of());
     } catch (Exception error) {
-      if (closed.get() && error instanceof InterruptedException && "COUNTDOWN".equals(job.phase())) {
+      if (closed.get()
+          && error instanceof InterruptedException
+          && "COUNTDOWN".equals(job.phase())) {
         Thread.currentThread().interrupt();
         return;
       }
@@ -516,14 +534,18 @@ public final class MaintenanceManager implements AutoCloseable {
     AtomicBoolean stopBoundaryEntered = new AtomicBoolean();
     NodeBackupCoordinator.Lease nodeLease = null;
     try {
-      if (automatic) throw new IOException("AUTOMATIC_BACKUP_DISABLED");
       if (!operationLock.tryLock()) throw new SecurityException("BUSY");
       locked = true;
-      if (fullBackups.recoveryRequired()) throw new IllegalStateException("RESTORE_RECOVERY_REQUIRED");
+      if (fullBackups.recoveryRequired())
+        throw new IllegalStateException("RESTORE_RECOVERY_REQUIRED");
       MaintenanceSettings current = settings;
       String waitingJobId = job.jobId();
-      nodeLease = fullBackups.acquireNodeBackupLease(() -> publish(
-          "maintenance.node.queued", Map.of("jobId", waitingJobId, "kind", "FULL_RESTORE_POINT")));
+      nodeLease =
+          fullBackups.acquireNodeBackupLease(
+              () ->
+                  publish(
+                      "maintenance.node.queued",
+                      Map.of("jobId", waitingJobId, "kind", "FULL_RESTORE_POINT")));
 
       if (!recoveringCountdown) {
         job = transition(job, "PREFLIGHT", null, 5, null, null, null, null, Map.of());
@@ -541,15 +563,21 @@ public final class MaintenanceManager implements AutoCloseable {
           job.jobId(),
           "",
           Map.of(
-              "initialServerState", startedOnline ? "RUNNING" : "STOPPED",
-              "countdownResumed", recoveringCountdown));
+              "initialServerState",
+              startedOnline ? "RUNNING" : "STOPPED",
+              "countdownResumed",
+              recoveringCountdown));
       if (startedOnline) {
         requireCommandChannel();
+        if (fullBackupCountdownSeconds != null && fullBackupCountdownSeconds == 0)
+          requireSuccess(commandChannel.emptyServerProbe());
         List<Integer> warningSeconds =
-            MaintenanceCountdown.fullBackupWarnings(
-                fullBackupCountdownSeconds == null
-                    ? MaintenanceCountdown.DEFAULT_FULL_BACKUP_COUNTDOWN_SECONDS
-                    : fullBackupCountdownSeconds);
+            fullBackupCountdownSeconds != null && fullBackupCountdownSeconds == 0
+                ? List.of()
+                : MaintenanceCountdown.fullBackupWarnings(
+                    fullBackupCountdownSeconds == null
+                        ? MaintenanceCountdown.DEFAULT_FULL_BACKUP_COUNTDOWN_SECONDS
+                        : fullBackupCountdownSeconds);
         if (!skipCountdown) {
           if (!recoveringCountdown) {
             job =
@@ -567,11 +595,10 @@ public final class MaintenanceManager implements AutoCloseable {
                         MaintenanceCountdown.durationSeconds(warningSeconds)));
             state.beginCountdown(job, warningSeconds, timeSource.instant());
           }
-          countdown(
-              job,
-              MinecraftCommandChannel.MaintenanceOperation.FULL_BACKUP,
-              warningSeconds);
+          countdown(job, MinecraftCommandChannel.MaintenanceOperation.FULL_BACKUP, warningSeconds);
         }
+        if (fullBackupCountdownSeconds != null && fullBackupCountdownSeconds == 0)
+          requireSuccess(commandChannel.emptyServerProbe());
         job = transition(job, "FINAL_SAVE", null, 25, null, null, null, null, Map.of());
         MaintenanceStateStore.Job beforeStop = job;
         job =
@@ -589,6 +616,8 @@ public final class MaintenanceManager implements AutoCloseable {
                           null,
                           null,
                           Map.of());
+                  if (fullBackupCountdownSeconds != null && fullBackupCountdownSeconds == 0)
+                    requireSuccess(commandChannel.emptyServerProbe());
                   stopBoundaryEntered.set(true);
                   service.action("stop");
                   return stopping;
@@ -614,13 +643,29 @@ public final class MaintenanceManager implements AutoCloseable {
       job = transition(job, "ARCHIVING", null, 50, null, null, null, null, Map.of());
       FullRestorePointManager.Metadata backup =
           fullBackups.createLocked(
-              job.jobId(), actor(device, automatic), automatic, false, current.fullRestorePoint(), true);
-      boolean providerConfigured = Boolean.TRUE.equals(fullBackups.providerStatus().get("configured"));
+              job.jobId(),
+              actor(device, automatic),
+              automatic,
+              false,
+              current.fullRestorePoint(),
+              true);
+      boolean providerConfigured =
+          Boolean.TRUE.equals(fullBackups.providerStatus().get("configured"));
       boolean localVerified =
           backup.sha256() != null
               && !backup.sha256().isBlank()
               && (backup.local() || backup.offsite());
       boolean remoteVerified = backup.offsite();
+      if (remoteVerified)
+        io.github.zpkdxgames.plexonpanel.util.AtomicFiles.writeUtf8(
+            verifiedWatermark(),
+            new com.google.gson.Gson()
+                .toJson(
+                    Map.of(
+                        "verifiedAt",
+                        timeSource.instant().toString(),
+                        "backupId",
+                        backup.backupId())));
       boolean degraded = providerConfigured && !remoteVerified;
       String errorCode = degraded ? retryableOffsiteCode(backup.errorCode()) : "";
       job =
@@ -647,9 +692,12 @@ public final class MaintenanceManager implements AutoCloseable {
                 remoteVerified,
                 stoppedByUs,
                 Map.of(
-                    "offsite", backup.offsite(),
-                    "errorCode", errorCode,
-                    "retryUploadAvailable", degraded && backup.local()));
+                    "offsite",
+                    backup.offsite(),
+                    "errorCode",
+                    errorCode,
+                    "retryUploadAvailable",
+                    degraded && backup.local()));
       }
       // Manual full-backup service recovery is mandatory. The serialized restartAfter field is
       // compatibility-only and cannot preserve a stopped service after this workflow stopped it.
@@ -723,7 +771,9 @@ public final class MaintenanceManager implements AutoCloseable {
               "safetyRestart", safetyRestart,
               "serverWasStoppedByMaintenance", stoppedByUs));
     } catch (Exception error) {
-      if (closed.get() && error instanceof InterruptedException && "COUNTDOWN".equals(job.phase())) {
+      if (closed.get()
+          && error instanceof InterruptedException
+          && "COUNTDOWN".equals(job.phase())) {
         Thread.currentThread().interrupt();
         return;
       }
@@ -864,14 +914,15 @@ public final class MaintenanceManager implements AutoCloseable {
 
   static boolean shouldStartAfterFullBackupFailure(
       boolean destructiveBoundary, boolean localBackupVerified) {
-    return destructiveBoundary && localBackupVerified;
+    return destructiveBoundary;
   }
 
   private void tryStartAfterFailure() {
     try {
       if (service.stopped()) service.action("start");
     } catch (Exception startFailure) {
-      System.err.println("PlexonPanel Host could not recover server start after maintenance failure");
+      System.err.println(
+          "PlexonPanel Host could not recover server start after maintenance failure");
     }
   }
 
@@ -889,25 +940,21 @@ public final class MaintenanceManager implements AutoCloseable {
       if (stoppedByUs && !latest.restartRecoveryRequired())
         latest =
             state.transition(
-                latest,
-                latest.phase(),
-                latest.backupId(),
-                null,
-                true,
-                null,
-                null,
-                true);
+                latest, latest.phase(), latest.backupId(), null, true, null, null, true);
       state.finish(
           latest,
           outcome,
           code,
           outcome.equals("RECOVERY_REQUIRED")
-              ? "Maintenance failed after the Host may have stopped Minecraft; verify service state before retrying."
+              ? "Maintenance failed after the Host may have stopped Minecraft; verify service state"
+                  + " before retrying."
               : "Maintenance failed before the destructive stop boundary.");
     } catch (Exception ignored) {
     }
     publish(
-        outcome.equals("RECOVERY_REQUIRED") ? "maintenance.recovery.required" : "maintenance.failed",
+        outcome.equals("RECOVERY_REQUIRED")
+            ? "maintenance.recovery.required"
+            : "maintenance.failed",
         Map.of("jobId", job.jobId(), "kind", job.kind(), "errorCode", code));
     audit(
         action,
@@ -926,7 +973,8 @@ public final class MaintenanceManager implements AutoCloseable {
         code,
         phase,
         code.equals("RECOVERY_REQUIRED")
-            ? "A previous Host maintenance job requires recovery before another destructive operation can start."
+            ? "A previous Host maintenance job requires recovery before another destructive"
+                + " operation can start."
             : "Another Host maintenance job is already active.",
         retryable,
         Map.of("jobId", active.jobId(), "state", phase, "kind", active.kind()));
@@ -1020,9 +1068,12 @@ public final class MaintenanceManager implements AutoCloseable {
   public boolean awaitClosed(Duration timeout) {
     long started = System.nanoTime();
     boolean workerDrained = ExecutorDrain.await(worker, timeout);
-    boolean schedulerDrained = ExecutorDrain.await(scheduler,
-        Duration.ofNanos(Math.max(0, timeout.toNanos() - (System.nanoTime() - started))));
-    if (workerDrained && schedulerDrained && commandChannelClosed.compareAndSet(false, true)) commandChannel.close();
+    boolean schedulerDrained =
+        ExecutorDrain.await(
+            scheduler,
+            Duration.ofNanos(Math.max(0, timeout.toNanos() - (System.nanoTime() - started))));
+    if (workerDrained && schedulerDrained && commandChannelClosed.compareAndSet(false, true))
+      commandChannel.close();
     return workerDrained && schedulerDrained;
   }
 

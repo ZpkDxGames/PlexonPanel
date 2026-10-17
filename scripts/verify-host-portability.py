@@ -20,6 +20,11 @@ REQUIRED_ENTRIES = {
     "io/github/zpkdxgames/plexonpanel/host/RconMinecraftCommandChannel.class",
 }
 JAVA_25_CLASS_MAJOR = 69
+SQLITE_NATIVES = {
+    f"org/sqlite/native/{platform}/{architecture}/libsqlitejdbc.so"
+    for platform in ("Linux", "Linux-Musl")
+    for architecture in ("x86_64", "aarch64")
+}
 
 
 def normalized_platform(system: str, machine: str) -> str:
@@ -92,15 +97,18 @@ def main() -> None:
             native_entries = sorted(
                 name
                 for name in names
-                if name.lower().endswith(NATIVE_SUFFIXES)
-                or "/native/" in name.lower()
-                or name.lower().startswith("native/")
-            )
-            if native_entries:
-                fail(
-                    "architecture-specific native payload found in Host JAR: "
-                    + ", ".join(native_entries[:10])
+                if not name.endswith("/") and (
+                    name.lower().endswith(NATIVE_SUFFIXES)
+                    or "/native/" in name.lower()
+                    or name.lower().startswith("native/")
                 )
+            )
+            unexpected = set(native_entries) - SQLITE_NATIVES
+            if unexpected:
+                fail("unexpected native payload: " + ", ".join(sorted(unexpected)))
+            missing_native = SQLITE_NATIVES - set(native_entries)
+            if missing_native:
+                fail("missing required SQLite platform payload: " + ", ".join(sorted(missing_native)))
 
             try:
                 manifest = manifest_attributes(
@@ -124,14 +132,14 @@ def main() -> None:
 
     report = {
         "jar": str(jar),
-        "artifactType": "architecture-neutral-java-jar",
+        "artifactType": "multi-platform-java-jar-with-sqlite-jni",
         "implementationVersion": implementation_version,
         "javaClassMajor": major,
         "runnerSystem": system,
         "runnerMachine": machine,
         "runnerPlatform": actual_platform,
         "supportedPlatforms": sorted(SUPPORTED_PLATFORMS),
-        "nativePayload": False,
+        "nativePayload": sorted(SQLITE_NATIVES),
     }
     print(json.dumps(report, indent=2, sort_keys=True))
 
