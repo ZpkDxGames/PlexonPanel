@@ -1,6 +1,10 @@
 # Gradle
 .gradle/
 **/build/
+*.class
+*.jar
+*.war
+!gradle/wrapper/gradle-wrapper.jar
 
 # IDEs
 .idea/
@@ -36,6 +40,3 @@ mock-gateway/.gateway-key.json
 
 # Release archives
 PlexonPanel-*.zip
-
-__pycache__/
-*.py[cod]

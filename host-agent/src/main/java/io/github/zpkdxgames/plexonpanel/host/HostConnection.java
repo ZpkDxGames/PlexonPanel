@@ -58,17 +58,17 @@ public final class HostConnection implements MessageSink, AutoCloseable {
     this.console = new HostConsoleStreamService(config, this, journalNamespace);
   }
 
-  public void handlers(Consumer<DecodedMessage> handler, Runnable connected) {
-    this.handler = handler;
-    this.connected = connected;
-  }
-
-  public void sessionStore(io.github.zpkdxgames.plexonpanel.host.storage.HostSessionStore store) {
+  public void sessionStore(HostSessionStore store) {
     console.sessionStore(store);
   }
 
-  public void clearConsoleEpoch() {
-    console.clearEpoch();
+  public void resetConsoleSession() {
+    console.resetSession();
+  }
+
+  public void handlers(Consumer<DecodedMessage> handler, Runnable connected) {
+    this.handler = handler;
+    this.connected = connected;
   }
 
   public boolean authenticated() {

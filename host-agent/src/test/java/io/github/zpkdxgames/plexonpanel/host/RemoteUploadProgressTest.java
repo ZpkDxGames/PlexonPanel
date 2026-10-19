@@ -103,7 +103,15 @@ class RemoteUploadProgressTest {
     FullRestorePointManager.Metadata result =
         (FullRestorePointManager.Metadata)
             complete.invoke(
-                manager, local, promotion, archive, metadata, jobId, backupId, 4096L, 12);
+                manager,
+                local,
+                promotion,
+                archive,
+                metadata,
+                jobId,
+                backupId,
+                4096L,
+                12);
 
     assertFalse(Files.exists(archive));
     assertFalse(result.local());
@@ -116,66 +124,6 @@ class RemoteUploadProgressTest {
                 event ->
                     "CLEANING_LOCAL".equals(event.get("phase"))
                         && "LOCAL_RELEASED".equals(event.get("providerState"))));
-  }
-
-  @Test
-  void keepLocalPolicyRetainsVerifiedArchive() throws Exception {
-    Path root = Files.createDirectory(temporary.resolve("keep-server")),
-        backups = temporary.resolve("keep-backups");
-    var manager =
-        new FullRestorePointManager(
-            config(root, backups),
-            new SystemdService("plexoncraft-test.service"),
-            () -> false,
-            new ReentrantLock(),
-            event -> {});
-    String jobId = UUID.randomUUID().toString(), backupId = UUID.randomUUID().toString();
-    Path archive = backups.resolve("restore-points").resolve(backupId + ".zip"),
-        metadata = backups.resolve("metadata").resolve(backupId + ".json");
-    Files.write(archive, new byte[4096]);
-    var old = MaintenanceSettings.migratedDefaults().fullRestorePoint();
-    var settings =
-        new MaintenanceSettings.FullRestorePoint(
-            old.retentionMode(),
-            3,
-            true,
-            old.canonicalFilename(),
-            old.uploadTimeoutSeconds(),
-            old.verificationMode(),
-            old.maximumBytes(),
-            old.excludes(),
-            "KEEP_LOCAL_ROTATING");
-    Method complete =
-        FullRestorePointManager.class.getDeclaredMethod(
-            "completeRemotePromotion",
-            MaintenanceSettings.FullRestorePoint.class,
-            FullRestorePointManager.Metadata.class,
-            RcloneBackupProvider.Promotion.class,
-            Path.class,
-            Path.class,
-            String.class,
-            String.class,
-            long.class,
-            int.class);
-    complete.setAccessible(true);
-    var result =
-        (FullRestorePointManager.Metadata)
-            complete.invoke(
-                manager,
-                settings,
-                localMetadata(backupId, jobId, 4096L),
-                new RcloneBackupProvider.Promotion(
-                    true, true, "gdrive:synthetic/Latest.zip", "2026-10-17T00:02:00Z", "verified"),
-                archive,
-                metadata,
-                jobId,
-                backupId,
-                4096L,
-                12);
-    assertTrue(Files.exists(archive));
-    assertTrue(result.local());
-    assertTrue(result.offsite());
-    assertEquals("VERIFIED_REMOTE", result.verification());
   }
 
   @Test
@@ -227,7 +175,8 @@ class RemoteUploadProgressTest {
     assertEquals("SUCCESS_WITH_WARNING", result.result());
     assertEquals("LOCAL_CLEANUP_FAILED", result.errorCode());
     assertTrue(
-        events.stream().anyMatch(event -> "LOCAL_RETAINED".equals(event.get("providerState"))));
+        events.stream()
+            .anyMatch(event -> "LOCAL_RETAINED".equals(event.get("providerState"))));
   }
 
   private FullRestorePointManager.Metadata localMetadata(

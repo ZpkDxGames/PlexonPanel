@@ -36,17 +36,13 @@ import java.util.concurrent.atomic.AtomicLong;
 public final class HostConsoleStreamService implements AutoCloseable {
   private static final long MAXIMUM_RESTART_BACKOFF_MILLIS = 30_000L;
 
-  private volatile io.github.zpkdxgames.plexonpanel.host.storage.HostSessionStore sessionStore;
+  private volatile HostSessionStore sessionStore;
 
-  void sessionStore(io.github.zpkdxgames.plexonpanel.host.storage.HostSessionStore store) {
-    sessionStore = store;
+  public void sessionStore(HostSessionStore store) {
+    this.sessionStore = store;
   }
 
-  private final java.util.LinkedHashSet<String> checkedInvocations =
-      new java.util.LinkedHashSet<>();
-  private long lastInvocationProbe;
-
-  synchronized void clearEpoch() {
+  public synchronized void resetSession() {
     recent.clear();
     pending.clear();
   }
@@ -199,33 +195,6 @@ public final class HostConsoleStreamService implements AutoCloseable {
       if (unit != null && !config.serviceName().equals(unit)) return false;
       String cursor = text(object, "__CURSOR");
       String nextInvocation = text(object, "_SYSTEMD_INVOCATION_ID");
-      if (sessionStore != null
-          && nextInvocation != null
-          && nextInvocation.matches("(?i)[0-9a-f]{32}")
-          && !nextInvocation.equalsIgnoreCase(sessionStore.bootEpochId())
-          && !checkedInvocations.contains(nextInvocation)
-          && System.nanoTime() - lastInvocationProbe > 1_000_000_000L) {
-        lastInvocationProbe = System.nanoTime();
-        checkedInvocations.add(nextInvocation);
-        while (checkedInvocations.size() > 32)
-          checkedInvocations.remove(checkedInvocations.iterator().next());
-        try {
-          var current = new SystemdService(config.serviceName()).status();
-          if (nextInvocation.equalsIgnoreCase(String.valueOf(current.get("invocationId")))
-              && sessionStore.observeService(current, Instant.now())) {
-            clearEpoch();
-            connection.send(
-                "session.epoch_reset",
-                Map.of(
-                    "bootEpochId",
-                    sessionStore.bootEpochId(),
-                    "bootStartedAt",
-                    sessionStore.bootStartedAt()),
-                MessagePriority.EVENT);
-          }
-        } catch (Exception unavailable) {
-        }
-      }
       String pid = text(object, "_PID");
       Integer priority = integer(object, "PRIORITY");
       boolean truncated =
@@ -248,19 +217,18 @@ public final class HostConsoleStreamService implements AutoCloseable {
               pid,
               streamSession,
               sequence);
-      if (sessionStore != null) {
-        try {
-          if (!sessionStore.appendConsole(line)) return false;
-        } catch (Exception unavailable) {
-          System.err.println("SESSION_STORAGE_WRITE_FAILED");
-          return false;
-        }
-      }
       if (cursor != null) lastCursor = cursor;
       if (nextInvocation != null) invocationId = nextInvocation;
       stateDirty = true;
       captured.incrementAndGet();
       lastConsoleEventAt = System.currentTimeMillis();
+      if (sessionStore != null) {
+        try {
+          sessionStore.append(line);
+        } catch (java.io.IOException failure) {
+          setSourceState("SESSION_STORE_UNAVAILABLE", false);
+        }
+      }
       addRecent(line);
       enqueue(line);
       if (!healthy) setSourceState("FOLLOWING", true);

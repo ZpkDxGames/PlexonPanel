@@ -25,5 +25,3 @@ Ordinary restarts retain identities and device grants. [Intentional clone/rekey]
 Original 4.0 binaries, private configuration, service paths, relay coordination and Caddy/certificate state must remain recoverable. Historical [4.0 source README](https://github.com/ZpkDxGames/PlexonPanel/blob/9efa8fcaf3d75d859e01fd712a2826aa8f974f29/README.md) describes that retained installation. No source merge grants permission to delete those materials or replace the standalone relay in isolation.
 
 See [Protocol 3](docs/PROTOCOL.md), [privacy](PRIVACY.md), [changelog](CHANGELOG.md) and the synchronized Dashboard deployment gate for operational details.
-
-The v5 owner directive restores periodic cold backups and adds private, current-boot SQLite/JSON telemetry. See [docs/V5_SESSION_STORAGE_AND_SCHEDULES.md](docs/V5_SESSION_STORAGE_AND_SCHEDULES.md).

@@ -65,25 +65,14 @@ public final class FullRestorePointManager {
       ReentrantLock operationLock,
       Consumer<Map<String, Object>> progress)
       throws IOException {
-    this(
-        config,
-        service,
-        paperConnected,
-        operationLock,
-        progress,
-        config.fleetIdentity() == null
-            ? null
-            : NodeBackupCoordinator.forNode(config.fleetIdentity().nodeId()));
+    this(config, service, paperConnected, operationLock, progress,
+        config.fleetIdentity() == null ? null : NodeBackupCoordinator.forNode(config.fleetIdentity().nodeId()));
   }
 
   FullRestorePointManager(
-      HostConfig config,
-      SystemdService service,
-      BooleanSupplier paperConnected,
-      ReentrantLock operationLock,
-      Consumer<Map<String, Object>> progress,
-      NodeBackupCoordinator nodeBackups)
-      throws IOException {
+      HostConfig config, SystemdService service, BooleanSupplier paperConnected,
+      ReentrantLock operationLock, Consumer<Map<String, Object>> progress,
+      NodeBackupCoordinator nodeBackups) throws IOException {
     this.config = Objects.requireNonNull(config);
     this.nodeBackups = nodeBackups;
     this.root = Path.of(config.serverRoot()).toRealPath();
@@ -107,29 +96,20 @@ public final class FullRestorePointManager {
     PartialBackupRecovery.clean(staging);
   }
 
-  NodeBackupCoordinator.Lease acquireNodeBackupLease(Runnable queued)
-      throws IOException, InterruptedException {
+  NodeBackupCoordinator.Lease acquireNodeBackupLease(Runnable queued) throws IOException, InterruptedException {
     return nodeBackups == null ? null : nodeBackups.acquire(java.time.Duration.ofHours(1), queued);
   }
 
   public Map<String, Object> nodeBackupStatus() {
-    return Map.of(
-        "enabled",
-        nodeBackups != null,
-        "localLeaseActive",
-        nodeBackups != null && nodeBackups.active(),
-        "waiting",
-        nodeBackups != null && nodeBackups.queued());
+    return Map.of("enabled", nodeBackups != null,
+        "localLeaseActive", nodeBackups != null && nodeBackups.active(),
+        "waiting", nodeBackups != null && nodeBackups.queued());
   }
 
   public List<Metadata> list() throws IOException {
     List<Metadata> result = new ArrayList<>();
     try (var files = Files.list(metadataDirectory)) {
-      for (Path file :
-          files
-              .filter(p -> p.getFileName().toString().matches("[0-9a-f-]{36}\\.json"))
-              .limit(1001)
-              .toList()) {
+      for (Path file : files.filter(p -> p.getFileName().toString().matches("[0-9a-f-]{36}\\.json")).limit(1001).toList()) {
         if (Files.isSymbolicLink(file) || Files.size(file) > 32_768) continue;
         Metadata value = GSON.fromJson(Files.readString(file), Metadata.class);
         if (value != null && "FULL_RESTORE_POINT".equals(value.type)) {
@@ -151,9 +131,7 @@ public final class FullRestorePointManager {
         || Files.isSymbolicLink(file)
         || Files.size(file) > 32_768) throw new IOException("Backup metadata unavailable");
     Metadata value = GSON.fromJson(Files.readString(file), Metadata.class);
-    if (value == null
-        || !backupId.equals(value.backupId)
-        || !"FULL_RESTORE_POINT".equals(value.type))
+    if (value == null || !backupId.equals(value.backupId) || !"FULL_RESTORE_POINT".equals(value.type))
       throw new IOException("Invalid full restore-point metadata");
     return value;
   }
@@ -175,8 +153,7 @@ public final class FullRestorePointManager {
       boolean uploadOffsite)
       throws Exception {
     if (!operationLock.tryLock()) throw new SecurityException("BUSY");
-    try (var nodeLease =
-        acquireNodeBackupLease(() -> emit(jobId, "", "WAITING_FOR_NODE", 0, 0, 0))) {
+    try (var nodeLease = acquireNodeBackupLease(() -> emit(jobId, "", "WAITING_FOR_NODE", 0, 0, 0))) {
       return createLocked(jobId, initiatedBy, automatic, emergency, settings, uploadOffsite);
     } finally {
       operationLock.unlock();
@@ -205,8 +182,7 @@ public final class FullRestorePointManager {
 
     Scan scan = scan(settings);
     long usable = Files.getFileStore(base).getUsableSpace();
-    long required =
-        Math.min(Long.MAX_VALUE / 2, scan.bytes + Math.min(scan.bytes, 2L * 1024 * 1024 * 1024));
+    long required = Math.min(Long.MAX_VALUE / 2, scan.bytes + Math.min(scan.bytes, 2L * 1024 * 1024 * 1024));
     if (usable < required) throw new IOException("BACKUP_DISK_SPACE_INSUFFICIENT");
     if (scan.bytes > settings.maximumBytes()) throw new IOException("BACKUP_SIZE_LIMIT");
 
@@ -215,8 +191,7 @@ public final class FullRestorePointManager {
     try {
       emit(jobId, backupId, "ARCHIVING", 0, scan.bytes, 0);
       try (OutputStream stream =
-              Files.newOutputStream(
-                  partial, StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE);
+              Files.newOutputStream(partial, StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE);
           ZipOutputStream zip = new ZipOutputStream(new BufferedOutputStream(stream, 128 * 1024))) {
         zip.setLevel(Deflater.BEST_SPEED);
         FullBackupSource.walk(
@@ -243,8 +218,7 @@ public final class FullRestorePointManager {
                   while ((count = input.read(buffer)) >= 0) {
                     checkStopped();
                     bytes[0] += count;
-                    if (bytes[0] > settings.maximumBytes())
-                      throw new IOException("BACKUP_SIZE_LIMIT");
+                    if (bytes[0] > settings.maximumBytes()) throw new IOException("BACKUP_SIZE_LIMIT");
                     zip.write(buffer, 0, count);
                     emit(jobId, backupId, "ARCHIVING", bytes[0], scan.bytes, entries[0]);
                   }
@@ -258,7 +232,12 @@ public final class FullRestorePointManager {
       }
       emit(jobId, backupId, "HASHING", scan.bytes, scan.bytes, entries[0]);
       VerifiedArchive published =
-          verifyAndPublish(partial, finalArchive, entries[0], bytes[0], settings.maximumBytes());
+          verifyAndPublish(
+              partial,
+              finalArchive,
+              entries[0],
+              bytes[0],
+              settings.maximumBytes());
       long archiveBytes = published.archiveBytes();
       LocalBackupVerifier.Result verified = published.verification();
       Metadata local =
@@ -327,7 +306,6 @@ public final class FullRestorePointManager {
                           "UPLOADING"));
           result =
               completeRemotePromotion(
-                  settings,
                   local,
                   promoted,
                   finalArchive,
@@ -347,7 +325,8 @@ public final class FullRestorePointManager {
         }
       }
       retention(settings);
-      if (!result.offsite()) emit(jobId, backupId, "COMPLETE", scan.bytes, scan.bytes, entries[0]);
+      if (!result.offsite())
+        emit(jobId, backupId, "COMPLETE", scan.bytes, scan.bytes, entries[0]);
       return result;
     } catch (Exception failure) {
       Files.deleteIfExists(partial);
@@ -356,12 +335,10 @@ public final class FullRestorePointManager {
     }
   }
 
-  public Metadata retryUpload(
-      String backupId, String jobId, MaintenanceSettings.FullRestorePoint settings)
+  public Metadata retryUpload(String backupId, String jobId, MaintenanceSettings.FullRestorePoint settings)
       throws Exception {
     if (!operationLock.tryLock()) throw new SecurityException("BUSY");
-    try (var nodeLease =
-        acquireNodeBackupLease(() -> emit(jobId, backupId, "WAITING_FOR_NODE", 0, 0, 0))) {
+    try (var nodeLease = acquireNodeBackupLease(() -> emit(jobId, backupId, "WAITING_FOR_NODE", 0, 0, 0))) {
       Metadata local = verify(backupId);
       if (!provider.configured()) throw new IllegalStateException("RCLONE_UNAVAILABLE");
       Path localArchive = archive(backupId);
@@ -399,7 +376,6 @@ public final class FullRestorePointManager {
                         update.bytesPerSecond(),
                         "UPLOADING"));
         return completeRemotePromotion(
-            settings,
             local,
             promoted,
             localArchive,
@@ -423,10 +399,7 @@ public final class FullRestorePointManager {
     Metadata value = metadata(backupId);
     LocalBackupVerifier.Result verified =
         LocalBackupVerifier.verify(
-            archive(backupId),
-            value.sha256(),
-            value.entryCount(),
-            Math.max(1L, value.sourceBytes()));
+            archive(backupId), value.sha256(), value.entryCount(), Math.max(1L, value.sourceBytes()));
     if (verified.expandedBytes() != value.sourceBytes())
       throw new IOException("LOCAL_BACKUP_SIZE_MISMATCH");
     Metadata result = withLocalState(value, true, "VERIFIED_LOCAL");
@@ -435,8 +408,7 @@ public final class FullRestorePointManager {
     return result;
   }
 
-  public synchronized RestoreGrant prepareRestore(String backupId, String deviceId)
-      throws Exception {
+  public synchronized RestoreGrant prepareRestore(String backupId, String deviceId) throws Exception {
     ensureLocalArchive(backupId);
     verify(backupId);
     restoreGrants.entrySet().removeIf(e -> e.getValue().expiresAt < System.currentTimeMillis());
@@ -475,8 +447,7 @@ public final class FullRestorePointManager {
     boolean stoppedByRestore = false;
     NodeBackupCoordinator.Lease nodeLease = null;
     try {
-      nodeLease =
-          acquireNodeBackupLease(() -> emit(restoreId, backupId, "WAITING_FOR_NODE", 0, 0, 0));
+      nodeLease = acquireNodeBackupLease(() -> emit(restoreId, backupId, "WAITING_FOR_NODE", 0, 0, 0));
       if (Files.exists(journal)) throw new IllegalStateException("RESTORE_RECOVERY_REQUIRED");
       if (!service.stopped() || paperConnected.getAsBoolean()) {
         service.action("stop");
@@ -489,8 +460,7 @@ public final class FullRestorePointManager {
       Metadata selected = verify(backupId);
       String emergencyJob = UUID.randomUUID().toString();
       Metadata emergency =
-          createLocked(
-              emergencyJob, initiatedBy + " emergency pre-restore", false, true, settings, false);
+          createLocked(emergencyJob, initiatedBy + " emergency pre-restore", false, true, settings, false);
       Files.createDirectory(extract);
       Files.createDirectory(rollback);
       Set<String> targets = extractArchive(archive(backupId), extract, settings.maximumBytes());
@@ -514,9 +484,8 @@ public final class FullRestorePointManager {
           Path destination = root.resolve(target).normalize(),
               incoming = extract.resolve(target).normalize(),
               previous = rollback.resolve(target).normalize();
-          if (!destination.startsWith(root)
-              || !incoming.startsWith(extract)
-              || !previous.startsWith(rollback)) throw new IOException("RESTORE_FAILED");
+          if (!destination.startsWith(root) || !incoming.startsWith(extract) || !previous.startsWith(rollback))
+            throw new IOException("RESTORE_FAILED");
           if (Files.exists(destination, LinkOption.NOFOLLOW_LINKS)) {
             Files.createDirectories(previous.getParent());
             Files.move(destination, previous, StandardCopyOption.ATOMIC_MOVE);
@@ -538,14 +507,10 @@ public final class FullRestorePointManager {
         state = "running";
       }
       return Map.of(
-          "backupId",
-          selected.backupId,
-          "emergencyBackupId",
-          emergency.backupId,
-          "state",
-          state,
-          "integrity",
-          "VERIFIED");
+          "backupId", selected.backupId,
+          "emergencyBackupId", emergency.backupId,
+          "state", state,
+          "integrity", "VERIFIED");
     } catch (Exception failure) {
       if (stoppedByRestore && !Files.exists(journal) && service.stopped()) {
         try {
@@ -563,11 +528,8 @@ public final class FullRestorePointManager {
           deleteTree(rollback);
         }
       } finally {
-        try {
-          if (nodeLease != null) nodeLease.close();
-        } finally {
-          operationLock.unlock();
-        }
+        try { if (nodeLease != null) nodeLease.close(); }
+        finally { operationLock.unlock(); }
       }
     }
   }
@@ -583,11 +545,7 @@ public final class FullRestorePointManager {
     Set<String> targets = new TreeSet<>(), existed = new TreeSet<>();
     for (JsonElement item : value.getAsJsonArray("targets")) targets.add(item.getAsString());
     for (JsonElement item : value.getAsJsonArray("existed")) existed.add(item.getAsString());
-    rollback(
-        staging.resolve("restore-" + restoreId),
-        staging.resolve("rollback-" + restoreId),
-        targets,
-        existed);
+    rollback(staging.resolve("restore-" + restoreId), staging.resolve("rollback-" + restoreId), targets, existed);
     Files.delete(journal);
   }
 
@@ -599,8 +557,7 @@ public final class FullRestorePointManager {
     if (!operationLock.tryLock()) throw new SecurityException("BUSY");
     try {
       Metadata value = metadata(backupId);
-      if (value.emergency)
-        throw new IOException("Emergency restore points require local review before deletion");
+      if (value.emergency) throw new IOException("Emergency restore points require local review before deletion");
       Files.deleteIfExists(restorePoints.resolve(backupId + ".zip"));
       Files.deleteIfExists(metadataDirectory.resolve(backupId + ".json"));
     } finally {
@@ -619,17 +576,12 @@ public final class FullRestorePointManager {
   private void ensureLocalArchive(String backupId) throws Exception {
     UUID.fromString(backupId);
     Path target = restorePoints.resolve(backupId + ".zip");
-    if (Files.isRegularFile(target, LinkOption.NOFOLLOW_LINKS) && !Files.isSymbolicLink(target))
-      return;
+    if (Files.isRegularFile(target, LinkOption.NOFOLLOW_LINKS) && !Files.isSymbolicLink(target)) return;
     Metadata value = metadata(backupId);
-    if (!value.offsite
-        || !provider.configured()
-        || value.remotePath == null
-        || value.remotePath.isBlank())
+    if (!value.offsite || !provider.configured() || value.remotePath == null || value.remotePath.isBlank())
       throw new IOException("Full restore-point archive unavailable");
     MaintenanceSettings maintenance =
-        MaintenanceSettings.load(
-            Path.of(config.dataDirectory()).resolve("maintenance-settings.json"));
+        MaintenanceSettings.load(Path.of(config.dataDirectory()).resolve("maintenance-settings.json"));
     String filename = value.remotePath.substring(value.remotePath.lastIndexOf('/') + 1);
     if (!filename.matches("[A-Za-z0-9][A-Za-z0-9_.-]{0,127}\\.zip"))
       throw new IOException("REMOTE_UNAVAILABLE");
@@ -682,19 +634,16 @@ public final class FullRestorePointManager {
     return new Scan(bytes[0], entries[0]);
   }
 
-  private Set<String> extractArchive(Path archive, Path destination, long maximumBytes)
-      throws IOException {
+  private Set<String> extractArchive(Path archive, Path destination, long maximumBytes) throws IOException {
     Set<String> names = new HashSet<>(), top = new TreeSet<>();
     long bytes = 0;
     int count = 0;
-    try (ZipInputStream zip =
-        new ZipInputStream(new BufferedInputStream(Files.newInputStream(archive)))) {
+    try (ZipInputStream zip = new ZipInputStream(new BufferedInputStream(Files.newInputStream(archive)))) {
       ZipEntry entry;
       while ((entry = zip.getNextEntry()) != null) {
         String name = entry.getName();
         validateArchiveName(name);
-        if (!names.add(name) || ++count > 500_000)
-          throw new IOException("Unsafe duplicate archive entry");
+        if (!names.add(name) || ++count > 500_000) throw new IOException("Unsafe duplicate archive entry");
         Path relative = Path.of(name);
         if (relative.isAbsolute() || !relative.normalize().equals(relative))
           throw new IOException("ZIP-slip rejected");
@@ -723,8 +672,7 @@ public final class FullRestorePointManager {
   private void rollback(Path extract, Path rollback, Set<String> targets, Set<String> existed)
       throws IOException {
     for (String target : targets) {
-      Path destination = root.resolve(target).normalize(),
-          previous = rollback.resolve(target).normalize();
+      Path destination = root.resolve(target).normalize(), previous = rollback.resolve(target).normalize();
       if (Files.exists(previous, LinkOption.NOFOLLOW_LINKS)) {
         deleteTree(destination);
         Files.createDirectories(destination.getParent());
@@ -738,10 +686,7 @@ public final class FullRestorePointManager {
   }
 
   private void retention(MaintenanceSettings.FullRestorePoint settings) throws IOException {
-    int keep =
-        settings.localRetentionPolicy().equals("KEEP_LOCAL_ROTATING")
-            ? settings.retentionCount()
-            : settings.retentionMode().equals("SINGLE_CURRENT") ? 1 : settings.retentionCount();
+    int keep = settings.retentionMode().equals("SINGLE_CURRENT") ? 1 : settings.retentionCount();
     int seen = 0;
     for (Metadata value : list()) {
       if (value.emergency) continue;
@@ -753,100 +698,40 @@ public final class FullRestorePointManager {
 
   private String canonicalFor(MaintenanceSettings.FullRestorePoint settings, String backupId) {
     if (settings.retentionMode().equals("SINGLE_CURRENT")) return settings.canonicalFilename();
-    String baseName =
-        settings.canonicalFilename().substring(0, settings.canonicalFilename().length() - 4);
+    String baseName = settings.canonicalFilename().substring(0, settings.canonicalFilename().length() - 4);
     return baseName + "-" + backupId + ".zip";
   }
 
   private Metadata withRemote(
       Metadata value, boolean offsite, String remotePath, String verification, String errorCode) {
     return new Metadata(
-        value.backupId,
-        value.jobId,
-        value.type,
-        value.timestamp,
-        value.startedAt,
-        Instant.now().toString(),
-        value.durationMillis,
-        value.serverName,
-        value.serverVersion,
-        value.paperVersion,
-        value.plexonPanelVersion,
-        value.archiveBytes,
-        value.sourceBytes,
-        value.entryCount,
-        value.sha256,
-        value.local,
-        offsite,
-        provider.configured() ? "RCLONE" : "LOCAL",
-        remotePath == null ? "" : remotePath,
-        verification,
-        value.initiatedBy,
-        value.automatic,
-        value.emergency,
-        value.restartPerformed,
-        offsite ? "SUCCESS" : "SUCCESS_LOCAL",
+        value.backupId, value.jobId, value.type, value.timestamp, value.startedAt,
+        Instant.now().toString(), value.durationMillis, value.serverName, value.serverVersion,
+        value.paperVersion, value.plexonPanelVersion, value.archiveBytes, value.sourceBytes,
+        value.entryCount, value.sha256, value.local, offsite, provider.configured() ? "RCLONE" : "LOCAL",
+        remotePath == null ? "" : remotePath, verification, value.initiatedBy, value.automatic,
+        value.emergency, value.restartPerformed, offsite ? "SUCCESS" : "SUCCESS_LOCAL",
         errorCode == null ? "" : errorCode);
   }
 
   private Metadata withLocalState(Metadata value, boolean local, String verification) {
     return new Metadata(
-        value.backupId,
-        value.jobId,
-        value.type,
-        value.timestamp,
-        value.startedAt,
-        value.completedAt,
-        value.durationMillis,
-        value.serverName,
-        value.serverVersion,
-        value.paperVersion,
-        value.plexonPanelVersion,
-        value.archiveBytes,
-        value.sourceBytes,
-        value.entryCount,
-        value.sha256,
-        local,
-        value.offsite,
-        value.remoteProvider,
-        value.remotePath,
-        verification,
-        value.initiatedBy,
-        value.automatic,
-        value.emergency,
-        value.restartPerformed,
-        value.result,
-        value.errorCode);
+        value.backupId, value.jobId, value.type, value.timestamp, value.startedAt,
+        value.completedAt, value.durationMillis, value.serverName, value.serverVersion,
+        value.paperVersion, value.plexonPanelVersion, value.archiveBytes, value.sourceBytes,
+        value.entryCount, value.sha256, local, value.offsite, value.remoteProvider,
+        value.remotePath, verification, value.initiatedBy, value.automatic, value.emergency,
+        value.restartPerformed, value.result, value.errorCode);
   }
 
   private Metadata withResult(Metadata value, String result, String errorCode) {
     return new Metadata(
-        value.backupId,
-        value.jobId,
-        value.type,
-        value.timestamp,
-        value.startedAt,
-        value.completedAt,
-        value.durationMillis,
-        value.serverName,
-        value.serverVersion,
-        value.paperVersion,
-        value.plexonPanelVersion,
-        value.archiveBytes,
-        value.sourceBytes,
-        value.entryCount,
-        value.sha256,
-        value.local,
-        value.offsite,
-        value.remoteProvider,
-        value.remotePath,
-        value.verification,
-        value.initiatedBy,
-        value.automatic,
-        value.emergency,
-        value.restartPerformed,
-        result,
-        errorCode);
+        value.backupId, value.jobId, value.type, value.timestamp, value.startedAt,
+        value.completedAt, value.durationMillis, value.serverName, value.serverVersion,
+        value.paperVersion, value.plexonPanelVersion, value.archiveBytes, value.sourceBytes,
+        value.entryCount, value.sha256, value.local, value.offsite, value.remoteProvider,
+        value.remotePath, value.verification, value.initiatedBy, value.automatic, value.emergency,
+        value.restartPerformed, result, errorCode);
   }
 
   private Metadata completeRemotePromotion(
@@ -859,35 +744,12 @@ public final class FullRestorePointManager {
       long archiveBytes,
       int entries)
       throws IOException {
-    return completeRemotePromotion(
-        MaintenanceSettings.migratedDefaults().fullRestorePoint(),
-        local,
-        promoted,
-        localArchive,
-        metadataFile,
-        jobId,
-        backupId,
-        archiveBytes,
-        entries);
-  }
-
-  private Metadata completeRemotePromotion(
-      MaintenanceSettings.FullRestorePoint settings,
-      Metadata local,
-      RcloneBackupProvider.Promotion promoted,
-      Path localArchive,
-      Path metadataFile,
-      String jobId,
-      String backupId,
-      long archiveBytes,
-      int entries)
-      throws IOException {
-    if (!promoted.uploaded() || !promoted.verified()) throw new IOException("REMOTE_VERIFY_FAILED");
+    if (!promoted.uploaded() || !promoted.verified())
+      throw new IOException("REMOTE_VERIFY_FAILED");
     Metadata remoteVerified =
         withRemote(local, promoted.verified(), promoted.remotePath(), "VERIFIED_REMOTE", "");
     AtomicFiles.writeUtf8(metadataFile, GSON.toJson(remoteVerified));
     emitRemoteProgress(jobId, backupId, archiveBytes, archiveBytes, entries, "VERIFIED_REMOTE");
-    if (settings.localRetentionPolicy().equals("KEEP_LOCAL_ROTATING")) return remoteVerified;
     emitRemoteProgress(jobId, backupId, archiveBytes, archiveBytes, entries, "CLEANING_LOCAL");
     try {
       Files.deleteIfExists(localArchive);
@@ -942,8 +804,7 @@ public final class FullRestorePointManager {
     }
   }
 
-  private void emit(
-      String jobId, String backupId, String phase, long bytes, long total, int entries) {
+  private void emit(String jobId, String backupId, String phase, long bytes, long total, int entries) {
     long now = System.currentTimeMillis();
     if (now - progressAt < 750 && "ARCHIVING".equals(phase)) return;
     progressAt = now;
@@ -967,7 +828,8 @@ public final class FullRestorePointManager {
       long totalBytes,
       int entries,
       String providerState) {
-    emitRemoteProgress(jobId, backupId, bytesUploaded, totalBytes, entries, 0L, providerState);
+    emitRemoteProgress(
+        jobId, backupId, bytesUploaded, totalBytes, entries, 0L, providerState);
   }
 
   private void emitRemoteProgress(
@@ -1029,13 +891,11 @@ public final class FullRestorePointManager {
         || name.chars().anyMatch(Character::isISOControl))
       throw new IOException("Unsafe archive entry");
     Path relative = Path.of(name);
-    if (relative.isAbsolute()
-        || !relative.normalize().equals(relative)
-        || relative.getNameCount() < 1) throw new IOException("Unsafe archive entry");
+    if (relative.isAbsolute() || !relative.normalize().equals(relative) || relative.getNameCount() < 1)
+      throw new IOException("Unsafe archive entry");
     for (Path part : relative)
-      if (part.toString().equals(".")
-          || part.toString().equals("..")
-          || part.toString().contains(":")) throw new IOException("Archive traversal rejected");
+      if (part.toString().equals(".") || part.toString().equals("..") || part.toString().contains(":"))
+        throw new IOException("Archive traversal rejected");
   }
 
   private static String classify(Exception error) {
@@ -1055,15 +915,13 @@ public final class FullRestorePointManager {
         path,
         new SimpleFileVisitor<>() {
           @Override
-          public FileVisitResult visitFile(Path file, BasicFileAttributes attrs)
-              throws IOException {
+          public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
             Files.delete(file);
             return FileVisitResult.CONTINUE;
           }
 
           @Override
-          public FileVisitResult postVisitDirectory(Path dir, IOException error)
-              throws IOException {
+          public FileVisitResult postVisitDirectory(Path dir, IOException error) throws IOException {
             if (error != null) throw error;
             Files.delete(dir);
             return FileVisitResult.CONTINUE;

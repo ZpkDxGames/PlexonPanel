@@ -37,7 +37,10 @@ public final class RconMinecraftCommandChannel implements MinecraftCommandChanne
       return Result.failed("MAINTENANCE_NOTICE_INVALID");
     String text =
         "Server maintenance: " + operation.label() + " in " + humanDuration(remainingSeconds) + ".";
-    String command = "tellraw @a {\"text\":\"" + text + "\",\"color\":\"yellow\",\"bold\":true}";
+    String command =
+        "tellraw @a {\"text\":\""
+            + text
+            + "\",\"color\":\"yellow\",\"bold\":true}";
     return executeFixed(command, false);
   }
 
@@ -51,17 +54,7 @@ public final class RconMinecraftCommandChannel implements MinecraftCommandChanne
     return executeFixed("list", false);
   }
 
-  @Override
-  public Result emptyServerProbe() {
-    return executeFixed("list", false, true);
-  }
-
   private Result executeFixed(String command, boolean requireAffirmativeResponse) {
-    return executeFixed(command, requireAffirmativeResponse, false);
-  }
-
-  private Result executeFixed(
-      String command, boolean requireAffirmativeResponse, boolean requireEmpty) {
     if (!config.enabled()) return Result.failed("COMMAND_CHANNEL_DISABLED");
     byte[] secret = null;
     try {
@@ -79,18 +72,14 @@ public final class RconMinecraftCommandChannel implements MinecraftCommandChanne
         authenticate(input);
 
         writePacket(
-            output, COMMAND_REQUEST_ID, COMMAND_TYPE, command.getBytes(StandardCharsets.UTF_8));
+            output,
+            COMMAND_REQUEST_ID,
+            COMMAND_TYPE,
+            command.getBytes(StandardCharsets.UTF_8));
         for (int i = 0; i < 8; i++) {
           Packet response = readPacket(input);
           if (response.requestId == -1) throw new RconFailure("RCON_PROTOCOL_ERROR");
           if (response.requestId == COMMAND_REQUEST_ID && response.type == COMMAND_RESPONSE_TYPE) {
-            if (requireEmpty
-                && !response
-                    .body
-                    .replaceAll("§.", "")
-                    .trim()
-                    .matches("There are 0 of a max of [0-9]+ players online:?"))
-              return Result.failed("SERVER_NOT_VERIFIED_EMPTY");
             if (requireAffirmativeResponse && !affirmative(response.body))
               return Result.failed("RCON_COMMAND_REJECTED");
             return Result.ok();
@@ -150,7 +139,8 @@ public final class RconMinecraftCommandChannel implements MinecraftCommandChanne
     if (!Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS)
         || Files.isSymbolicLink(path)
         || Files.size(path) < 1
-        || Files.size(path) > MAX_SECRET_BYTES) throw new SecretFailure("RCON_SECRET_INVALID");
+        || Files.size(path) > MAX_SECRET_BYTES)
+      throw new SecretFailure("RCON_SECRET_INVALID");
     try {
       Set<PosixFilePermission> permissions =
           Files.getPosixFilePermissions(path, LinkOption.NOFOLLOW_LINKS);

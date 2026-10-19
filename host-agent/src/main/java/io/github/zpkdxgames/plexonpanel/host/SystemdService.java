@@ -46,7 +46,7 @@ public final class SystemdService {
                 "/usr/bin/systemctl",
                 "show",
                 "--no-pager",
-                "--property=ActiveState,SubState,MainPID,CPUUsageNSec,MemoryCurrent,MemoryMax,InvocationID,ExecMainStartTimestamp",
+                "--property=ActiveState,SubState,MainPID,CPUUsageNSec,MemoryCurrent,InvocationID",
                 service),
             10);
     Map<String, String> values = new HashMap<>();
@@ -57,40 +57,25 @@ public final class SystemdService {
     String state = values.getOrDefault("ActiveState", "unknown");
     long pid;
     try {
-      pid = Long.parseLong(values.getOrDefault("MainPID", "-1"));
+      pid = Long.parseLong(values.getOrDefault("MainPID", "0"));
     } catch (NumberFormatException e) {
-      pid = -1;
+      pid = 0;
     }
-    String bootStarted = "";
-    try {
-      bootStarted =
-          java.time.ZonedDateTime.parse(
-                  values.getOrDefault("ExecMainStartTimestamp", ""),
-                  java.time.format.DateTimeFormatter.ofPattern(
-                      "EEE yyyy-MM-dd HH:mm:ss z", Locale.ENGLISH))
-              .toInstant()
-              .toString();
-    } catch (RuntimeException unavailable) {
-    }
-    Map<String, Object> result = new LinkedHashMap<>();
-    result.put("bootStartedAt", bootStarted);
-    result.putAll(
-        Map.of(
-            "state",
-            state,
-            "invocationId",
-            values.getOrDefault("InvocationID", ""),
-            "subState",
-            values.getOrDefault("SubState", "unknown"),
-            "pid",
-            pid,
-            "service",
-            service,
-            "hostConnected",
-            true,
-            "resources",
-            resources.sample(values, pid, System.nanoTime(), java.time.Instant.now())));
-    return Map.copyOf(result);
+    return Map.of(
+        "invocationId",
+        values.getOrDefault("InvocationID", ""),
+        "state",
+        state,
+        "subState",
+        values.getOrDefault("SubState", "unknown"),
+        "pid",
+        pid,
+        "service",
+        service,
+        "hostConnected",
+        true,
+        "resources",
+        resources.sample(values, pid, System.nanoTime(), java.time.Instant.now()));
   }
 
   /**
@@ -106,9 +91,9 @@ public final class SystemdService {
     Objects.requireNonNull(pidAlive, "pidAlive");
     String state = String.valueOf(status.getOrDefault("state", "unknown"));
     if (!state.equals("inactive") && !state.equals("failed")) return false;
-    Object rawPid = status.getOrDefault("pid", -1L);
-    long pid = rawPid instanceof Number number ? number.longValue() : -1L;
-    return pid == 0;
+    Object rawPid = status.getOrDefault("pid", 0L);
+    long pid = rawPid instanceof Number number ? number.longValue() : 0L;
+    return pid <= 0 || !pidAlive.test(pid);
   }
 
   private static boolean processAlive(long pid) {

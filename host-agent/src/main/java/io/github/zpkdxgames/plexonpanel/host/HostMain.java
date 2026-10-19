@@ -259,16 +259,9 @@ public final class HostMain {
     HostConsoleHistory consoleHistory =
         new HostConsoleHistory(config.serviceName(), config.console(), journalNamespace);
     SystemdService service = new SystemdService(config.serviceName());
-    var sessionStore =
-        new io.github.zpkdxgames.plexonpanel.host.storage.HostSessionStore(
-            data, config.serverId(), config.console().redactPatterns());
-    try {
-      sessionStore.observeService(service.status(), Instant.now());
-    } catch (Exception unavailable) {
-      System.err.println("HOST_SERVICE_EPOCH_UNAVAILABLE");
-    }
+    HostSessionStore sessionStore = new HostSessionStore(data, Path.of(config.serverRoot()));
+    sessionStore.observeService(service.status());
     connection.sessionStore(sessionStore);
-    consoleHistory.sessionStore(sessionStore);
     MinecraftCommandChannel commands = new RconMinecraftCommandChannel(config.commandChannel());
     AtomicBoolean paper = new AtomicBoolean();
     MinecraftReadinessCache minecraftReadiness = new MinecraftReadinessCache(commands);
@@ -282,35 +275,9 @@ public final class HostMain {
             operationLock,
             progress -> connection.send("backup.progress", progress, MessagePriority.EVENT));
     FullBackupPreflight fullPreflight = new FullBackupPreflight(backupRuntimeConfig, fullBackups);
-    MessageSink sessionEvents =
-        (type, body, priority) -> {
-          if (type.equals("maintenance.phase")
-              || type.equals("maintenance.completed")
-              || type.equals("maintenance.failed")
-              || type.equals("maintenance.recovery.required")) {
-            String phase =
-                body instanceof Map<?, ?> values ? String.valueOf(values.get("phase")) : "";
-            try {
-              sessionStore.serverEvent(
-                  type.contains("failed") ? "ALERT" : "MAINTENANCE",
-                  type.contains("failed") ? "ERROR" : "INFO",
-                  type + " " + phase);
-            } catch (Exception unavailable) {
-              System.err.println("SESSION_EVENT_WRITE_FAILED");
-            }
-          }
-          return connection.send(type, body, priority);
-        };
     MaintenanceManager maintenance =
         new MaintenanceManager(
-            backupRuntimeConfig,
-            service,
-            commands,
-            operationLock,
-            audit,
-            sessionEvents,
-            fullBackups);
-    maintenance.playerActivity(sessionStore::lastJoin);
+            backupRuntimeConfig, service, commands, operationLock, audit, connection, fullBackups);
     BackupTransfers transfers = new BackupTransfers();
 
     if (args.length == 2) {
@@ -319,6 +286,7 @@ public final class HostMain {
       fullBackups.recoverRestore();
       maintenance.close();
       connection.close();
+      sessionStore.close();
       if (activeFleetLease != null) activeFleetLease.close();
       return;
     }
@@ -364,7 +332,7 @@ public final class HostMain {
                           fullPreflight.check(maintenance.settings().fullRestorePoint()));
                   Path directory =
                       Path.of(config.backups().directory()).toAbsolutePath().normalize();
-                  result.put("backupMode", "MANUAL_AND_SCHEDULED");
+                  result.put("backupMode", "MANUAL_FULL_ONLY");
                   result.put("hostAuthenticated", connection.authenticated());
                   result.put("operationBusy", operationLock.isLocked());
                   boolean restoreRecoveryRequired = fullBackups.recoveryRequired();
@@ -392,7 +360,7 @@ public final class HostMain {
                 case "backup.create", "maintenance.full-backup.create" -> {
                   int countdownSeconds =
                       p.has("countdownSeconds")
-                          ? (int) integer(p, "countdownSeconds", -1, 0, 1800)
+                          ? (int) integer(p, "countdownSeconds", -1, 300, 1800)
                           : MaintenanceCountdown.DEFAULT_FULL_BACKUP_COUNTDOWN_SECONDS;
                   return Map.of(
                       "jobId",
@@ -469,7 +437,7 @@ public final class HostMain {
                 case "maintenance.settings.get" -> {
                   return Map.of("settings", maintenance.settings());
                 }
-                case "maintenance.settings.update", "maintenance.configure" -> {
+                case "maintenance.settings.update" -> {
                   if (!p.has("settings") || !p.get("settings").isJsonObject())
                     throw new IllegalArgumentException("SCHEDULE_INVALID");
                   return Map.of("settings", maintenance.updateSettings(p.get("settings")));
@@ -493,34 +461,19 @@ public final class HostMain {
                 case "provider.test" -> {
                   return fullBackups.testProvider(30);
                 }
-                case "chat.history" -> {
-                  return sessionStore.chatHistory();
-                }
-                case "events.session.list" -> {
-                  return sessionStore.sessionView();
-                }
                 case "console.history" -> {
-                  return consoleHistory.query(p, false);
+                  if (p.has("stream") && !device.scopes().contains("chat.view"))
+                    throw new SecurityException("MISSING_CHAT_VIEW_SCOPE");
+                  return sessionStore.query(p, false);
                 }
                 case "console.history.errors" -> {
-                  return consoleHistory.query(p, true);
+                  return sessionStore.query(p, true);
+                }
+                case "players.history.list" -> {
+                  return sessionStore.history(p);
                 }
                 case "server.status" -> {
                   var status = new HashMap<>(service.status());
-                  status.put("bootEpochId", sessionStore.bootEpochId());
-                  status.put("bootStartedAt", sessionStore.bootStartedAt());
-                  if (p.has("includeSession") && p.get("includeSession").getAsBoolean()) {
-                    if (!device.scopes().contains("players.view")
-                        || !Boolean.TRUE.equals(caps.get("players.view")))
-                      throw new SecurityException("SCOPE_DENIED");
-                    status.put("session", sessionStore.sessionView());
-                  }
-                  if (p.has("includeChat") && p.get("includeChat").getAsBoolean()) {
-                    if (!device.scopes().contains("chat.view")
-                        || !Boolean.TRUE.equals(caps.get("chat.view")))
-                      throw new SecurityException("SCOPE_DENIED");
-                    status.put("chat", sessionStore.chatHistory());
-                  }
                   status.put("paperConnected", paper.get());
                   status.put("authorizationMirror", authorization.status());
                   status.put("commandChannelConfigured", commands.enabled());
@@ -588,20 +541,15 @@ public final class HostMain {
         () -> {
           try {
             var status = new HashMap<>(service.status());
-            if (sessionStore.observeService(status, Instant.now())) {
-              connection.clearConsoleEpoch();
-              connection.send(
-                  "session.epoch_reset",
-                  Map.of(
-                      "bootEpochId",
-                      sessionStore.bootEpochId(),
-                      "bootStartedAt",
-                      sessionStore.bootStartedAt()),
-                  MessagePriority.EVENT);
-            }
-            status.put("bootEpochId", sessionStore.bootEpochId());
-            status.put("bootStartedAt", sessionStore.bootStartedAt());
-            if (!connection.authenticated()) return;
+            sessionStore
+                .observeService(status)
+                .ifPresent(
+                    reset -> {
+                      connection.resetConsoleSession();
+                      if (connection.authenticated())
+                        connection.send("session.epoch_reset", reset, MessagePriority.CRITICAL);
+                    });
+            status.put("invocationId", sessionStore.epoch());
             status.put("sourceIntervalMillis", TimeUnit.SECONDS.toMillis(SERVICE_STATUS_SECONDS));
             if (config.fleetIdentity() != null)
               status.put("nodeId", config.fleetIdentity().nodeId().toString());
@@ -614,7 +562,8 @@ public final class HostMain {
                 "recoveryRequired",
                 backupRecoveryRequired(
                     fullBackups.recoveryRequired(), maintenance.recoveryRequired()));
-            connection.send("service.status", status, MessagePriority.TELEMETRY);
+            if (connection.authenticated())
+              connection.send("service.status", status, MessagePriority.TELEMETRY);
           } catch (Exception e) {
             System.err.println(
                 "Host service snapshot unavailable: " + e.getClass().getSimpleName());
@@ -665,11 +614,14 @@ public final class HostMain {
                   boolean schedulerDrained = ExecutorDrain.await(scheduler, remaining(deadline));
                   transfers.close();
                   connection.close();
-                  try {
-                    sessionStore.close();
-                  } catch (Exception ignored) {
-                  }
                   boolean connectionDrained = connection.awaitClosed(remaining(deadline));
+                  if (connectionDrained) {
+                    try {
+                      sessionStore.close();
+                    } catch (java.io.IOException failure) {
+                      System.err.println("SESSION_STORE_CLOSE_FAILED");
+                    }
+                  }
                   boolean drained =
                       controlDrained
                           && maintenanceDrained

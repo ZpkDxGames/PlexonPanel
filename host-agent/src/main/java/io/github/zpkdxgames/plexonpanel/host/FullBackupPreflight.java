@@ -1,6 +1,7 @@
 package io.github.zpkdxgames.plexonpanel.host;
 
 import io.github.zpkdxgames.plexonpanel.control.OperationFailure;
+import java.io.File;
 import java.io.IOException;
 import java.nio.file.*;
 import java.nio.file.attribute.BasicFileAttributes;
@@ -106,12 +107,14 @@ final class FullBackupPreflight {
     return preflightFailure(code, stage, !code.endsWith("INVALID"));
   }
 
-  private static OperationFailure preflightFailure(String code, String stage, boolean retryable) {
+  private static OperationFailure preflightFailure(
+      String code, String stage, boolean retryable) {
     String message =
         switch (code) {
           case "RCLONE_UNAVAILABLE" ->
               "No off-site rclone provider is configured on the running Host.";
-          case "RCLONE_CONFIG_INVALID" -> "The Host rclone provider configuration is invalid.";
+          case "RCLONE_CONFIG_INVALID" ->
+              "The Host rclone provider configuration is invalid.";
           case "RCLONE_EXECUTABLE_UNAVAILABLE" ->
               "The fixed /usr/bin/rclone executable is unavailable or unsafe.";
           case "RCLONE_CONFIG_UNREADABLE" ->
@@ -150,8 +153,7 @@ final class FullBackupPreflight {
   }
 
   private static void validateProviderFiles(HostConfig.BackupConfig config) throws IOException {
-    if (!"/usr/bin/rclone".equals(config.rcloneExecutable()))
-      throw new IOException("RCLONE_CONFIG_INVALID");
+    if (!"/usr/bin/rclone".equals(config.rcloneExecutable())) throw new IOException("RCLONE_CONFIG_INVALID");
     Path executable = Path.of(config.rcloneExecutable());
     if (!Files.isRegularFile(executable, LinkOption.NOFOLLOW_LINKS)
         || Files.isSymbolicLink(executable)
@@ -162,11 +164,11 @@ final class FullBackupPreflight {
     Path providerConfig = Path.of(config.rcloneConfig()).normalize();
     if (!Files.isRegularFile(providerConfig, LinkOption.NOFOLLOW_LINKS)
         || Files.isSymbolicLink(providerConfig)
-        || !Files.isReadable(providerConfig)
-        || !Files.isWritable(providerConfig)) throw new IOException("RCLONE_CONFIG_UNREADABLE");
+        || !Files.isReadable(providerConfig)) throw new IOException("RCLONE_CONFIG_UNREADABLE");
   }
 
-  static Scan scan(Path root, List<String> includes, MaintenanceSettings.FullRestorePoint settings)
+  static Scan scan(
+      Path root, List<String> includes, MaintenanceSettings.FullRestorePoint settings)
       throws IOException {
     long[] bytes = {0};
     int[] entries = {0};

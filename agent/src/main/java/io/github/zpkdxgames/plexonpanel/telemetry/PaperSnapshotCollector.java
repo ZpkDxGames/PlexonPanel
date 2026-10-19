@@ -65,16 +65,10 @@ public final class PaperSnapshotCollector {
         round(server.getAverageTickTime()),
         tickMillis.length == 0 ? 0.0 : round(tickMillis[0]),
         round(p95),
-        round(maximum),
-        server.getCurrentTick(),
-        Math.multiplyExact(settings.serverIntervalTicks(), 50L),
-        tickMillis.length == 0 ? 0.0 : round(tickMillis[0]),
-        round(p95),
         round(percentile(tickMillis, 0.99)),
         round(maximum),
-        tickMillis.length,
-        server.getWorlds().stream().mapToInt(org.bukkit.World::getChunkCount).sum(),
-        server.getWorlds().stream().mapToInt(org.bukkit.World::getEntityCount).sum());
+        server.getCurrentTick(),
+        Math.multiplyExact(settings.serverIntervalTicks(), 50L));
   }
 
   public List<PlayerSnapshot> playerSnapshots() {
@@ -150,11 +144,9 @@ public final class PaperSnapshotCollector {
                     "name",
                     world.getName(),
                     "loadedChunks",
-                    world.getChunkCount(),
+                    world.getLoadedChunks().length,
                     "entities",
                     world.getEntityCount(),
-                    "tileEntities",
-                    world.getTileEntityCount(),
                     "players",
                     world.getPlayerCount()))
         .toList();

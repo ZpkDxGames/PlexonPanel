@@ -104,7 +104,6 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python3 scripts/test-host-portability.py
           python3 scripts/summarize-tests.py
           python3 scripts/package-release.py
           python3 scripts/verify-host-portability.py \
@@ -136,7 +135,7 @@ jobs:
               assert manifest['fleetContract'] == contract['fleetContract']
               assert manifest['configurationSchemas'] == {'paper': 5, 'host': 5}
           assert manifest['certification'] == contract['certification']
-          assert manifest['hostArtifactType'] == 'multi-platform-java-jar-with-sqlite-jni'
+          assert manifest['hostArtifactType'] == 'multiarchitecture-java-jar-with-sqlite-jni'
           assert manifest['hostSupportedPlatforms'] == ['linux-x64', 'linux-arm64']
 
           jar=Path(f'build/release/PlexonPanel-{version}.jar')

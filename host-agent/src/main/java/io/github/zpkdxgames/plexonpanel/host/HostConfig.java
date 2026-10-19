@@ -321,7 +321,8 @@ public record HostConfig(
           && !scope.equals("telemetry.view")
           && !scope.equals("settings.view")
           && !scope.equals("console.view.errors")
-          && !scope.equals("console.view.full"))
+          && !scope.equals("console.view.full")
+          && !scope.equals("players.history.view"))
         throw new IllegalArgumentException("Scope is not a host capability");
     for (String value : List.of(c.serverRoot, c.dataDirectory, c.accessRegistry))
       if (!Path.of(value).isAbsolute())
@@ -461,8 +462,6 @@ public record HostConfig(
     Map<String, Boolean> result = new TreeMap<>();
     for (String s : Scopes.ALL) result.put(s, false);
     result.putAll(capabilities);
-    if (!capabilities.containsKey("chat.view")) result.put("chat.view", true);
-    if (!capabilities.containsKey("players.view")) result.put("players.view", true);
     for (String s : Scopes.ALL) if (s.startsWith("devices.")) result.put(s, false);
     for (String s :
         List.of(
@@ -474,6 +473,12 @@ public record HostConfig(
               && (!s.equals("backup.restore") || backups.restoreEnabled));
     for (String s : List.of("console.view.errors", "console.view.full"))
       result.put(s, Boolean.TRUE.equals(result.get(s)) && console.enabled);
+    result.put(
+        "players.history.view",
+        console.enabled
+            && (capabilities.containsKey("players.history.view")
+                ? Boolean.TRUE.equals(capabilities.get("players.history.view"))
+                : Boolean.TRUE.equals(result.get("console.view.full"))));
     for (String scope : RETIRED_SERVER_TREE_MUTATIONS) result.put(scope, false);
     result.put("console.execute.allowed", false);
     return Map.copyOf(result);

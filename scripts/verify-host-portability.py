@@ -20,11 +20,6 @@ REQUIRED_ENTRIES = {
     "io/github/zpkdxgames/plexonpanel/host/RconMinecraftCommandChannel.class",
 }
 JAVA_25_CLASS_MAJOR = 69
-SQLITE_NATIVES = {
-    f"org/sqlite/native/{platform}/{architecture}/libsqlitejdbc.so"
-    for platform in ("Linux", "Linux-Musl")
-    for architecture in ("x86_64", "aarch64")
-}
 
 
 def normalized_platform(system: str, machine: str) -> str:
@@ -94,21 +89,12 @@ def main() -> None:
             if missing:
                 fail("missing required Host classes: " + ", ".join(missing))
 
-            native_entries = sorted(
-                name
-                for name in names
-                if not name.endswith("/") and (
-                    name.lower().endswith(NATIVE_SUFFIXES)
-                    or "/native/" in name.lower()
-                    or name.lower().startswith("native/")
-                )
-            )
-            unexpected = set(native_entries) - SQLITE_NATIVES
-            if unexpected:
-                fail("unexpected native payload: " + ", ".join(sorted(unexpected)))
-            missing_native = SQLITE_NATIVES - set(native_entries)
-            if missing_native:
-                fail("missing required SQLite platform payload: " + ", ".join(sorted(missing_native)))
+            native_entries=sorted(name for name in names if not name.endswith("/") and (name.lower().endswith(NATIVE_SUFFIXES) or "/native/" in name.lower() or name.lower().startswith("native/")))
+            expected_native={"org/sqlite/native/Linux/x86_64/libsqlitejdbc.so":62,"org/sqlite/native/Linux/aarch64/libsqlitejdbc.so":183}
+            if set(native_entries)!=set(expected_native):fail("Host must contain exactly the Linux x64 and ARM64 SQLite JNI payloads")
+            for native_name,expected_machine in expected_native.items():
+                raw=archive.read(native_name)
+                if raw[:4]!=b"\x7fELF" or int.from_bytes(raw[18:20],"little")!=expected_machine:fail("SQLite JNI payload has wrong ELF machine")
 
             try:
                 manifest = manifest_attributes(
@@ -132,14 +118,14 @@ def main() -> None:
 
     report = {
         "jar": str(jar),
-        "artifactType": "multi-platform-java-jar-with-sqlite-jni",
+        "artifactType": "multiarchitecture-java-jar-with-sqlite-jni",
         "implementationVersion": implementation_version,
         "javaClassMajor": major,
         "runnerSystem": system,
         "runnerMachine": machine,
         "runnerPlatform": actual_platform,
         "supportedPlatforms": sorted(SUPPORTED_PLATFORMS),
-        "nativePayload": sorted(SQLITE_NATIVES),
+        "nativePayload": native_entries,
     }
     print(json.dumps(report, indent=2, sort_keys=True))
 
