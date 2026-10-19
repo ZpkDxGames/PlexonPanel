@@ -13,7 +13,9 @@ public final class SystemdService {
   private final ServiceResourceSampler resources = new ServiceResourceSampler();
 
   @FunctionalInterface
-  interface CommandRunner { String run(List<String> arguments, int timeoutSeconds) throws Exception; }
+  interface CommandRunner {
+    String run(List<String> arguments, int timeoutSeconds) throws Exception;
+  }
 
   private static final class CommandFailure extends IOException {
     final int exitCode;
@@ -26,7 +28,9 @@ public final class SystemdService {
     }
   }
 
-  public SystemdService(String service) { this(service, SystemdService::run); }
+  public SystemdService(String service) {
+    this(service, SystemdService::run);
+  }
 
   SystemdService(String service, CommandRunner runner) {
     if (!service.matches("[A-Za-z0-9][A-Za-z0-9_.@-]{0,90}\\.service"))
@@ -42,7 +46,7 @@ public final class SystemdService {
                 "/usr/bin/systemctl",
                 "show",
                 "--no-pager",
-                "--property=ActiveState,SubState,MainPID,CPUUsageNSec,MemoryCurrent",
+                "--property=ActiveState,SubState,MainPID,CPUUsageNSec,MemoryCurrent,InvocationID",
                 service),
             10);
     Map<String, String> values = new HashMap<>();
@@ -58,6 +62,8 @@ public final class SystemdService {
       pid = 0;
     }
     return Map.of(
+        "invocationId",
+        values.getOrDefault("InvocationID", ""),
         "state",
         state,
         "subState",

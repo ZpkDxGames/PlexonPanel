@@ -135,7 +135,7 @@ jobs:
               assert manifest['fleetContract'] == contract['fleetContract']
               assert manifest['configurationSchemas'] == {'paper': 5, 'host': 5}
           assert manifest['certification'] == contract['certification']
-          assert manifest['hostArtifactType'] == 'architecture-neutral-java-jar'
+          assert manifest['hostArtifactType'] == 'multiarchitecture-java-jar-with-sqlite-jni'
           assert manifest['hostSupportedPlatforms'] == ['linux-x64', 'linux-arm64']
 
           jar=Path(f'build/release/PlexonPanel-{version}.jar')

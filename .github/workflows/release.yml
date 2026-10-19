@@ -226,7 +226,7 @@ jobs:
           assert manifest['securityReview'] == 'PASS'
           assert manifest['dashboardCandidateCommit'] == contract['dashboardCommit']
           assert manifest['dashboardCiRun'] == contract['dashboardCiRun']
-          assert manifest['hostArtifactType'] == 'architecture-neutral-java-jar'
+          assert manifest['hostArtifactType'] == 'multiarchitecture-java-jar-with-sqlite-jni'
           assert manifest['hostSupportedPlatforms'] == ['linux-x64', 'linux-arm64']
 
           paper=Path(f'build/release/PlexonPanel-{version}.jar')

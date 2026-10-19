@@ -7,13 +7,7 @@ import java.nio.file.*;
 import java.time.*;
 import java.util.*;
 
-/**
- * Host-owned, non-secret maintenance configuration edited through the control plane.
- *
- * <p>Full backups are manual-only. Legacy {@code fullRestorePoint.schedule} and {@code liveSnapshot}
- * JSON members are intentionally absent from this model; Gson ignores those members when loading an
- * older settings file, so they cannot regain runtime authority after an upgrade.
- */
+/** Host-owned schema-v2 settings. Legacy backup schedules migrate disabled. */
 public record MaintenanceSettings(
     int schemaVersion, String timezone, Restart restart, FullRestorePoint fullRestorePoint) {
   private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
@@ -27,9 +21,15 @@ public record MaintenanceSettings(
           "plugins/PlexonPanel/identity",
           "plugins/spark/tmp");
 
-  public record Schedule(boolean enabled, String type, List<String> weekdays, String time) {
+  public record Schedule(
+      boolean enabled, String type, List<String> weekdays, String time, Integer intervalHours) {
+    public Schedule(boolean enabled, String type, List<String> weekdays, String time) {
+      this(enabled, type, weekdays, time, 24);
+    }
+
     public Schedule {
       weekdays = weekdays == null ? List.of() : List.copyOf(weekdays);
+      intervalHours = intervalHours == null ? 24 : intervalHours;
     }
   }
 
@@ -51,8 +51,31 @@ public record MaintenanceSettings(
       int uploadTimeoutSeconds,
       String verificationMode,
       long maximumBytes,
-      List<String> excludes) {
+      List<String> excludes,
+      Schedule schedule) {
+    public FullRestorePoint(
+        String retentionMode,
+        int retentionCount,
+        boolean restartAfter,
+        String canonicalFilename,
+        int uploadTimeoutSeconds,
+        String verificationMode,
+        long maximumBytes,
+        List<String> excludes) {
+      this(
+          retentionMode,
+          retentionCount,
+          restartAfter,
+          canonicalFilename,
+          uploadTimeoutSeconds,
+          verificationMode,
+          maximumBytes,
+          excludes,
+          null);
+    }
+
     public FullRestorePoint {
+      schedule = schedule == null ? new Schedule(false, "DAILY", List.of(), "04:00", 24) : schedule;
       // Step 8 finalizes one operator-facing workflow: a manual full backup always restores
       // Minecraft availability after a successful or safely degraded operation. Keep the legacy
       // JSON field for rolling-upgrade compatibility, but normalize false to true so an older
@@ -62,6 +85,26 @@ public record MaintenanceSettings(
           new LinkedHashSet<>(MaintenanceSettings.REQUIRED_FULL_BACKUP_EXCLUDES);
       if (excludes != null) normalizedExcludes.addAll(excludes);
       excludes = List.copyOf(normalizedExcludes);
+    }
+  }
+
+  public MaintenanceSettings {
+    if (schemaVersion == 1) {
+      schemaVersion = 2;
+      if (fullRestorePoint != null) {
+        var f = fullRestorePoint;
+        fullRestorePoint =
+            new FullRestorePoint(
+                f.retentionMode(),
+                f.retentionCount(),
+                f.restartAfter(),
+                f.canonicalFilename(),
+                f.uploadTimeoutSeconds(),
+                f.verificationMode(),
+                f.maximumBytes(),
+                f.excludes(),
+                new Schedule(false, "DAILY", List.of(), "04:00", 24));
+      }
     }
   }
 
@@ -86,8 +129,7 @@ public record MaintenanceSettings(
     if (!Files.exists(path)) return migratedDefaults();
     if (!Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS)
         || Files.isSymbolicLink(path)
-        || Files.size(path) > 65_536)
-      throw new IOException("Invalid maintenance settings file");
+        || Files.size(path) > 65_536) throw new IOException("Invalid maintenance settings file");
     MaintenanceSettings settings = GSON.fromJson(Files.readString(path), MaintenanceSettings.class);
     validate(settings);
     return settings;
@@ -106,7 +148,7 @@ public record MaintenanceSettings(
   }
 
   public static void validate(MaintenanceSettings settings) {
-    if (settings == null || settings.schemaVersion != 1)
+    if (settings == null || settings.schemaVersion != 2)
       throw new IllegalArgumentException("Unsupported maintenance settings schema");
     ZoneId.of(settings.timezone);
     if (settings.restart == null || settings.fullRestorePoint == null)
@@ -120,6 +162,7 @@ public record MaintenanceSettings(
         || settings.restart.startupTimeoutSeconds > 1800)
       throw new IllegalArgumentException("Invalid restart settings");
     var full = settings.fullRestorePoint;
+    validateSchedule(full.schedule());
     if (!Set.of("SINGLE_CURRENT", "ROTATING").contains(full.retentionMode)
         || full.retentionCount < 1
         || full.retentionCount > 52
@@ -143,12 +186,18 @@ public record MaintenanceSettings(
   }
 
   private static void validateSchedule(Schedule schedule) {
-    if (schedule == null || !Set.of("DAILY", "WEEKLY", "SELECTED_WEEKDAYS").contains(schedule.type))
-      throw new IllegalArgumentException("Invalid schedule type");
-    LocalTime.parse(schedule.time);
+    if (schedule == null
+        || !Set.of("DAILY", "WEEKLY", "SELECTED_WEEKDAYS", "SELECTED_DAYS", "INTERVAL_HOURS")
+            .contains(schedule.type)) throw new IllegalArgumentException("Invalid schedule type");
+    if (schedule.type.equals("INTERVAL_HOURS")) {
+      if (schedule.intervalHours < 1 || schedule.intervalHours > 168)
+        throw new IllegalArgumentException("Invalid interval hours");
+    } else LocalTime.parse(schedule.time);
     if (schedule.weekdays.size() > 7) throw new IllegalArgumentException("Too many weekdays");
     for (String value : schedule.weekdays) DayOfWeek.valueOf(value);
-    if ((schedule.type.equals("WEEKLY") || schedule.type.equals("SELECTED_WEEKDAYS"))
+    if ((schedule.type.equals("WEEKLY")
+            || schedule.type.equals("SELECTED_WEEKDAYS")
+            || schedule.type.equals("SELECTED_DAYS"))
         && schedule.weekdays.isEmpty())
       throw new IllegalArgumentException("Weekday schedule requires at least one day");
   }

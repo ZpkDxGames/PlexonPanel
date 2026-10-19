@@ -13,6 +13,11 @@ public final class MaintenanceSchedule {
     Objects.requireNonNull(zone, "zone");
     Objects.requireNonNull(strictlyAfter, "strictlyAfter");
     if (!schedule.enabled()) return null;
+    if (schedule.type().equals("INTERVAL_HOURS")) {
+      long seconds = Math.multiplyExact(schedule.intervalHours().longValue(), 3600L);
+      return Instant.ofEpochSecond(
+          Math.multiplyExact(Math.floorDiv(strictlyAfter.getEpochSecond(), seconds) + 1, seconds));
+    }
     LocalTime time = LocalTime.parse(schedule.time());
     ZonedDateTime cursor = strictlyAfter.atZone(zone);
     LocalDate start = cursor.toLocalDate();
@@ -35,7 +40,8 @@ public final class MaintenanceSchedule {
   static boolean matches(MaintenanceSettings.Schedule schedule, DayOfWeek day) {
     return switch (schedule.type()) {
       case "DAILY" -> true;
-      case "WEEKLY", "SELECTED_WEEKDAYS" -> schedule.weekdays().contains(day.name());
+      case "WEEKLY", "SELECTED_WEEKDAYS", "SELECTED_DAYS" ->
+          schedule.weekdays().contains(day.name());
       default -> throw new IllegalArgumentException("Unsupported schedule type");
     };
   }

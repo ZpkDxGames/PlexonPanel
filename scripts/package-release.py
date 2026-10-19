@@ -21,7 +21,7 @@ if not version_match:
     raise SystemExit("Cannot read the release version from build.gradle.kts")
 version = version_match.group(1)
 
-HOST_ARTIFACT_TYPE = "architecture-neutral-java-jar"
+HOST_ARTIFACT_TYPE = "multiarchitecture-java-jar-with-sqlite-jni"
 HOST_SUPPORTED_PLATFORMS = ["linux-x64", "linux-arm64"]
 
 contract_path = root / f"docs/release-gates-{version}.json"

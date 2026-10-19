@@ -2,11 +2,12 @@ plugins { application }
 java { toolchain.languageVersion.set(JavaLanguageVersion.of(25)) }
 dependencies {
     implementation(project(":protocol"))
+    implementation("org.xerial:sqlite-jdbc:3.53.1.0")
     testImplementation(platform("org.junit:junit-bom:6.1.3"))
     testImplementation("org.junit.jupiter:junit-jupiter")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
-application { mainClass.set("io.github.zpkdxgames.plexonpanel.host.HostMain") }
+application { applicationDefaultJvmArgs = listOf("--enable-native-access=ALL-UNNAMED"); mainClass.set("io.github.zpkdxgames.plexonpanel.host.HostMain") }
 tasks.test { useJUnitPlatform() }
 tasks.jar {
     dependsOn(":protocol:jar")
@@ -21,5 +22,6 @@ tasks.jar {
         rename { "gson-Apache-2.0.txt" }
     }
     exclude("META-INF/*.SF", "META-INF/*.DSA", "META-INF/*.RSA", "module-info.class")
+    eachFile { if(path.startsWith("org/sqlite/native/") && path !in setOf("org/sqlite/native/Linux/x86_64/libsqlitejdbc.so","org/sqlite/native/Linux/aarch64/libsqlitejdbc.so")) exclude() }
     manifest { attributes("Main-Class" to application.mainClass.get(), "Implementation-Version" to project.version) }
 }

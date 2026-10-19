@@ -2,8 +2,8 @@ package io.github.zpkdxgames.plexonpanel.host;
 
 import io.github.zpkdxgames.plexonpanel.identity.*;
 import io.github.zpkdxgames.plexonpanel.protocol.*;
-import io.github.zpkdxgames.plexonpanel.util.NamedThreadFactory;
 import io.github.zpkdxgames.plexonpanel.util.ExecutorDrain;
+import io.github.zpkdxgames.plexonpanel.util.NamedThreadFactory;
 import java.net.URI;
 import java.net.http.*;
 import java.nio.ByteBuffer;
@@ -56,6 +56,14 @@ public final class HostConnection implements MessageSink, AutoCloseable {
     this.config = config;
     this.identity = identity;
     this.console = new HostConsoleStreamService(config, this, journalNamespace);
+  }
+
+  public void sessionStore(HostSessionStore store) {
+    console.sessionStore(store);
+  }
+
+  public void resetConsoleSession() {
+    console.resetSession();
   }
 
   public void handlers(Consumer<DecodedMessage> handler, Runnable connected) {
@@ -140,8 +148,7 @@ public final class HostConnection implements MessageSink, AutoCloseable {
               .sendPing(ByteBuffer.wrap(new byte[] {1}))
               .whenComplete(
                   (ignored, error) -> {
-                    if (error != null)
-                      disconnect(current, "Relay ping failed: " + describe(error));
+                    if (error != null) disconnect(current, "Relay ping failed: " + describe(error));
                   });
         } catch (RuntimeException error) {
           disconnect(current, "Relay ping failed: " + describe(error));
@@ -355,7 +362,8 @@ public final class HostConnection implements MessageSink, AutoCloseable {
 
   private static String describe(Throwable error) {
     Throwable current = error;
-    while (current.getCause() != null && current.getCause() != current) current = current.getCause();
+    while (current.getCause() != null && current.getCause() != current)
+      current = current.getCause();
     String message = current.getMessage();
     return current.getClass().getSimpleName()
         + (message == null || message.isBlank() ? "" : ": " + message);
@@ -381,9 +389,13 @@ public final class HostConnection implements MessageSink, AutoCloseable {
     boolean link = ExecutorDrain.await(scheduler, ExecutorDrain.remaining(deadline));
     boolean client;
     try {
-      if (sender != null) TimeUnit.NANOSECONDS.timedJoin(sender, ExecutorDrain.remaining(deadline).toNanos());
+      if (sender != null)
+        TimeUnit.NANOSECONDS.timedJoin(sender, ExecutorDrain.remaining(deadline).toNanos());
       client = http.awaitTermination(ExecutorDrain.remaining(deadline));
-    } catch (InterruptedException interrupted) { Thread.currentThread().interrupt(); return false; }
+    } catch (InterruptedException interrupted) {
+      Thread.currentThread().interrupt();
+      return false;
+    }
     return journal && link && client && (sender == null || !sender.isAlive());
   }
 }

@@ -24,20 +24,43 @@ public record HostConfig(
     CommandChannelConfig commandChannel,
     FleetConfig fleet) {
   static final int CURRENT_SCHEMA_VERSION = 5;
+
   /** Additive preparation contract; schema 5 will require it for every instance. */
   public record FleetConfig(String nodeId, String instanceKey) {}
 
   public FleetIdentity fleetIdentity() {
-    return fleet == null ? null : FleetIdentity.parse(serverId, fleet.nodeId(), fleet.instanceKey(), serverName);
+    return fleet == null
+        ? null
+        : FleetIdentity.parse(serverId, fleet.nodeId(), fleet.instanceKey(), serverName);
   }
 
   public HostConfig(
-      String serverId, String serverName, String relayUrl, String relayPublicKey,
-      String serverRoot, String dataDirectory, String accessRegistry, String serviceName,
-      Map<String, Boolean> capabilities, BackupConfig backups, ConsoleConfig console,
+      String serverId,
+      String serverName,
+      String relayUrl,
+      String relayPublicKey,
+      String serverRoot,
+      String dataDirectory,
+      String accessRegistry,
+      String serviceName,
+      Map<String, Boolean> capabilities,
+      BackupConfig backups,
+      ConsoleConfig console,
       CommandChannelConfig commandChannel) {
-    this(serverId, serverName, relayUrl, relayPublicKey, serverRoot, dataDirectory,
-        accessRegistry, serviceName, capabilities, backups, console, commandChannel, null);
+    this(
+        serverId,
+        serverName,
+        relayUrl,
+        relayPublicKey,
+        serverRoot,
+        dataDirectory,
+        accessRegistry,
+        serviceName,
+        capabilities,
+        backups,
+        console,
+        commandChannel,
+        null);
   }
 
   /**
@@ -167,43 +190,55 @@ public record HostConfig(
 
   public static HostConfig load(Path path) throws java.io.IOException {
     InstanceLayout.rejectSymlinks(path);
-    if (!Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS)) throw new java.io.IOException("HOST_CONFIG_INVALID");
+    if (!Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS))
+      throw new java.io.IOException("HOST_CONFIG_INVALID");
     if (Files.size(path) > 65536) throw new java.io.IOException("Host config exceeds limit");
     JsonObject raw;
-    try { raw = JsonParser.parseString(Files.readString(path)).getAsJsonObject(); }
-    catch (RuntimeException invalid) { throw new java.io.IOException("HOST_CONFIG_INVALID"); }
+    try {
+      raw = JsonParser.parseString(Files.readString(path)).getAsJsonObject();
+    } catch (RuntimeException invalid) {
+      throw new java.io.IOException("HOST_CONFIG_INVALID");
+    }
     return fromJson(raw);
   }
 
   static HostConfig fromJson(JsonObject raw) {
-    boolean schemaFive = raw.has("schemaVersion") && raw.get("schemaVersion").isJsonPrimitive()
-        && raw.get("schemaVersion").getAsJsonPrimitive().isNumber()
-        && raw.get("schemaVersion").getAsBigDecimal().compareTo(java.math.BigDecimal.valueOf(5)) == 0;
-    if (!schemaFive && !Set.of(
-            "schemaVersion",
-            "serverId",
-            "serverName",
-            "relayUrl",
-            "relayPublicKey",
-            "serverRoot",
-            "dataDirectory",
-            "accessRegistry",
-            "serviceName",
-            "capabilities",
-            "backups",
-            "console",
-            "commandChannel",
-            "fleet")
-        .containsAll(raw.keySet()))
+    boolean schemaFive =
+        raw.has("schemaVersion")
+            && raw.get("schemaVersion").isJsonPrimitive()
+            && raw.get("schemaVersion").getAsJsonPrimitive().isNumber()
+            && raw.get("schemaVersion").getAsBigDecimal().compareTo(java.math.BigDecimal.valueOf(5))
+                == 0;
+    if (!schemaFive
+        && !Set.of(
+                "schemaVersion",
+                "serverId",
+                "serverName",
+                "relayUrl",
+                "relayPublicKey",
+                "serverRoot",
+                "dataDirectory",
+                "accessRegistry",
+                "serviceName",
+                "capabilities",
+                "backups",
+                "console",
+                "commandChannel",
+                "fleet")
+            .containsAll(raw.keySet()))
       throw new IllegalArgumentException("Unknown host configuration key");
     if (raw.has("schemaVersion")) {
       int schema;
       try {
-        if (!raw.get("schemaVersion").isJsonPrimitive() || !raw.get("schemaVersion").getAsJsonPrimitive().isNumber())
+        if (!raw.get("schemaVersion").isJsonPrimitive()
+            || !raw.get("schemaVersion").getAsJsonPrimitive().isNumber())
           throw new ArithmeticException();
         schema = raw.get("schemaVersion").getAsBigDecimal().intValueExact();
-      } catch (RuntimeException invalid) { throw new IllegalArgumentException("Unsupported Host configuration schemaVersion"); }
-      if (schema != 4 && schema != CURRENT_SCHEMA_VERSION) throw new IllegalArgumentException("Unsupported Host configuration schemaVersion");
+      } catch (RuntimeException invalid) {
+        throw new IllegalArgumentException("Unsupported Host configuration schemaVersion");
+      }
+      if (schema != 4 && schema != CURRENT_SCHEMA_VERSION)
+        throw new IllegalArgumentException("Unsupported Host configuration schemaVersion");
     }
     if (raw.has("commandChannel")) {
       JsonElement commandRaw = raw.get("commandChannel");
@@ -286,7 +321,8 @@ public record HostConfig(
           && !scope.equals("telemetry.view")
           && !scope.equals("settings.view")
           && !scope.equals("console.view.errors")
-          && !scope.equals("console.view.full"))
+          && !scope.equals("console.view.full")
+          && !scope.equals("players.history.view"))
         throw new IllegalArgumentException("Scope is not a host capability");
     for (String value : List.of(c.serverRoot, c.dataDirectory, c.accessRegistry))
       if (!Path.of(value).isAbsolute())
@@ -328,7 +364,8 @@ public record HostConfig(
     }
     validateConsole(c.console);
     validateCommandChannel(c.commandChannel);
-    if (raw.has("schemaVersion") && raw.get("schemaVersion").getAsInt() == 5) validateFleetLayout(c);
+    if (raw.has("schemaVersion") && raw.get("schemaVersion").getAsInt() == 5)
+      validateFleetLayout(c);
     return c;
   }
 
@@ -340,7 +377,8 @@ public record HostConfig(
     InstanceLayout.requirePath(c.dataDirectory(), layout.stateDirectory());
     InstanceLayout.requirePath(c.accessRegistry(), layout.accessRegistry());
     InstanceLayout.requirePath(c.backups().directory(), layout.backupsDirectory());
-    if (c.commandChannel().enabled()) InstanceLayout.requirePath(c.commandChannel().secretFile(), layout.rconSecret());
+    if (c.commandChannel().enabled())
+      InstanceLayout.requirePath(c.commandChannel().secretFile(), layout.rconSecret());
     if (c.backups().rcloneRemote() != null && !c.backups().rcloneRemote().isBlank()) {
       InstanceLayout.requirePath(c.backups().rcloneConfig(), layout.rcloneConfig());
       if (!c.backups().rcloneRemote().replaceAll("/+$", "").endsWith("/" + identity.serverId()))
@@ -424,8 +462,7 @@ public record HostConfig(
     Map<String, Boolean> result = new TreeMap<>();
     for (String s : Scopes.ALL) result.put(s, false);
     result.putAll(capabilities);
-    for (String s : Scopes.ALL)
-      if (s.startsWith("devices.")) result.put(s, false);
+    for (String s : Scopes.ALL) if (s.startsWith("devices.")) result.put(s, false);
     for (String s :
         List.of(
             "backup.view", "backup.create", "backup.download", "backup.delete", "backup.restore"))
@@ -436,6 +473,12 @@ public record HostConfig(
               && (!s.equals("backup.restore") || backups.restoreEnabled));
     for (String s : List.of("console.view.errors", "console.view.full"))
       result.put(s, Boolean.TRUE.equals(result.get(s)) && console.enabled);
+    result.put(
+        "players.history.view",
+        console.enabled
+            && (capabilities.containsKey("players.history.view")
+                ? Boolean.TRUE.equals(capabilities.get("players.history.view"))
+                : Boolean.TRUE.equals(result.get("console.view.full"))));
     for (String scope : RETIRED_SERVER_TREE_MUTATIONS) result.put(scope, false);
     result.put("console.execute.allowed", false);
     return Map.copyOf(result);

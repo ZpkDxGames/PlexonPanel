@@ -1,0 +1,13 @@
+# v5 session store and periodic cold backups
+
+The Host owns private `dataDirectory/telemetry/session-telemetry.sqlite` in WAL/FULL mode and atomically replaces `player-events-current.json`. InvocationID changes or an inactive/failed-to-active cycle reset active tables and JSON and emit session.epoch_reset. Host restarts within the same Minecraft invocation preserve history. Late old-invocation logs are rejected. The JSON projection keeps the newest 4,096 presence events; SQLite holds current-boot logs, lifecycle, exact-UUID presence and standard journal chat.
+
+console.history and console.history.errors return bounded epoch-cursor pages with a wire budget. console.history with stream=chat is separately paginated and requires both full-console and chat read scopes. Custom plugin chat formats remain live-only. players.history.list requires the existing history scope and exact UUID for individual queries. Closed-session means count only observed JOINED-to-LEFT pairs.
+
+Maintenance schema 2 defaults disabled. Schema 1 periodic settings migrate disabled. Explicit DAILY, WEEKLY, SELECTED_DAYS/SELECTED_WEEKDAYS and fixed UTC INTERVAL_HOURS (1–168) are supported. The durable occurrence ledger prevents duplicate scheduled runs. Periodic backups use a 30-minute warning and take precedence over simultaneous restart occurrences. Disabled scheduled countdowns do not silently resume after Host restart.
+
+Manual and periodic backups share the existing cold-backup worker, node/instance locks, RCON save-all flush, stopped-service/MainPID proof, manifest, .partial ZIP promotion, local SHA-256, fixed /usr/bin/rclone upload and strict remote SHA-256 verification. Fourteen display stages refine coarser durable phases; they are not additional recovery checkpoints. Status retains currentOperation as its Java record and adds stageDefinitions, nextFullRestorePoint and uploadRetryable.
+
+The Host JAR embeds exactly Linux x64 and ARM64 SQLite JNI libraries and requires Java 25 with --enable-native-access=ALL-UNNAMED (included in service examples). Linux x64 packaged runtime is checked locally. Actual Paper startup, relay routing, journald/systemd permissions, RCON, scheduled/manual Drive runs, remote SHA verification, interruption recovery, restore/rollback and ARM64 runtime require separate live certification. This handoff performs no installation or live server operation.
+
+Journal-cursor replay is indexed and idempotent across Host restarts. Presence and UUID announcements must match complete standard server message bodies after recognized log prefixes; ordinary chat cannot impersonate those records. Custom lifecycle/chat formatting is not inferred.

@@ -24,72 +24,129 @@ public final class HostMain {
   private HostMain() {}
 
   public static void main(String[] args) throws Exception {
-    try { run(args); }
-    catch (Exception failure) {
+    try {
+      run(args);
+    } catch (Exception failure) {
       String code = failure.getMessage();
-      System.err.println(code != null && code.matches("[A-Z][A-Z0-9_]{2,63}")
-          ? code : "HOST_STARTUP_OR_LOCAL_OPERATION_FAILED " + failure.getClass().getSimpleName());
+      System.err.println(
+          code != null && code.matches("[A-Z][A-Z0-9_]{2,63}")
+              ? code
+              : "HOST_STARTUP_OR_LOCAL_OPERATION_FAILED " + failure.getClass().getSimpleName());
       System.exit(1);
     }
   }
 
   static void run(String[] args) throws Exception {
-    if (args.length == 2 && (args[0].equals("--plan-provider-reseed") || args[0].equals("--reseed-provider"))) {
-      if (!System.getProperty("os.name").equals("Linux") || !ProcessHandle.current().info().user().orElse("").equals("root"))
+    if (args.length == 2
+        && (args[0].equals("--plan-provider-reseed") || args[0].equals("--reseed-provider"))) {
+      if (!System.getProperty("os.name").equals("Linux")
+          || !ProcessHandle.current().info().user().orElse("").equals("root"))
         throw new SecurityException("LOCAL_ADMINISTRATOR_REQUIRED");
-      var layout = new InstanceLayout(args[1]); HostConfig config = HostConfig.load(layout.hostConfig());
-      if (HostConfigMigration.schemaVersion(layout.hostConfig()) != 5 || !layout.instanceKey().equals(config.fleet().instanceKey()))
+      var layout = new InstanceLayout(args[1]);
+      HostConfig config = HostConfig.load(layout.hostConfig());
+      if (HostConfigMigration.schemaVersion(layout.hostConfig()) != 5
+          || !layout.instanceKey().equals(config.fleet().instanceKey()))
         throw new SecurityException("FLEET_SCHEMA_REQUIRED");
-      InstanceFilePolicy.validate(config, layout.hostConfig()); NodeInstanceRegistry.readDefault().require(config.fleetIdentity());
-      Path provider = layout.stateDirectory().resolve("provider"); InstanceLayout.rejectSymlinks(provider);
+      InstanceFilePolicy.validate(config, layout.hostConfig());
+      NodeInstanceRegistry.readDefault().require(config.fleetIdentity());
+      Path provider = layout.stateDirectory().resolve("provider");
+      InstanceLayout.rejectSymlinks(provider);
       if (args[0].equals("--plan-provider-reseed")) {
-        System.out.println(new com.google.gson.Gson().toJson(Map.of("serverId", config.serverId(), "instanceKey", layout.instanceKey(),
-            "providerStatePresent", Files.exists(provider, LinkOption.NOFOLLOW_LINKS), "operation", "PRESERVE_OFFLINE_PROVIDER_STATE")));
+        System.out.println(
+            new com.google.gson.Gson()
+                .toJson(
+                    Map.of(
+                        "serverId",
+                        config.serverId(),
+                        "instanceKey",
+                        layout.instanceKey(),
+                        "providerStatePresent",
+                        Files.exists(provider, LinkOption.NOFOLLOW_LINKS),
+                        "operation",
+                        "PRESERVE_OFFLINE_PROVIDER_STATE")));
       } else {
         String state = String.valueOf(new SystemdService(layout.hostUnit()).status().get("state"));
-        if (!Set.of("inactive", "failed").contains(state)) throw new SecurityException("PROVIDER_RESEED_REQUIRES_INACTIVE_HOST");
+        if (!Set.of("inactive", "failed").contains(state))
+          throw new SecurityException("PROVIDER_RESEED_REQUIRES_INACTIVE_HOST");
         Path archive = ProviderReseed.preserve(layout.stateDirectory(), layout.hostUser());
-        System.out.println(new com.google.gson.Gson().toJson(Map.of("serverId", config.serverId(), "instanceKey", layout.instanceKey(),
-            "preservedState", archive.toString(), "nextStep", "VALIDATE_NODE_THEN_START_PAIRED_HOST")));
+        System.out.println(
+            new com.google.gson.Gson()
+                .toJson(
+                    Map.of(
+                        "serverId",
+                        config.serverId(),
+                        "instanceKey",
+                        layout.instanceKey(),
+                        "preservedState",
+                        archive.toString(),
+                        "nextStep",
+                        "VALIDATE_NODE_THEN_START_PAIRED_HOST")));
       }
       return;
     }
     if (args.length == 1 && args[0].equals("--validate-node")) {
-      if (!System.getProperty("os.name").equals("Linux") || !ProcessHandle.current().info().user().orElse("").equals("root"))
+      if (!System.getProperty("os.name").equals("Linux")
+          || !ProcessHandle.current().info().user().orElse("").equals("root"))
         throw new SecurityException("LOCAL_ADMINISTRATOR_REQUIRED");
       var registry = NodeInstanceRegistry.readDefault();
       var entries = InstanceConfigurationAudit.validateNode(registry);
-      System.out.println(new com.google.gson.Gson().toJson(Map.of("nodeId", registry.nodeId().toString(), "instances", entries, "configurationValidated", true)));
+      System.out.println(
+          new com.google.gson.Gson()
+              .toJson(
+                  Map.of(
+                      "nodeId",
+                      registry.nodeId().toString(),
+                      "instances",
+                      entries,
+                      "configurationValidated",
+                      true)));
       return;
     }
     if (args.length == 2 && args[0].equals("--validate-fleet")) {
       var layout = new InstanceLayout(args[1]);
       HostConfig config = HostConfig.load(layout.hostConfig());
-      if (HostConfigMigration.schemaVersion(layout.hostConfig()) != 5) throw new IllegalArgumentException("FLEET_SCHEMA_REQUIRED");
-      if (!layout.instanceKey().equals(config.fleet().instanceKey())) throw new IllegalArgumentException("INSTANCE_KEY_MISMATCH");
+      if (HostConfigMigration.schemaVersion(layout.hostConfig()) != 5)
+        throw new IllegalArgumentException("FLEET_SCHEMA_REQUIRED");
+      if (!layout.instanceKey().equals(config.fleet().instanceKey()))
+        throw new IllegalArgumentException("INSTANCE_KEY_MISMATCH");
       InstanceFilePolicy.validate(config, layout.hostConfig());
       var entry = NodeInstanceRegistry.readDefault().require(config.fleetIdentity());
       Integer port = config.commandChannel().enabled() ? config.commandChannel().port() : null;
-      if (!Objects.equals(port, entry.rconPort())) throw new IllegalArgumentException("REGISTERED_RCON_PORT_MISMATCH");
+      if (!Objects.equals(port, entry.rconPort()))
+        throw new IllegalArgumentException("REGISTERED_RCON_PORT_MISMATCH");
       InstanceConfigurationAudit.validate(config, entry);
       System.out.println(new com.google.gson.Gson().toJson(entry));
       return;
     }
     if (args.length == 3 && args[0].equals("--register-fleet")) {
-      if (!System.getProperty("os.name").equals("Linux") || !ProcessHandle.current().info().user().orElse("").equals("root"))
+      if (!System.getProperty("os.name").equals("Linux")
+          || !ProcessHandle.current().info().user().orElse("").equals("root"))
         throw new SecurityException("LOCAL_ADMINISTRATOR_REQUIRED");
       var layout = new InstanceLayout(args[1]);
       HostConfig config = HostConfig.load(layout.hostConfig());
-      if (HostConfigMigration.schemaVersion(layout.hostConfig()) != 5) throw new IllegalArgumentException("FLEET_SCHEMA_REQUIRED");
-      if (!layout.instanceKey().equals(config.fleet().instanceKey())) throw new IllegalArgumentException("INSTANCE_KEY_MISMATCH");
+      if (HostConfigMigration.schemaVersion(layout.hostConfig()) != 5)
+        throw new IllegalArgumentException("FLEET_SCHEMA_REQUIRED");
+      if (!layout.instanceKey().equals(config.fleet().instanceKey()))
+        throw new IllegalArgumentException("INSTANCE_KEY_MISMATCH");
       int minecraftPort;
-      try { minecraftPort = Integer.parseInt(args[2]); }
-      catch (NumberFormatException invalid) { throw new IllegalArgumentException("REGISTRY_PORT_INVALID"); }
+      try {
+        minecraftPort = Integer.parseInt(args[2]);
+      } catch (NumberFormatException invalid) {
+        throw new IllegalArgumentException("REGISTRY_PORT_INVALID");
+      }
       InstanceFilePolicy.validate(config, layout.hostConfig());
-      InstanceConfigurationAudit.validate(config, new NodeInstanceRegistry.Entry(config.fleetIdentity().serverId(), layout.instanceKey(), minecraftPort,
-          config.commandChannel().enabled() ? config.commandChannel().port() : null));
-      var entry = NodeInstanceRegistry.registerDefault(config.fleetIdentity(), minecraftPort,
-          config.commandChannel().enabled() ? config.commandChannel().port() : null);
+      InstanceConfigurationAudit.validate(
+          config,
+          new NodeInstanceRegistry.Entry(
+              config.fleetIdentity().serverId(),
+              layout.instanceKey(),
+              minecraftPort,
+              config.commandChannel().enabled() ? config.commandChannel().port() : null));
+      var entry =
+          NodeInstanceRegistry.registerDefault(
+              config.fleetIdentity(),
+              minecraftPort,
+              config.commandChannel().enabled() ? config.commandChannel().port() : null);
       System.out.println(new com.google.gson.Gson().toJson(entry));
       return;
     }
@@ -98,7 +155,8 @@ public final class HostMain {
           || !ProcessHandle.current().info().user().orElse("").equals("root"))
         throw new SecurityException("Node provisioning requires the local Linux administrator");
       UUID nodeId = NodeIdentity.initialize(NodeIdentity.DEFAULT_PATH);
-      if (!nodeId.equals(NodeIdentity.readDefault())) throw new SecurityException("NODE_IDENTITY_MISMATCH");
+      if (!nodeId.equals(NodeIdentity.readDefault()))
+        throw new SecurityException("NODE_IDENTITY_MISMATCH");
       System.out.println("Initialized public node identity: " + nodeId);
       return;
     }
@@ -113,7 +171,8 @@ public final class HostMain {
       UUID nodeId = NodeIdentity.readDefault();
       var plan = HostConfigMigration.planFleet(configPath, nodeId, args[2]);
       if (args[1].equals("--migrate-fleet")) {
-        if (!System.getProperty("os.name").equals("Linux") || !ProcessHandle.current().info().user().orElse("").equals("root"))
+        if (!System.getProperty("os.name").equals("Linux")
+            || !ProcessHandle.current().info().user().orElse("").equals("root"))
           throw new SecurityException("LOCAL_ADMINISTRATOR_REQUIRED");
         HostConfigMigration.migrateFleet(configPath, nodeId, args[2]);
       }
@@ -122,12 +181,14 @@ public final class HostMain {
     }
     if (args.length < 1 || args.length > 2)
       throw new IllegalArgumentException(
-          "Usage: java -jar plexonpanel-host.jar <host-config.json> [--recover-restore|--migrate-config]");
+          "Usage: java -jar plexonpanel-host.jar <host-config.json>"
+              + " [--recover-restore|--migrate-config]");
 
     Path configPath = Path.of(args[0]).toAbsolutePath().normalize();
     if (args.length == 2 && args[1].equals("--migrate-config")) {
       HostConfigMigration.migrate(configPath);
-      System.out.println("Host configuration migration completed; existing rollback backup retained.");
+      System.out.println(
+          "Host configuration migration completed; existing rollback backup retained.");
       return;
     }
     if (!System.getProperty("os.name").equals("Linux")
@@ -137,27 +198,38 @@ public final class HostMain {
     Instant hostStartedAt = Instant.now();
     if (HostConfigMigration.needsMigration(configPath))
       System.err.println(
-          "Legacy Host config accepted read-only; run the local --migrate-config operation before release certification.");
-    long configLoadedMtime = Files.getLastModifiedTime(configPath, LinkOption.NOFOLLOW_LINKS).toMillis();
+          "Legacy Host config accepted read-only; run the local --migrate-config operation before"
+              + " release certification.");
+    long configLoadedMtime =
+        Files.getLastModifiedTime(configPath, LinkOption.NOFOLLOW_LINKS).toMillis();
     HostConfig config = HostConfig.load(configPath);
     boolean fleetSchema = HostConfigMigration.schemaVersion(configPath) == 5;
     if (HostConfig.CURRENT_SCHEMA_VERSION == 5 && !fleetSchema)
       throw new SecurityException("HOST_FIVE_REQUIRES_EXPLICIT_FLEET_MIGRATION");
-    String journalNamespace = fleetSchema ? new InstanceLayout(config.fleet().instanceKey()).journalNamespace() : null;
+    String journalNamespace =
+        fleetSchema ? new InstanceLayout(config.fleet().instanceKey()).journalNamespace() : null;
     if (fleetSchema) {
       var layout = new InstanceLayout(config.fleet().instanceKey());
       InstanceLayout.requirePath(configPath.toString(), layout.hostConfig());
       if (!layout.hostUser().equals(ProcessHandle.current().info().user().orElse("")))
         throw new SecurityException("HOST_INSTANCE_ACCOUNT_MISMATCH");
-      for (Path path : List.of(layout.serverRoot(), layout.stateDirectory(), layout.backupsDirectory(), layout.rconSecret(), layout.rcloneConfig()))
-        InstanceLayout.rejectSymlinks(path);
+      for (Path path :
+          List.of(
+              layout.serverRoot(),
+              layout.stateDirectory(),
+              layout.backupsDirectory(),
+              layout.rconSecret(),
+              layout.rcloneConfig())) InstanceLayout.rejectSymlinks(path);
       InstanceFilePolicy.validate(config, configPath);
       var registered = NodeInstanceRegistry.readDefault().require(config.fleetIdentity());
       InstanceConfigurationAudit.validate(config, registered);
-      if (!Objects.equals(registered.rconPort(), config.commandChannel().enabled() ? config.commandChannel().port() : null))
+      if (!Objects.equals(
+          registered.rconPort(),
+          config.commandChannel().enabled() ? config.commandChannel().port() : null))
         throw new SecurityException("REGISTERED_RCON_PORT_MISMATCH");
     }
-    if (config.fleetIdentity() != null && !config.fleetIdentity().nodeId().equals(NodeIdentity.readDefault()))
+    if (config.fleetIdentity() != null
+        && !config.fleetIdentity().nodeId().equals(NodeIdentity.readDefault()))
       throw new SecurityException("HOST_NODE_IDENTITY_MISMATCH");
     Path data = Path.of(config.dataDirectory());
     Files.createDirectories(data);
@@ -168,11 +240,13 @@ public final class HostMain {
 
     FleetBindingStore.Lease fleetLease = null;
     if (config.fleetIdentity() != null) {
-      fleetLease = new FleetBindingStore(data, Path.of(config.serverRoot()))
-          .claim(config.fleetIdentity(), identity.fingerprint());
+      fleetLease =
+          new FleetBindingStore(data, Path.of(config.serverRoot()))
+              .claim(config.fleetIdentity(), identity.fingerprint());
     }
     final FleetBindingStore.Lease activeFleetLease = fleetLease;
-    HostConfig backupRuntimeConfig = fleetSchema ? ProviderRuntimeConfiguration.prepare(config) : config;
+    HostConfig backupRuntimeConfig =
+        fleetSchema ? ProviderRuntimeConfiguration.prepare(config) : config;
 
     Path legacyAccessRegistry = Path.of(config.accessRegistry()).toAbsolutePath().normalize();
     HostAuthorizationMirror authorization =
@@ -182,8 +256,12 @@ public final class HostMain {
     LocalAudit audit = new LocalAudit(data.resolve("audit"), 30);
     audit.clean();
     HostConnection connection = new HostConnection(config, identity, journalNamespace);
-    HostConsoleHistory consoleHistory = new HostConsoleHistory(config.serviceName(), config.console(), journalNamespace);
+    HostConsoleHistory consoleHistory =
+        new HostConsoleHistory(config.serviceName(), config.console(), journalNamespace);
     SystemdService service = new SystemdService(config.serviceName());
+    HostSessionStore sessionStore = new HostSessionStore(data, Path.of(config.serverRoot()));
+    sessionStore.observeService(service.status());
+    connection.sessionStore(sessionStore);
     MinecraftCommandChannel commands = new RconMinecraftCommandChannel(config.commandChannel());
     AtomicBoolean paper = new AtomicBoolean();
     MinecraftReadinessCache minecraftReadiness = new MinecraftReadinessCache(commands);
@@ -208,6 +286,7 @@ public final class HostMain {
       fullBackups.recoverRestore();
       maintenance.close();
       connection.close();
+      sessionStore.close();
       if (activeFleetLease != null) activeFleetLease.close();
       return;
     }
@@ -216,9 +295,7 @@ public final class HostMain {
     Path root = Path.of(config.serverRoot());
     SafeFiles files =
         new SafeFiles(
-            new PathPolicy(
-                Map.of("server", root),
-                List.of(data, legacyAccessRegistry.getParent())),
+            new PathPolicy(Map.of("server", root), List.of(data, legacyAccessRegistry.getParent())),
             Set.of("server"));
     SystemMetrics metrics = new SystemMetrics(root);
     ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
@@ -235,7 +312,8 @@ public final class HostMain {
                 case "backup.list", "backup.full.list" -> {
                   var all = fullBackups.list();
                   int page = (int) integer(p, "page", 0, 0, 100);
-                  int first = Math.min(all.size(), page * 50), last = Math.min(all.size(), first + 50);
+                  int first = Math.min(all.size(), page * 50),
+                      last = Math.min(all.size(), first + 50);
                   return Map.of(
                       "backups",
                       all.subList(first, last),
@@ -252,7 +330,8 @@ public final class HostMain {
                   Map<String, Object> result =
                       new LinkedHashMap<>(
                           fullPreflight.check(maintenance.settings().fullRestorePoint()));
-                  Path directory = Path.of(config.backups().directory()).toAbsolutePath().normalize();
+                  Path directory =
+                      Path.of(config.backups().directory()).toAbsolutePath().normalize();
                   result.put("backupMode", "MANUAL_FULL_ONLY");
                   result.put("hostAuthenticated", connection.authenticated());
                   result.put("operationBusy", operationLock.isLocked());
@@ -264,13 +343,13 @@ public final class HostMain {
                       "recoveryRequired",
                       backupRecoveryRequired(restoreRecoveryRequired, jobRecoveryRequired));
                   result.put(
-                      "backupRootWritable", Files.isDirectory(directory) && Files.isWritable(directory));
+                      "backupRootWritable",
+                      Files.isDirectory(directory) && Files.isWritable(directory));
                   result.put("commandChannelConfigured", commands.enabled());
                   Map<String, Object> serviceStatus = service.status();
                   result.put(
                       "minecraftReady",
-                      minecraftReadiness.refresh(
-                          "active".equals(serviceStatus.get("state"))));
+                      minecraftReadiness.refresh("active".equals(serviceStatus.get("state"))));
                   result.put("hostStartedAt", hostStartedAt.toString());
                   result.put(
                       "hostConfigLoadedAt", Instant.ofEpochMilli(configLoadedMtime).toString());
@@ -315,11 +394,15 @@ public final class HostMain {
                   String id = text(p, "backupId", 36);
                   var grant = fullBackups.prepareRestore(id, device.deviceId());
                   return Map.of(
-                      "confirmationToken", grant.token(),
-                      "serverName", config.serverName(),
-                      "expiresInSeconds", 60,
+                      "confirmationToken",
+                      grant.token(),
+                      "serverName",
+                      config.serverName(),
+                      "expiresInSeconds",
+                      60,
                       "message",
-                      "A verified emergency full restore point will be created before replacement.");
+                      "A verified emergency full restore point will be created before"
+                          + " replacement.");
                 }
                 case "backup.restore", "backup.full.restore" -> {
                   requireOwner(device);
@@ -336,10 +419,7 @@ public final class HostMain {
                   String id = text(p, "backupId", 36);
                   var metadata = fullBackups.metadata(id);
                   return transfers.start(
-                      fullBackups.archive(id),
-                      metadata.archiveBytes(),
-                      metadata.sha256(),
-                      device);
+                      fullBackups.archive(id), metadata.archiveBytes(), metadata.sha256(), device);
                 }
                 case "backup.download.chunk" -> {
                   return transfers.chunk(
@@ -382,10 +462,15 @@ public final class HostMain {
                   return fullBackups.testProvider(30);
                 }
                 case "console.history" -> {
-                  return consoleHistory.query(p, false);
+                  if (p.has("stream") && !device.scopes().contains("chat.view"))
+                    throw new SecurityException("MISSING_CHAT_VIEW_SCOPE");
+                  return sessionStore.query(p, false);
                 }
                 case "console.history.errors" -> {
-                  return consoleHistory.query(p, true);
+                  return sessionStore.query(p, true);
+                }
+                case "players.history.list" -> {
+                  return sessionStore.history(p);
                 }
                 case "server.status" -> {
                   var status = new HashMap<>(service.status());
@@ -394,8 +479,7 @@ public final class HostMain {
                   status.put("commandChannelConfigured", commands.enabled());
                   status.put(
                       "minecraftReady",
-                      minecraftReadiness.observeServiceState(
-                          "active".equals(status.get("state"))));
+                      minecraftReadiness.observeServiceState("active".equals(status.get("state"))));
                   status.put(
                       "recoveryRequired",
                       backupRecoveryRequired(
@@ -421,8 +505,10 @@ public final class HostMain {
                       minecraftReadiness.markStarted();
                     }
                     return Map.of(
-                        "state", action.equals("server.stop") ? "stopped" : "running",
-                        "minecraftReadinessVerified", !action.equals("server.stop"));
+                        "state",
+                        action.equals("server.stop") ? "stopped" : "running",
+                        "minecraftReadinessVerified",
+                        !action.equals("server.stop"));
                   } finally {
                     operationLock.unlock();
                   }
@@ -453,24 +539,34 @@ public final class HostMain {
         };
     Runnable serviceSnapshot =
         () -> {
-          if (!connection.authenticated()) return;
           try {
             var status = new HashMap<>(service.status());
+            sessionStore
+                .observeService(status)
+                .ifPresent(
+                    reset -> {
+                      connection.resetConsoleSession();
+                      if (connection.authenticated())
+                        connection.send("session.epoch_reset", reset, MessagePriority.CRITICAL);
+                    });
+            status.put("invocationId", sessionStore.epoch());
             status.put("sourceIntervalMillis", TimeUnit.SECONDS.toMillis(SERVICE_STATUS_SECONDS));
-            if (config.fleetIdentity() != null) status.put("nodeId", config.fleetIdentity().nodeId().toString());
+            if (config.fleetIdentity() != null)
+              status.put("nodeId", config.fleetIdentity().nodeId().toString());
             status.put("paperConnected", paper.get());
             status.put("authorizationMirror", authorization.status());
             status.put(
-                      "minecraftReady",
-                      minecraftReadiness.observeServiceState(
-                          "active".equals(status.get("state"))));
+                "minecraftReady",
+                minecraftReadiness.observeServiceState("active".equals(status.get("state"))));
             status.put(
-                      "recoveryRequired",
-                      backupRecoveryRequired(
-                          fullBackups.recoveryRequired(), maintenance.recoveryRequired()));
-            connection.send("service.status", status, MessagePriority.TELEMETRY);
+                "recoveryRequired",
+                backupRecoveryRequired(
+                    fullBackups.recoveryRequired(), maintenance.recoveryRequired()));
+            if (connection.authenticated())
+              connection.send("service.status", status, MessagePriority.TELEMETRY);
           } catch (Exception e) {
-            System.err.println("Host service snapshot unavailable: " + e.getClass().getSimpleName());
+            System.err.println(
+                "Host service snapshot unavailable: " + e.getClass().getSimpleName());
           }
         };
     connection.handlers(
@@ -497,10 +593,7 @@ public final class HostMain {
           scheduler.execute(serviceSnapshot);
         });
     telemetryScheduler.scheduleWithFixedDelay(
-        fastSnapshot,
-        FAST_TELEMETRY_MILLIS,
-        FAST_TELEMETRY_MILLIS,
-        TimeUnit.MILLISECONDS);
+        fastSnapshot, FAST_TELEMETRY_MILLIS, FAST_TELEMETRY_MILLIS, TimeUnit.MILLISECONDS);
     scheduler.scheduleWithFixedDelay(
         serviceSnapshot, SERVICE_STATUS_SECONDS, SERVICE_STATUS_SECONDS, TimeUnit.SECONDS);
     maintenance.start();
@@ -516,16 +609,32 @@ public final class HostMain {
                   maintenance.beginClose();
                   boolean controlDrained = engine.awaitClosed(remaining(deadline));
                   boolean maintenanceDrained = maintenance.awaitClosed(remaining(deadline));
-                  boolean telemetryDrained = ExecutorDrain.await(telemetryScheduler, remaining(deadline));
+                  boolean telemetryDrained =
+                      ExecutorDrain.await(telemetryScheduler, remaining(deadline));
                   boolean schedulerDrained = ExecutorDrain.await(scheduler, remaining(deadline));
                   transfers.close();
                   connection.close();
                   boolean connectionDrained = connection.awaitClosed(remaining(deadline));
-                  boolean drained = controlDrained && maintenanceDrained && telemetryDrained && schedulerDrained && connectionDrained;
+                  if (connectionDrained) {
+                    try {
+                      sessionStore.close();
+                    } catch (java.io.IOException failure) {
+                      System.err.println("SESSION_STORE_CLOSE_FAILED");
+                    }
+                  }
+                  boolean drained =
+                      controlDrained
+                          && maintenanceDrained
+                          && telemetryDrained
+                          && schedulerDrained
+                          && connectionDrained;
                   if (!drained) System.err.println("HOST_DRAIN_TIMEOUT_IDENTITY_LEASE_RETAINED");
                   if (drained && activeFleetLease != null) {
-                    try { activeFleetLease.close(); }
-                    catch (java.io.IOException failure) { System.err.println("FLEET_IDENTITY_LEASE_RELEASE_FAILED"); }
+                    try {
+                      activeFleetLease.close();
+                    } catch (java.io.IOException failure) {
+                      System.err.println("FLEET_IDENTITY_LEASE_RELEASE_FAILED");
+                    }
                   }
                 }));
     connection.start();
@@ -555,9 +664,8 @@ public final class HostMain {
     while (System.nanoTime() < until) {
       Map<String, Object> status = service.status();
       long pid = status.get("pid") instanceof Number n ? n.longValue() : 0L;
-      if ("active".equals(status.get("state"))
-          && pid > 0L
-          && commands.readinessProbe().success()) return;
+      if ("active".equals(status.get("state")) && pid > 0L && commands.readinessProbe().success())
+        return;
       Thread.sleep(250);
     }
     throw new IllegalStateException("MINECRAFT_READINESS_TIMEOUT");

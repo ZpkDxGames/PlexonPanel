@@ -15,7 +15,8 @@ class MaintenanceSettingsTest {
   @Test
   void missingSettingsUseSafeManualOnlyMigrationDefaults() throws Exception {
     var settings = MaintenanceSettings.load(temporary.resolve("maintenance.json"));
-    assertEquals(1, settings.schemaVersion());
+    assertEquals(2, settings.schemaVersion());
+    assertFalse(settings.fullRestorePoint().schedule().enabled());
     assertEquals("America/Sao_Paulo", settings.timezone());
     assertFalse(settings.restart().schedule().enabled());
     assertTrue(settings.fullRestorePoint().restartAfter());
@@ -63,7 +64,7 @@ class MaintenanceSettingsTest {
   }
 
   @Test
-  void legacyBackupSchedulesAreIgnoredAndNotReserialized() throws Exception {
+  void legacyBackupSchedulesMigrateDisabledInSchemaV2() throws Exception {
     Path path = temporary.resolve("maintenance.json");
     Files.writeString(
         path,
@@ -107,7 +108,13 @@ class MaintenanceSettingsTest {
     loaded.save(path);
     JsonObject saved = JsonParser.parseString(Files.readString(path)).getAsJsonObject();
     assertFalse(saved.has("liveSnapshot"));
-    assertFalse(saved.getAsJsonObject("fullRestorePoint").has("schedule"));
+    assertEquals(2, saved.get("schemaVersion").getAsInt());
+    assertFalse(
+        saved
+            .getAsJsonObject("fullRestorePoint")
+            .getAsJsonObject("schedule")
+            .get("enabled")
+            .getAsBoolean());
   }
 
   @Test
@@ -125,7 +132,8 @@ class MaintenanceSettingsTest {
             List.of("world/session.lock"));
 
     assertTrue(configured.excludes().contains("world/session.lock"));
-    assertTrue(configured.excludes().containsAll(MaintenanceSettings.REQUIRED_FULL_BACKUP_EXCLUDES));
+    assertTrue(
+        configured.excludes().containsAll(MaintenanceSettings.REQUIRED_FULL_BACKUP_EXCLUDES));
     assertTrue(configured.excludes().contains("plugins/PlexonPanel/identity"));
     assertTrue(configured.excludes().contains("plugins/PlexonPanel/audit"));
     assertTrue(configured.excludes().contains("plugins/spark/tmp"));
@@ -203,7 +211,8 @@ class MaintenanceSettingsTest {
                 "SIZE_AND_HASH_WHEN_AVAILABLE",
                 1024L * 1024 * 1024,
                 List.of("../secrets")));
-    assertThrows(IllegalArgumentException.class, () -> MaintenanceSettings.validate(traversalExclude));
+    assertThrows(
+        IllegalArgumentException.class, () -> MaintenanceSettings.validate(traversalExclude));
   }
 
   @Test

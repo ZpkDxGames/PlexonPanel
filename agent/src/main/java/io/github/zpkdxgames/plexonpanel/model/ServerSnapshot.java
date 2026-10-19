@@ -13,6 +13,7 @@ public record ServerSnapshot(
     double averageTickMillis,
     double minimumSampleTickMillis,
     double p95TickMillis,
+    double p99TickMillis,
     double maximumSampleTickMillis,
     long currentTick,
     long sourceIntervalMillis) {}

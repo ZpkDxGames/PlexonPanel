@@ -8,13 +8,13 @@ import io.github.zpkdxgames.plexonpanel.console.ConsoleLine;
 import io.github.zpkdxgames.plexonpanel.console.ConsoleRedactor;
 import io.github.zpkdxgames.plexonpanel.protocol.MessagePriority;
 import io.github.zpkdxgames.plexonpanel.protocol.SnapshotBatches;
-import io.github.zpkdxgames.plexonpanel.util.NamedThreadFactory;
 import io.github.zpkdxgames.plexonpanel.util.ExecutorDrain;
+import io.github.zpkdxgames.plexonpanel.util.NamedThreadFactory;
 import java.io.BufferedReader;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
-import java.time.Instant;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -35,6 +35,17 @@ import java.util.concurrent.atomic.AtomicLong;
  */
 public final class HostConsoleStreamService implements AutoCloseable {
   private static final long MAXIMUM_RESTART_BACKOFF_MILLIS = 30_000L;
+
+  private volatile HostSessionStore sessionStore;
+
+  public void sessionStore(HostSessionStore store) {
+    this.sessionStore = store;
+  }
+
+  public synchronized void resetSession() {
+    recent.clear();
+    pending.clear();
+  }
 
   private final HostConfig config;
   private final HostConfig.ConsoleConfig settings;
@@ -98,7 +109,8 @@ public final class HostConsoleStreamService implements AutoCloseable {
         TimeUnit.MILLISECONDS);
   }
 
-  static List<String> journalCommand(JournalSource source, HostConfig.ConsoleConfig settings, String cursor) {
+  static List<String> journalCommand(
+      JournalSource source, HostConfig.ConsoleConfig settings, String cursor) {
     List<String> command = new ArrayList<>();
     command.add(settings.journalExecutable());
     command.addAll(source.arguments());
@@ -134,8 +146,8 @@ public final class HostConsoleStreamService implements AutoCloseable {
               String lower = line.toLowerCase(java.util.Locale.ROOT);
               if (lower.contains("permission denied") || lower.contains("not permitted"))
                 setSourceState("JOURNAL_PERMISSION_DENIED", false);
-              if (lower.contains("cursor") && (lower.contains("failed") || lower.contains("invalid")))
-                cursorFailure = true;
+              if (lower.contains("cursor")
+                  && (lower.contains("failed") || lower.contains("invalid"))) cursorFailure = true;
             }
           }
         }
@@ -185,7 +197,8 @@ public final class HostConsoleStreamService implements AutoCloseable {
       String nextInvocation = text(object, "_SYSTEMD_INVOCATION_ID");
       String pid = text(object, "_PID");
       Integer priority = integer(object, "PRIORITY");
-      boolean truncated = content.getBytes(StandardCharsets.UTF_8).length > settings.maximumLineBytes();
+      boolean truncated =
+          content.getBytes(StandardCharsets.UTF_8).length > settings.maximumLineBytes();
       content = truncateUtf8(content, settings.maximumLineBytes());
       content = redactor.redact(content);
       ConsoleClassifier.Classification classification = classifier.classify(content, priority);
@@ -209,6 +222,13 @@ public final class HostConsoleStreamService implements AutoCloseable {
       stateDirty = true;
       captured.incrementAndGet();
       lastConsoleEventAt = System.currentTimeMillis();
+      if (sessionStore != null) {
+        try {
+          sessionStore.append(line);
+        } catch (java.io.IOException failure) {
+          setSourceState("SESSION_STORE_UNAVAILABLE", false);
+        }
+      }
       addRecent(line);
       enqueue(line);
       if (!healthy) setSourceState("FOLLOWING", true);
@@ -270,7 +290,8 @@ public final class HostConsoleStreamService implements AutoCloseable {
           new ConsoleLine(
               Instant.now().toString(),
               "WARN",
-              unreported + " console lines were dropped while the Host console queue was saturated.",
+              unreported
+                  + " console lines were dropped while the Host console queue was saturated.",
               null,
               false,
               "HOST_JOURNAL",
@@ -329,10 +350,7 @@ public final class HostConsoleStreamService implements AutoCloseable {
     try {
       stateStore.save(
           new ConsoleStateStore.State(
-              ConsoleStateStore.FORMAT_VERSION,
-              lastCursor,
-              invocationId,
-              sourceSequence.get()));
+              ConsoleStateStore.FORMAT_VERSION, lastCursor, invocationId, sourceSequence.get()));
       lastStateWrite = now;
       stateDirty = false;
     } catch (Exception ignored) {
