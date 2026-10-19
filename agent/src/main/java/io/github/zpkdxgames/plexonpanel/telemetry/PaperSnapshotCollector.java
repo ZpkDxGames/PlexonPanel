@@ -68,7 +68,8 @@ public final class PaperSnapshotCollector {
         round(percentile(tickMillis, 0.99)),
         round(maximum),
         server.getCurrentTick(),
-        Math.multiplyExact(settings.serverIntervalTicks(), 50L));
+        Math.multiplyExact(settings.serverIntervalTicks(), 50L),
+        server.getOnlineMode());
   }
 
   public List<PlayerSnapshot> playerSnapshots() {
@@ -132,7 +133,22 @@ public final class PaperSnapshotCollector {
         metadata.sessionId(),
         metadata.sessionStartedAt(),
         metadata.firstSeenAt(),
-        metadata.lastLoginAt());
+        metadata.lastLoginAt(),
+        extractSkinTexture(player));
+  }
+
+  /** Read the profile already applied by Paper / SkinsRestorer on the Bukkit thread. */
+  public static String extractSkinTexture(Player player) {
+    try {
+      for (var property : player.getPlayerProfile().getProperties()) {
+        if (!"textures".equals(property.getName())) continue;
+        String hash = SkinTextures.fromProperty(property.getValue());
+        if (hash != null) return hash;
+      }
+    } catch (RuntimeException unavailableProfile) {
+      // A transient profile must not interrupt player inventory or presence delivery.
+    }
+    return null;
   }
 
   public List<java.util.Map<String, Object>> worldSnapshots() {

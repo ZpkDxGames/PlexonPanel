@@ -365,7 +365,7 @@ public final class TelemetryService implements Listener, AutoCloseable {
             now,
             firstSeen(player, now),
             totalPlayTime(player));
-    emitPresence(captured);
+    emitPresence(captured, PaperSnapshotCollector.extractSkinTexture(player));
     markPlayerInventoryDirty();
   }
 
@@ -389,10 +389,10 @@ public final class TelemetryService implements Listener, AutoCloseable {
             Instant.now(),
             termination,
             totalPlayTime(player));
-    emitPresence(captured);
+    emitPresence(captured, PaperSnapshotCollector.extractSkinTexture(player));
   }
 
-  private void emitPresence(PlayerPresenceService.CapturedEvent captured) {
+  private void emitPresence(PlayerPresenceService.CapturedEvent captured, String skinTexture) {
     if (captured == null || !settings.enabled() || !settings.sendPlayerPresenceEvents()) return;
     long epoch = transportEpoch.get();
     try {
@@ -405,6 +405,7 @@ public final class TelemetryService implements Listener, AutoCloseable {
             body.put("sessionId", record.sessionId());
             body.put("uuid", record.uuid());
             body.put("name", record.name());
+            body.put("skinTexture", skinTexture);
             body.put("state", record.state().name());
             body.put("observedAt", record.observedAt());
             body.put("sessionStartedAt", record.sessionStartedAt());
