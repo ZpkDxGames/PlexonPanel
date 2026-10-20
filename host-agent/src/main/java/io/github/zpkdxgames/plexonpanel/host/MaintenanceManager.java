@@ -70,6 +70,12 @@ public final class MaintenanceManager implements AutoCloseable {
       FullRestorePointManager fullBackups,
       Clock timeSource)
       throws IOException {
+    this(config,service,commandChannel,operationLock,audit,events,fullBackups,timeSource,null);
+  }
+
+  MaintenanceManager(HostConfig config, SystemdService service, MinecraftCommandChannel commandChannel,
+      ReentrantLock operationLock, LocalAudit audit, MessageSink events, FullRestorePointManager fullBackups,
+      Clock timeSource, FullBackupPreflight preflight) throws IOException {
     this.config = config;
     this.service = service;
     this.commandChannel = Objects.requireNonNull(commandChannel, "commandChannel");
@@ -77,7 +83,7 @@ public final class MaintenanceManager implements AutoCloseable {
     this.audit = audit;
     this.events = events;
     this.fullBackups = fullBackups;
-    this.fullBackupPreflight = new FullBackupPreflight(config, fullBackups);
+    this.fullBackupPreflight = preflight == null ? new FullBackupPreflight(config, fullBackups) : preflight;
     this.timeSource = Objects.requireNonNull(timeSource, "timeSource");
     Path data = Path.of(config.dataDirectory()).toAbsolutePath().normalize();
     this.settingsPath = data.resolve("maintenance-settings.json");
@@ -171,7 +177,14 @@ public final class MaintenanceManager implements AutoCloseable {
         Arrays.stream(BackupStage.values())
             .map(stage -> Map.of("id", stage.name(), "label", stage.label))
             .toList());
+    result.put("stages", BackupStage.definitions());
+    result.put("job", state.snapshot(active));
     result.put("jobStateContractVersion", 4);
+    result.put("countdownState", "IDLE");
+    result.put("countdownKind", "");
+    result.put("countdownRemainingSeconds", 0L);
+    result.put("countdownEndsAt", "");
+    result.put("countdownTotalSeconds", 0);
     result.put("currentOperation", active);
     result.put(
         "uploadRetryable",
@@ -188,6 +201,7 @@ public final class MaintenanceManager implements AutoCloseable {
     result.put("nodeBackup", fullBackups.nodeBackupStatus());
     result.put("restoreRecoveryRequired", fullBackups.recoveryRequired());
     result.put("jobRecoveryRequired", state.recoveryRequired() != null);
+    result.put("recoveryRequired", fullBackups.recoveryRequired() || state.recoveryRequired()!=null);
     result.put(
         "commandChannel", Map.of("enabled", commandChannel.enabled(), "type", "HOST_LOCAL_RCON"));
     if (active != null && "COUNTDOWN".equals(active.phase())) {
@@ -196,10 +210,13 @@ public final class MaintenanceManager implements AutoCloseable {
         Instant deadline = Instant.parse(countdown.deadline());
         long remainingSeconds = Math.max(0L, Duration.between(now, deadline).getSeconds());
         result.put("countdownDeadline", countdown.deadline());
+        result.put("countdownEndsAt", countdown.deadline());
+        result.put("countdownKind", "FULL_RESTORE_POINT".equals(active.kind()) ? "BACKUP" : "RESTART");
         result.put("countdownRemainingSeconds", remainingSeconds);
         result.put("countdownWarningsSent", countdown.consumedWarnings());
         List<Integer> warningSeconds = durableWarnings(active, countdown);
         result.put("countdownInitialSeconds", MaintenanceCountdown.durationSeconds(warningSeconds));
+        result.put("countdownTotalSeconds", MaintenanceCountdown.durationSeconds(warningSeconds));
         result.put("countdownWarningSeconds", warningSeconds);
         result.put("countdownState", "ACTIVE");
       } catch (IOException | DateTimeException invalidCountdown) {
@@ -228,7 +245,17 @@ public final class MaintenanceManager implements AutoCloseable {
           false,
           Map.of("supportedCountdownSeconds", "1800,900,600,300"));
     }
-    return queue("FULL_RESTORE_POINT", null, device, false, false, countdownSeconds);
+    return fullRestorePointNow(device, countdownSeconds, DestinationMode.AUTO);
+  }
+
+  public String fullRestorePointNow(DeviceRegistry.Device device, int countdownSeconds, DestinationMode mode) throws Exception {
+    MaintenanceCountdown.fullBackupWarnings(countdownSeconds);
+    return startFullBackup(device,countdownSeconds,mode,false);
+  }
+
+  String startFullBackup(DeviceRegistry.Device device, int countdownSeconds, DestinationMode mode, boolean automatic) throws Exception {
+    if (countdownSeconds != 0) MaintenanceCountdown.fullBackupWarnings(countdownSeconds);
+    return queue("FULL_RESTORE_POINT",null,device,automatic,countdownSeconds==0,countdownSeconds,mode);
   }
 
   /**
@@ -236,64 +263,41 @@ public final class MaintenanceManager implements AutoCloseable {
    * a positively verified running state. This never invents backup success; the interrupted job is
    * finalized as FAILED while preserving its original error code.
    */
-  public synchronized Map<String, Object> resolveRecovery(DeviceRegistry.Device device)
-      throws Exception {
-    if (closed.get()) throw new IllegalStateException("HOST_OFFLINE");
-    MaintenanceStateStore.Job recovery = state.recoveryRequired();
-    if (recovery == null) return Map.of("resolved", false, "state", "NONE");
+  public synchronized Map<String,Object> resolveRecovery(DeviceRegistry.Device device) throws Exception {
+    return resolveRecovery(device,false);
+  }
 
-    Map<String, Object> serviceStatus = service.status();
-    if (!"active".equals(serviceStatus.get("state")))
-      throw new OperationFailure(
-          "RECOVERY_STATE_NOT_VERIFIED",
-          "RECOVERY_REQUIRED",
-          "Minecraft must be running before maintenance recovery can be acknowledged.",
-          true,
-          Map.of(
-              "jobId", recovery.jobId(),
-              "state", recovery.phase(),
-              "requiredServiceState", "active"));
+  public synchronized Map<String,Object> resolveRecovery(DeviceRegistry.Device device, boolean acknowledgeRestore) throws Exception {
+    if(closed.get()) throw new IllegalStateException("HOST_OFFLINE");
+    var recovery=state.recoveryRequired(); boolean restore=fullBackups.recoveryRequired();
+    if(recovery==null && !restore) return Map.of("resolved",false,"reason","NOTHING_TO_RESOLVE","state","NONE");
+    if(worker.getActiveCount()>0 || !worker.getQueue().isEmpty() || operationLock.isLocked())
+      throw FullBackupPreflight.preflightFailure("RECOVERY_JOB_RUNNING","A maintenance operation is still running.");
+    if(!"active".equals(service.status().get("state")))
+      throw FullBackupPreflight.preflightFailure("RECOVERY_SERVICE_NOT_ACTIVE","The Minecraft service must be active.");
+    if(!commandChannel.enabled() || !commandChannel.readinessProbe().success())
+      throw FullBackupPreflight.preflightFailure("RECOVERY_MINECRAFT_NOT_READY","Minecraft must pass the Host readiness probe.");
+    if(restore && !acknowledgeRestore)
+      throw FullBackupPreflight.preflightFailure("RESTORE_RECOVERY_REQUIRES_REVIEW","A restore was interrupted. Review the world, then confirm explicitly.");
+    String actor=actor(device,false), id=recovery==null?"":recovery.jobId();
+    if(restore) fullBackups.acknowledgeRestoreRecovery(actor);
+    if(recovery!=null) state.markRecovered(recovery,"FAILED",actor);
+    publish("maintenance.recovery.resolved",Map.of("jobId",id,"resolvedBy",actor,"result","FAILED",
+        "errorCode",recovery==null?"":recovery.errorCode()));
+    audit("maintenance.recovery.resolve","SUCCESS",actor,false,id,recovery==null?"":recovery.backupId(),
+        Map.of("verifiedServiceState","active","readinessVerified",true,"acknowledgeRestore",acknowledgeRestore));
+    publishStatus();
+    return Map.of("resolved",true,"jobId",id,"state","FAILED");
+  }
 
-    requireCommandChannel();
-    MinecraftCommandChannel.Result readiness = commandChannel.readinessProbe();
-    if (!readiness.success())
-      throw new OperationFailure(
-          "RECOVERY_STATE_NOT_VERIFIED",
-          "RECOVERY_REQUIRED",
-          "Minecraft must pass the Host-local readiness probe before maintenance recovery can be"
-              + " acknowledged.",
-          true,
-          Map.of("jobId", recovery.jobId(), "state", recovery.phase()));
-
-    String originalCode = recovery.errorCode();
-    state.markRecovered(recovery, "FAILED");
-    MaintenanceStateStore.Job resolved = state.active();
-    publish(
-        "maintenance.recovery.resolved",
-        Map.of(
-            "jobId",
-            recovery.jobId(),
-            "kind",
-            recovery.kind(),
-            "result",
-            "FAILED",
-            "errorCode",
-            originalCode == null ? "" : originalCode));
-    audit(
-        "maintenance.recovery.resolve",
-        "SUCCESS",
-        actor(device, false),
-        false,
-        recovery.jobId(),
-        recovery.backupId(),
-        Map.of("verifiedServiceState", "active", "readinessVerified", true));
-    return Map.of(
-        "resolved",
-        true,
-        "jobId",
-        recovery.jobId(),
-        "state",
-        resolved == null ? "FAILED" : resolved.phase());
+  /** Upload is independent of world-source/disk/recovery gates and never owns the maintenance lock. */
+  public synchronized FullRestorePointManager.Metadata promoteToDrive(DeviceRegistry.Device device,String backupId) throws Exception {
+    if (state.blocking()!=null && state.recoveryRequired()==null || worker.getActiveCount()>0 || operationLock.isLocked())
+      throw FullBackupPreflight.preflightFailure("JOB_RUNNING","A maintenance operation is running.");
+    FullBackupPreflight.assertProvider(fullBackupPreflight.inspect(settings,true).provider());
+    var result=fullBackups.retryUpload(backupId,UUID.randomUUID().toString(),settings.fullRestorePoint(),true);
+    audit("backup.full.retry-upload","SUCCESS",actor(device,false),false,result.jobId(),backupId,Map.of("sha256",result.sha256()));
+    return result;
   }
 
   private synchronized String queue(
@@ -304,6 +308,11 @@ public final class MaintenanceManager implements AutoCloseable {
       boolean skipCountdown,
       Integer fullBackupCountdownSeconds)
       throws Exception {
+    return queue(kind,occurrence,device,automatic,skipCountdown,fullBackupCountdownSeconds,DestinationMode.AUTO);
+  }
+
+  private synchronized String queue(String kind, Instant occurrence, DeviceRegistry.Device device,
+      boolean automatic, boolean skipCountdown, Integer fullBackupCountdownSeconds, DestinationMode requested) throws Exception {
     if (closed.get()) throw new IllegalStateException("HOST_OFFLINE");
     MaintenanceStateStore.Job recovery = state.recoveryRequired();
     if (recovery != null) throw conflict("RECOVERY_REQUIRED", recovery, false);
@@ -321,6 +330,12 @@ public final class MaintenanceManager implements AutoCloseable {
       throw new OperationFailure(
           "BUSY", "QUEUED", "Another destructive Host operation is already active.", true);
 
+    DestinationMode.Plan plan=null;
+    if ("FULL_RESTORE_POINT".equals(kind)) {
+      var report=fullBackupPreflight.inspect(settings,requested!=DestinationMode.LOCAL_ONLY);
+      plan=requested.plan(report.provider().state(),settings.fullRestorePoint().allowLocalFallback());
+      FullBackupPreflight.assertReady(report,plan.requireRemote());
+    }
     MaintenanceStateStore.Job job =
         state.begin(
             kind,
@@ -329,6 +344,13 @@ public final class MaintenanceManager implements AutoCloseable {
             "QUEUED",
             requesterDeviceId(device, automatic),
             requesterDeviceName(device, automatic));
+    if(plan!=null) {
+      var detail=new LinkedHashMap<String,Object>();
+      detail.put("destinationMode",requested.name()); detail.put("effectiveDestination",plan.effective());
+      detail.put("fallbackReason",plan.fallbackReason()==null?"":plan.fallbackReason());
+      detail.put("skippedStages",plan.uploadOffsite()?List.of():BackupStage.offsiteStageOrdinals());
+      state.annotate(job,detail);
+    }
     publishPhase(job, Map.of());
     try {
       worker.execute(
@@ -456,6 +478,7 @@ public final class MaintenanceManager implements AutoCloseable {
         if (!recoveringCountdown) {
           job = transition(job, "COUNTDOWN", null, 10, null, null, null, null, Map.of());
           state.beginCountdown(job, warningSeconds, timeSource.instant());
+          publishStatus();
         }
         countdown(job, MinecraftCommandChannel.MaintenanceOperation.RESTART, warningSeconds);
       }
@@ -535,10 +558,10 @@ public final class MaintenanceManager implements AutoCloseable {
 
       if (!recoveringCountdown) {
         job = transition(job, "PREFLIGHT", null, 5, null, null, null, null, Map.of());
-        Map<String, Object> preflight = fullBackupPreflight.check(current.fullRestorePoint());
+        Map<String, Object> preflight = inspectPlan(job,current).toMap();
         job = transition(job, "PREFLIGHT", null, 7, null, null, null, null, preflight);
       } else {
-        fullBackupPreflight.check(current.fullRestorePoint());
+        inspectPlan(job,current);
       }
       boolean startedOnline = !service.stopped();
       audit(
@@ -557,7 +580,7 @@ public final class MaintenanceManager implements AutoCloseable {
         requireCommandChannel();
         List<Integer> warningSeconds =
             MaintenanceCountdown.fullBackupWarnings(
-                fullBackupCountdownSeconds == null
+                fullBackupCountdownSeconds == null || fullBackupCountdownSeconds == 0
                     ? MaintenanceCountdown.DEFAULT_FULL_BACKUP_COUNTDOWN_SECONDS
                     : fullBackupCountdownSeconds);
         if (!skipCountdown) {
@@ -576,6 +599,7 @@ public final class MaintenanceManager implements AutoCloseable {
                         "countdownInitialSeconds",
                         MaintenanceCountdown.durationSeconds(warningSeconds)));
             state.beginCountdown(job, warningSeconds, timeSource.instant());
+          publishStatus();
           }
           countdown(job, MinecraftCommandChannel.MaintenanceOperation.FULL_BACKUP, warningSeconds);
         }
@@ -585,6 +609,7 @@ public final class MaintenanceManager implements AutoCloseable {
             MaintenanceSafetyGate.afterSuccessfulFlush(
                 commandChannel,
                 () -> {
+                  inspectPlan(beforeStop,current);
                   MaintenanceStateStore.Job stopping =
                       transition(
                           beforeStop,
@@ -618,6 +643,8 @@ public final class MaintenanceManager implements AutoCloseable {
                 false,
                 Map.of("serverAlreadyStopped", true));
       }
+      if (!startedOnline) inspectPlan(job,current);
+      boolean uploadOffsite="DRIVE_AND_LOCAL".equals(state.details(job).get("effectiveDestination"));
       job = transition(job, "ARCHIVING", null, 50, null, null, null, null, Map.of());
       FullRestorePointManager.Metadata backup =
           fullBackups.createLocked(
@@ -626,9 +653,8 @@ public final class MaintenanceManager implements AutoCloseable {
               automatic,
               false,
               current.fullRestorePoint(),
-              true);
-      boolean providerConfigured =
-          Boolean.TRUE.equals(fullBackups.providerStatus().get("configured"));
+              uploadOffsite,true);
+      boolean providerConfigured = uploadOffsite;
       boolean localVerified =
           backup.sha256() != null
               && !backup.sha256().isBlank()
@@ -709,6 +735,7 @@ public final class MaintenanceManager implements AutoCloseable {
       }
       String finalResult = degraded ? "DEGRADED" : "SUCCESS";
       state.finish(job, finalResult, errorCode);
+      publishStatus();
       publish(
           "maintenance.completed",
           Map.of(
@@ -758,6 +785,24 @@ public final class MaintenanceManager implements AutoCloseable {
         if (locked) operationLock.unlock();
       }
     }
+  }
+
+  private FullBackupPreflight.PreflightReport inspectPlan(MaintenanceStateStore.Job job, MaintenanceSettings current) throws IOException {
+    var details=state.details(job);
+    var requested=DestinationMode.parse(details.get("destinationMode"));
+    boolean wasLocal="LOCAL_ONLY".equals(details.get("effectiveDestination"));
+    var report=fullBackupPreflight.inspect(current,!wasLocal && requested!=DestinationMode.LOCAL_ONLY);
+    var plan=requested.plan(report.provider().state(),current.fullRestorePoint().allowLocalFallback());
+    if(wasLocal) plan=new DestinationMode.Plan(requested,false,false,String.valueOf(details.getOrDefault("fallbackReason","")));
+    FullBackupPreflight.assertReady(report,plan.requireRemote());
+    state.annotate(job,Map.of("effectiveDestination",plan.effective(),"fallbackReason",plan.fallbackReason()==null?"":plan.fallbackReason(),
+        "skippedStages",plan.uploadOffsite()?List.of():BackupStage.offsiteStageOrdinals()));
+    return report;
+  }
+
+  private void publishStatus() {
+    try { publish("maintenance.status",status()); }
+    catch(Exception error) { publish("maintenance.status",Map.of("recoveryRequired",true,"countdownState","UNAVAILABLE")); }
   }
 
   private MaintenanceStateStore.Job transition(
@@ -904,7 +949,8 @@ public final class MaintenanceManager implements AutoCloseable {
     String code = classify(error);
     String outcome = stoppedByUs || job.restartRecoveryRequired() ? "RECOVERY_REQUIRED" : "FAILED";
     try {
-      MaintenanceStateStore.Job latest = job;
+      MaintenanceStateStore.Job stored = state.active();
+      MaintenanceStateStore.Job latest = stored!=null && stored.jobId().equals(job.jobId()) ? stored : job;
       if (stoppedByUs && !latest.restartRecoveryRequired())
         latest =
             state.transition(
@@ -919,6 +965,7 @@ public final class MaintenanceManager implements AutoCloseable {
               : "Maintenance failed before the destructive stop boundary.");
     } catch (Exception ignored) {
     }
+    publishStatus();
     publish(
         outcome.equals("RECOVERY_REQUIRED")
             ? "maintenance.recovery.required"
@@ -962,8 +1009,10 @@ public final class MaintenanceManager implements AutoCloseable {
     body.put("restartRecoveryRequired", job.restartRecoveryRequired());
     if (job.backupId() != null && !job.backupId().isBlank()) body.put("backupId", job.backupId());
     body.put("capturedAt", timeSource.instant().toString());
+    try { body.putAll(state.snapshot(job)); } catch(IOException ignored) { }
     body.putAll(extra);
     publish("maintenance.phase", body);
+    publishStatus();
   }
 
   private void publish(String type, Map<String, Object> body) {

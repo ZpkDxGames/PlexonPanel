@@ -288,6 +288,7 @@ public final class MaintenanceStateStore {
             job.localBackupVerified(),
             job.remoteBackupVerified(),
             "RECOVERY_REQUIRED".equals(normalizedPhase) || job.restartRecoveryRequired());
+    if ("RECOVERY_REQUIRED".equals(finalPhase)) annotate(job, Map.of("failedStage", job.phase()));
     write(finished);
     Files.deleteIfExists(countdownFile);
     if (terminal(finished)) appendHistory(finished);
@@ -374,6 +375,12 @@ public final class MaintenanceStateStore {
   }
 
   public synchronized void markRecovered(Job job, String result) throws IOException {
+    markRecovered(job, result, "local-host");
+  }
+
+  public synchronized void markRecovered(Job job, String result, String actor) throws IOException {
+    annotate(job, Map.of("originalErrorCode",safe(job.errorCode()),"resolvedBy",actor,
+        "resolvedAt",Instant.now().toString(),"resolution","RECOVERY_RESOLVED_BY_OPERATOR"));
     Job cleared =
         transition(
             job,
@@ -407,14 +414,50 @@ public final class MaintenanceStateStore {
       throw new IOException("COUNTDOWN_STATE_INVALID");
   }
 
+  private static final Set<String> DETAIL_KEYS = Set.of("destinationMode", "effectiveDestination", "fallbackReason", "skippedStages", "originalErrorCode", "resolvedBy", "resolvedAt", "resolution", "failedStage");
+
+  synchronized Map<String,Object> details(Job job) throws IOException {
+    var out=new LinkedHashMap<String,Object>();
+    if (job==null || !Files.exists(activeFile)) return out;
+    JsonObject raw=JsonParser.parseString(Files.readString(activeFile)).getAsJsonObject();
+    if (!job.jobId().equals(raw.get("jobId").getAsString())) return out;
+    for(String key:DETAIL_KEYS) if(raw.has(key)) out.put(key,GSON.fromJson(raw.get(key),Object.class));
+    return out;
+  }
+  synchronized void annotate(Job job, Map<String,?> fields) throws IOException {
+    requireCurrent(job);
+    JsonObject raw=JsonParser.parseString(Files.readString(activeFile)).getAsJsonObject();
+    for (var entry:fields.entrySet()) {
+      if(!DETAIL_KEYS.contains(entry.getKey())) throw new IllegalArgumentException("Invalid job annotation");
+      raw.add(entry.getKey(),GSON.toJsonTree(entry.getValue()));
+    }
+    AtomicFiles.writeUtf8(activeFile,GSON.toJson(raw));
+  }
+  synchronized Map<String,Object> snapshot(Job job) throws IOException {
+    if(job==null) return Map.of();
+    Map<String,Object> result=new LinkedHashMap<>();
+    JsonObject value=GSON.toJsonTree(job).getAsJsonObject();
+    for(var entry:value.entrySet()) result.put(entry.getKey(),GSON.fromJson(entry.getValue(),Object.class));
+    result.putAll(details(job));
+    String phase=String.valueOf(result.getOrDefault("failedStage",job.phase()));
+    if ("RECOVERY_REQUIRED".equals(phase) && job.progressPercent()>=35 && job.progressPercent()<40) phase="STOPPING_SERVER";
+    BackupStage stage=BackupStage.forPhase(phase);
+    result.put("stage",stage.name()); result.put("stageIndex",stage.ordinal()+1);
+    result.put("stages",BackupStage.definitions());
+    result.putIfAbsent("skippedStages",List.of());
+    return result;
+  }
   private void write(Job job) throws IOException {
-    AtomicFiles.writeUtf8(activeFile, GSON.toJson(job));
+    var extra=details(job);
+    JsonObject value=GSON.toJsonTree(job).getAsJsonObject();
+    for(var entry:extra.entrySet()) value.add(entry.getKey(),GSON.toJsonTree(entry.getValue()));
+    AtomicFiles.writeUtf8(activeFile, GSON.toJson(value));
   }
 
   private void appendHistory(Job job) throws IOException {
     Files.writeString(
         historyFile,
-        GSON.toJson(job) + System.lineSeparator(),
+        GSON.toJson(snapshot(job)) + System.lineSeparator(),
         StandardOpenOption.CREATE,
         StandardOpenOption.APPEND,
         StandardOpenOption.WRITE);

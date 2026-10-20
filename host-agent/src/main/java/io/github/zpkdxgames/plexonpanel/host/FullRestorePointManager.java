@@ -53,6 +53,7 @@ public final class FullRestorePointManager {
   private final BooleanSupplier paperConnected;
   private final ReentrantLock operationLock;
   private final RcloneBackupProvider provider;
+  private final ReentrantLock transferLock = new ReentrantLock();
   private final NodeBackupCoordinator nodeBackups;
   private final Consumer<Map<String, Object>> progress;
   private final Map<String, RestoreGrant> restoreGrants = new HashMap<>();
@@ -73,6 +74,12 @@ public final class FullRestorePointManager {
       HostConfig config, SystemdService service, BooleanSupplier paperConnected,
       ReentrantLock operationLock, Consumer<Map<String, Object>> progress,
       NodeBackupCoordinator nodeBackups) throws IOException {
+    this(config,service,paperConnected,operationLock,progress,nodeBackups,null);
+  }
+
+  FullRestorePointManager(HostConfig config, SystemdService service, BooleanSupplier paperConnected,
+      ReentrantLock operationLock, Consumer<Map<String,Object>> progress, NodeBackupCoordinator nodeBackups,
+      RcloneBackupProvider injectedProvider) throws IOException {
     this.config = Objects.requireNonNull(config);
     this.nodeBackups = nodeBackups;
     this.root = Path.of(config.serverRoot()).toRealPath();
@@ -84,7 +91,7 @@ public final class FullRestorePointManager {
     this.service = Objects.requireNonNull(service);
     this.paperConnected = Objects.requireNonNull(paperConnected);
     this.operationLock = Objects.requireNonNull(operationLock);
-    this.provider = new RcloneBackupProvider(config.backups());
+    this.provider = injectedProvider==null?new RcloneBackupProvider(config.backups()):injectedProvider;
     this.progress = Objects.requireNonNull(progress);
     if (base.startsWith(root) || Files.isSymbolicLink(base))
       throw new IOException("Backups must remain outside the Minecraft server root");
@@ -153,9 +160,11 @@ public final class FullRestorePointManager {
       boolean uploadOffsite)
       throws Exception {
     if (!operationLock.tryLock()) throw new SecurityException("BUSY");
+    if (!transferLock.tryLock()) { operationLock.unlock(); throw new SecurityException("BUSY"); }
     try (var nodeLease = acquireNodeBackupLease(() -> emit(jobId, "", "WAITING_FOR_NODE", 0, 0, 0))) {
       return createLocked(jobId, initiatedBy, automatic, emergency, settings, uploadOffsite);
     } finally {
+      transferLock.unlock();
       operationLock.unlock();
     }
   }
@@ -168,6 +177,18 @@ public final class FullRestorePointManager {
       MaintenanceSettings.FullRestorePoint settings,
       boolean uploadOffsite)
       throws Exception {
+    return createLocked(jobId,initiatedBy,automatic,emergency,settings,uploadOffsite,false);
+  }
+
+  Metadata createLocked(String jobId,String initiatedBy,boolean automatic,boolean emergency,
+      MaintenanceSettings.FullRestorePoint settings,boolean uploadOffsite,boolean keepLocal) throws Exception {
+    if (!transferLock.tryLock()) throw new SecurityException("BUSY");
+    try { return createWithTransferLock(jobId,initiatedBy,automatic,emergency,settings,uploadOffsite,keepLocal); }
+    finally { transferLock.unlock(); }
+  }
+
+  private Metadata createWithTransferLock(String jobId,String initiatedBy,boolean automatic,boolean emergency,
+      MaintenanceSettings.FullRestorePoint settings,boolean uploadOffsite,boolean keepLocal) throws Exception {
     if (nodeBackups != null && !nodeBackups.heldByCurrentThread())
       throw new IllegalStateException("NODE_BACKUP_LEASE_REQUIRED");
     UUID.fromString(jobId);
@@ -313,7 +334,7 @@ public final class FullRestorePointManager {
                   jobId,
                   backupId,
                   archiveBytes,
-                  entries[0]);
+                  entries[0],keepLocal);
         } catch (Exception remoteFailure) {
           result = withRemote(local, false, "", "LOCAL_ONLY", classify(remoteFailure));
           AtomicFiles.writeUtf8(metadataFile, GSON.toJson(result));
@@ -337,7 +358,11 @@ public final class FullRestorePointManager {
 
   public Metadata retryUpload(String backupId, String jobId, MaintenanceSettings.FullRestorePoint settings)
       throws Exception {
-    if (!operationLock.tryLock()) throw new SecurityException("BUSY");
+    return retryUpload(backupId,jobId,settings,false);
+  }
+
+  Metadata retryUpload(String backupId,String jobId,MaintenanceSettings.FullRestorePoint settings,boolean keepLocal) throws Exception {
+    if (!transferLock.tryLock()) throw new SecurityException("BUSY");
     try (var nodeLease = acquireNodeBackupLease(() -> emit(jobId, backupId, "WAITING_FOR_NODE", 0, 0, 0))) {
       Metadata local = verify(backupId);
       if (!provider.configured()) throw new IllegalStateException("RCLONE_UNAVAILABLE");
@@ -383,7 +408,7 @@ public final class FullRestorePointManager {
             jobId,
             backupId,
             archiveBytes,
-            local.entryCount());
+            local.entryCount(),keepLocal);
       } finally {
         try {
           Files.deleteIfExists(transferMetadata);
@@ -391,7 +416,7 @@ public final class FullRestorePointManager {
         }
       }
     } finally {
-      operationLock.unlock();
+      transferLock.unlock();
     }
   }
 
@@ -440,6 +465,7 @@ public final class FullRestorePointManager {
         || !config.serverName().equals(serverName))
       throw new SecurityException("RESTORE_CONFIRMATION_REQUIRED");
     if (!operationLock.tryLock()) throw new SecurityException("BUSY");
+    if (!transferLock.tryLock()) { operationLock.unlock(); throw new SecurityException("BUSY"); }
     String restoreId = UUID.randomUUID().toString();
     Path extract = staging.resolve("restore-" + restoreId),
         rollback = staging.resolve("rollback-" + restoreId),
@@ -529,7 +555,7 @@ public final class FullRestorePointManager {
         }
       } finally {
         try { if (nodeLease != null) nodeLease.close(); }
-        finally { operationLock.unlock(); }
+        finally { transferLock.unlock(); operationLock.unlock(); }
       }
     }
   }
@@ -549,18 +575,30 @@ public final class FullRestorePointManager {
     Files.delete(journal);
   }
 
+  synchronized void acknowledgeRestoreRecovery(String actor) throws IOException {
+    Path journal=metadataDirectory.resolve("restore-journal.json");
+    if(!Files.exists(journal)) return;
+    if(!Files.isRegularFile(journal,LinkOption.NOFOLLOW_LINKS) || Files.isSymbolicLink(journal)) throw new IOException("RESTORE_JOURNAL_INVALID");
+    Path reviewed=metadataDirectory.resolve("restore-reviewed-"+UUID.randomUUID()+".json");
+    AtomicFiles.writeUtf8(reviewed.resolveSibling(reviewed.getFileName()+".resolution.json"),GSON.toJson(Map.of(
+        "resolvedBy",actor,"resolvedAt",Instant.now().toString(),"resolution","WORLD_REVIEW_ACKNOWLEDGED")));
+    Files.move(journal,reviewed,StandardCopyOption.ATOMIC_MOVE);
+  }
+
   public boolean recoveryRequired() {
     return Files.exists(metadataDirectory.resolve("restore-journal.json"));
   }
 
   public void delete(String backupId) throws Exception {
     if (!operationLock.tryLock()) throw new SecurityException("BUSY");
+    if (!transferLock.tryLock()) { operationLock.unlock(); throw new SecurityException("BUSY"); }
     try {
       Metadata value = metadata(backupId);
       if (value.emergency) throw new IOException("Emergency restore points require local review before deletion");
       Files.deleteIfExists(restorePoints.resolve(backupId + ".zip"));
       Files.deleteIfExists(metadataDirectory.resolve(backupId + ".json"));
     } finally {
+      transferLock.unlock();
       operationLock.unlock();
     }
   }
@@ -734,6 +772,11 @@ public final class FullRestorePointManager {
         value.restartPerformed, result, errorCode);
   }
 
+  private Metadata completeRemotePromotion(Metadata local,RcloneBackupProvider.Promotion promoted,
+      Path localArchive,Path metadataFile,String jobId,String backupId,long archiveBytes,int entries) throws IOException {
+    return completeRemotePromotion(local,promoted,localArchive,metadataFile,jobId,backupId,archiveBytes,entries,false);
+  }
+
   private Metadata completeRemotePromotion(
       Metadata local,
       RcloneBackupProvider.Promotion promoted,
@@ -742,7 +785,7 @@ public final class FullRestorePointManager {
       String jobId,
       String backupId,
       long archiveBytes,
-      int entries)
+      int entries, boolean keepLocal)
       throws IOException {
     if (!promoted.uploaded() || !promoted.verified())
       throw new IOException("REMOTE_VERIFY_FAILED");
@@ -750,6 +793,10 @@ public final class FullRestorePointManager {
         withRemote(local, promoted.verified(), promoted.remotePath(), "VERIFIED_REMOTE", "");
     AtomicFiles.writeUtf8(metadataFile, GSON.toJson(remoteVerified));
     emitRemoteProgress(jobId, backupId, archiveBytes, archiveBytes, entries, "VERIFIED_REMOTE");
+    if (keepLocal) {
+      emitRemoteProgress(jobId,backupId,archiveBytes,archiveBytes,entries,"LOCAL_RETAINED");
+      return remoteVerified;
+    }
     emitRemoteProgress(jobId, backupId, archiveBytes, archiveBytes, entries, "CLEANING_LOCAL");
     try {
       Files.deleteIfExists(localArchive);
