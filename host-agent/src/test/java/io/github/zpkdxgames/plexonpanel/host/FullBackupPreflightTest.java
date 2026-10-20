@@ -15,14 +15,14 @@ class FullBackupPreflightTest {
   @TempDir Path temporary;
 
   @Test
-  void requiredSpaceIncludesSourceSizedHeadroomForSmallBackups() {
-    assertEquals(2_000_000L, FullBackupPreflight.requiredSpace(1_000_000L));
+  void requiredSpaceIncludesTwoCopiesAndSafetyMargin() {
+    assertEquals(2_000_000L + 256L * 1024 * 1024, FullBackupPreflight.requiredSpace(1_000_000L));
   }
 
   @Test
-  void requiredSpaceCapsHeadroomAtTwoGiB() {
+  void requiredSpaceKeepsTwoCopiesForLargeArchives() {
     long source = 10L * 1024 * 1024 * 1024;
-    assertEquals(source + 2L * 1024 * 1024 * 1024, FullBackupPreflight.requiredSpace(source));
+    assertEquals(source * 2 + 256L * 1024 * 1024, FullBackupPreflight.requiredSpace(source));
   }
 
   @Test
@@ -72,16 +72,9 @@ class FullBackupPreflightTest {
     if (!FileSystems.getDefault().supportedFileAttributeViews().contains("posix")) return;
     Files.setPosixFilePermissions(unreadable, PosixFilePermissions.fromString("-w-------"));
 
-    IOException failure =
-        assertThrows(
-            IOException.class,
-            () ->
-                FullBackupPreflight.scan(
-                    root,
-                    List.of("world"),
-                    MaintenanceSettings.migratedDefaults().fullRestorePoint()));
-
-    assertEquals("BACKUP_SOURCE_UNREADABLE", failure.getMessage());
+    assumeFalse(Files.isReadable(unreadable), "Privileged process bypasses POSIX read denial");
+    IOException failure = assertThrows(IOException.class, () -> FullBackupPreflight.scan(root,List.of("world"),MaintenanceSettings.migratedDefaults().fullRestorePoint()));
+    assertEquals("BACKUP_SOURCE_UNREADABLE",failure.getMessage());
   }
 
   @Test
@@ -135,5 +128,42 @@ class FullBackupPreflightTest {
     assertEquals("RCLONE_CONFIG_UNREADABLE", failure.code());
     assertEquals("provider", failure.safeData().get("stage"));
     assertFalse(failure.getMessage().contains("private"));
+  }
+
+  @Test void evaluatesAllGatesWithoutRclone() {
+    var p=new FakeProbes(temporary); var pf=new FullBackupPreflight(s->p);
+    var r=pf.inspect(null,false);
+    assertEquals(FullBackupPreflight.Readiness.READY,r.source().state());
+    assertEquals(FullBackupPreflight.Readiness.READY,r.storage().state());
+    assertEquals(FullBackupPreflight.ProviderState.NOT_CONFIGURED,r.provider().state());
+    assertEquals("RCLONE_UNAVAILABLE",r.provider().errorCode());
+    assertTrue(r.localBackupReady()); assertFalse(r.offsiteBackupReady());
+    assertDoesNotThrow(()->pf.check(null,false));
+    assertEquals("RCLONE_UNAVAILABLE",assertThrows(OperationFailure.class,()->pf.check(null,true)).code());
+  }
+  @Test void recoveryIsNeverMaskedAndUnknownStateFailsClosed() {
+    var p=new FakeProbes(temporary); p.recovery=true; var pf=new FullBackupPreflight(s->p);
+    assertEquals("RECOVERY_REQUIRED",assertThrows(OperationFailure.class,()->pf.check(null,true)).code());
+    p.recoveryThrows=true; assertTrue(pf.inspect(null,false).recovery().recoveryRequired());
+  }
+  @Test void independentDiskAndSourceReports() {
+    var p=new FakeProbes(temporary); p.usable=1024; var pf=new FullBackupPreflight(s->p);
+    assertEquals("INSUFFICIENT_DISK_SPACE",pf.inspect(null,false).storage().errorCode());
+    assertFalse(pf.inspect(null,false).localBackupReady());
+    p.sourceMissing=true; var r=pf.inspect(null,false);
+    assertEquals("SOURCE_ROOT_MISSING",r.source().errorCode());
+    assertEquals(FullBackupPreflight.Readiness.READY,r.storage().state());
+  }
+  @Test void providerCacheFreshBypassAndUnreadableConfig() {
+    var p=new FakeProbes(temporary); p.providerConfigured=true; var pf=new FullBackupPreflight(s->p);
+    pf.inspect(null,false); pf.inspect(null,false); assertEquals(1,p.tests.get());
+    pf.inspect(null,true); assertEquals(2,p.tests.get());
+    p.configUnreadable=true; assertEquals("RCLONE_CONFIG_UNREADABLE",pf.inspect(null,true).provider().errorCode());
+  }
+  @Test void reportExposesAllPublicKeys() {
+    var p=new FakeProbes(temporary); p.providerConfigured=true;
+    var m=new FullBackupPreflight(s->p).inspect(null,false).toMap();
+    for(var key:List.of("recoveryRequired","sourceState","sourceBytes","entryCount","includes","storageState","backupRootWritable","usableBytes","requiredBytes","providerState","provider","remote","localBackupReady","offsiteBackupReady","providerStatus","ok")) assertTrue(m.containsKey(key),key);
+    assertEquals(true,m.get("offsiteBackupReady"));
   }
 }

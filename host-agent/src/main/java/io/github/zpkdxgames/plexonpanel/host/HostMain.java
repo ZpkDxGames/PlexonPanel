@@ -329,7 +329,7 @@ public final class HostMain {
                 case "backup.preflight" -> {
                   Map<String, Object> result =
                       new LinkedHashMap<>(
-                          fullPreflight.check(maintenance.settings().fullRestorePoint()));
+                          fullPreflight.inspect(maintenance.settings(),p.has("fresh") && p.get("fresh").getAsBoolean()).toMap());
                   Path directory =
                       Path.of(config.backups().directory()).toAbsolutePath().normalize();
                   result.put("backupMode", "MANUAL_FULL_ONLY");
@@ -355,7 +355,7 @@ public final class HostMain {
                       "hostConfigLoadedAt", Instant.ofEpochMilli(configLoadedMtime).toString());
                   result.put(
                       "hostConfigRestartRequired", configChanged(configPath, configLoadedMtime));
-                  return Map.copyOf(result);
+                  return result;
                 }
                 case "backup.create", "maintenance.full-backup.create" -> {
                   int countdownSeconds =
@@ -364,7 +364,7 @@ public final class HostMain {
                           : MaintenanceCountdown.DEFAULT_FULL_BACKUP_COUNTDOWN_SECONDS;
                   return Map.of(
                       "jobId",
-                      maintenance.fullRestorePointNow(device, countdownSeconds),
+                      maintenance.fullRestorePointNow(device, countdownSeconds, DestinationMode.parse(p.has("destinationMode") ? p.get("destinationMode").getAsString() : null)),
                       "state",
                       "QUEUED",
                       "countdownSeconds",
@@ -383,10 +383,7 @@ public final class HostMain {
                 }
                 case "backup.full.retry-upload" -> {
                   var result =
-                      fullBackups.retryUpload(
-                          text(p, "backupId", 36),
-                          UUID.randomUUID().toString(),
-                          maintenance.settings().fullRestorePoint());
+                      maintenance.promoteToDrive(device, text(p,"backupId",36));
                   return Map.of("backup", result);
                 }
                 case "backup.restore.prepare", "backup.full.restore.prepare" -> {
@@ -447,7 +444,7 @@ public final class HostMain {
                   return Map.of("jobId", maintenance.restartNow(device, skip), "state", "QUEUED");
                 }
                 case "maintenance.recovery.resolve" -> {
-                  return maintenance.resolveRecovery(device);
+                  return maintenance.resolveRecovery(device,p.has("acknowledgeRestore") && p.get("acknowledgeRestore").getAsBoolean());
                 }
                 case "provider.status" -> {
                   var result = new LinkedHashMap<>(fullBackups.providerStatus());

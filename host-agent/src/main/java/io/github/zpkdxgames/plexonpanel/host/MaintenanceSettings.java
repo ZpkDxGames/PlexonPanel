@@ -52,7 +52,8 @@ public record MaintenanceSettings(
       String verificationMode,
       long maximumBytes,
       List<String> excludes,
-      Schedule schedule) {
+      Schedule schedule,
+      boolean allowLocalFallback) {
     public FullRestorePoint(
         String retentionMode,
         int retentionCount,
@@ -71,7 +72,15 @@ public record MaintenanceSettings(
           verificationMode,
           maximumBytes,
           excludes,
-          null);
+          null,
+          false);
+    }
+
+    public FullRestorePoint(String retentionMode, int retentionCount, boolean restartAfter,
+        String canonicalFilename, int uploadTimeoutSeconds, String verificationMode, long maximumBytes,
+        List<String> excludes, Schedule schedule) {
+      this(retentionMode,retentionCount,restartAfter,canonicalFilename,uploadTimeoutSeconds,
+          verificationMode,maximumBytes,excludes,schedule,false);
     }
 
     public FullRestorePoint {
