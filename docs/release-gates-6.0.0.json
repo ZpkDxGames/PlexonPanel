@@ -6,8 +6,8 @@
     "paper": 5,
     "host": 5
   },
-  "dashboardCommit": "1624119193c4943d1181ef65e0324e22a960821e",
-  "dashboardCiRun": 39365402229,
+  "dashboardCommit": "8f6c907235766e9033b4f8a443b7384d160f9392",
+  "dashboardCiRun": 39368159031,
   "certification": {
     "source": "SOURCE_IMPLEMENTED",
     "ci": "REQUIRES_PASSING_RUN_FOR_THIS_COMMIT",
@@ -38,7 +38,7 @@
     "ci": null,
     "security": null,
     "runtime": null,
-    "dashboardCi": "https://github.com/ZpkDxGames/PlexonPanel-Dashboard/actions/runs/39365402229",
+    "dashboardCi": "https://github.com/ZpkDxGames/PlexonPanel-Dashboard/actions/runs/39368159031",
     "migration": null,
     "backup": null,
     "offVpsBackup": null,
