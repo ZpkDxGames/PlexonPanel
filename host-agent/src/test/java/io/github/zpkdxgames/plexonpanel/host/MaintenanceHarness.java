@@ -47,7 +47,7 @@ final class MaintenanceHarness implements AutoCloseable {
         case "copyto" -> { byte[] source=remote.get(path); if(source==null) source=Files.readAllBytes(Path.of(path)); remote.put(args.get(3),source); yield new RcloneBackupProvider.ProcessResult(0,""); }
         case "lsl" -> new RcloneBackupProvider.ProcessResult(bytes==null?4:0,bytes==null?"not found":bytes.length+" object");
         case "lsf" -> new RcloneBackupProvider.ProcessResult(bytes==null?4:0,bytes==null?"":"object");
-        case "hashsum" -> { byte[] hashed=remote.get(args.get(3)); yield new RcloneBackupProvider.ProcessResult(hashed==null?4:0,hashed==null?"":HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256").digest(hashed))+"  object"); }
+        case "hashsum" -> { byte[] hashed=remote.get(args.get(3)); yield new RcloneBackupProvider.ProcessResult(hashed==null?4:0,hashed==null?"":HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256").digest(hashed))+"  "+args.get(3).substring(args.get(3).lastIndexOf('/')+1)); }
         case "deletefile" -> { remote.remove(path); yield new RcloneBackupProvider.ProcessResult(0,""); }
         default -> new RcloneBackupProvider.ProcessResult(1,"unsupported");
       };
