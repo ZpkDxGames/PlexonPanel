@@ -25,7 +25,7 @@ final class MaintenanceHarness implements AutoCloseable {
     Files.createDirectories(root.resolve("world")); Files.writeString(root.resolve("world/level.dat"),"synthetic world");
     data=Files.createDirectories(dir.resolve("data")); output=dir.resolve("backups");
     var config=new HostConfig(UUID.randomUUID().toString(),"Test SMP","","",root.toString(),data.toString(),data.resolve("access.json").toString(),
-        "minecraft@test.service",Map.of(),new HostConfig.BackupConfig(true,output.toString(),List.of("world"),3,0,1048576,false,"/usr/bin/rclone","drive:backups",""),HostConfig.ConsoleConfig.defaults());
+        "minecraft@test.service",Map.of(),new HostConfig.BackupConfig(true,output.toString(),List.of("world"),3,0,1048576,false,"/usr/bin/rclone","drive:backups",dir.resolve("rclone.conf").toString()),HostConfig.ConsoleConfig.defaults());
     var service=new SystemdService(config.serviceName(),(args,seconds)-> {
       String command=args.get(1);
       if(command.equals("stop")) { actions.add("stop"); active=false; return ""; }

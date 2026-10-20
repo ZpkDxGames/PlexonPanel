@@ -78,7 +78,12 @@ final class FullBackupPreflight {
         var includes=List.copyOf(config.backups().include());
         Path root=Path.of(config.serverRoot());
         if (!Files.isDirectory(root,LinkOption.NOFOLLOW_LINKS) || Files.isSymbolicLink(root)) return new SourceGate(Readiness.FAILED,0,0,includes,"SOURCE_ROOT_MISSING");
-        Scan scanned=scan(root.toRealPath(),includes,settings.fullRestorePoint());
+        Path real=root.toRealPath();
+        for(String include:includes) {
+          if(include!=null && !real.resolve(include).normalize().startsWith(real))
+            return new SourceGate(Readiness.FAILED,0,0,includes,"SOURCE_PATH_ESCAPES_ROOT");
+        }
+        Scan scanned=scan(real,includes,settings.fullRestorePoint());
         return new SourceGate(scanned.entries()>0?Readiness.READY:Readiness.FAILED,scanned.bytes(),scanned.entries(),includes,scanned.entries()>0?null:"SOURCE_EMPTY");
       }
       public Path backupRoot() { return Path.of(config.backups().directory()).toAbsolutePath().normalize(); }

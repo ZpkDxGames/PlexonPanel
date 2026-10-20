@@ -335,21 +335,13 @@ public final class HostMain {
                   result.put("backupMode", "MANUAL_FULL_ONLY");
                   result.put("hostAuthenticated", connection.authenticated());
                   result.put("operationBusy", operationLock.isLocked());
-                  boolean restoreRecoveryRequired = fullBackups.recoveryRequired();
-                  boolean jobRecoveryRequired = maintenance.recoveryRequired();
-                  result.put("restoreRecoveryRequired", restoreRecoveryRequired);
-                  result.put("jobRecoveryRequired", jobRecoveryRequired);
-                  result.put(
-                      "recoveryRequired",
-                      backupRecoveryRequired(restoreRecoveryRequired, jobRecoveryRequired));
-                  result.put(
-                      "backupRootWritable",
-                      Files.isDirectory(directory) && Files.isWritable(directory));
                   result.put("commandChannelConfigured", commands.enabled());
-                  Map<String, Object> serviceStatus = service.status();
-                  result.put(
-                      "minecraftReady",
-                      minecraftReadiness.refresh("active".equals(serviceStatus.get("state"))));
+                  try {
+                    Map<String,Object> serviceStatus=service.status();
+                    result.put("minecraftReady",minecraftReadiness.refresh("active".equals(serviceStatus.get("state"))));
+                  } catch(Exception unavailable) {
+                    result.put("minecraftReady",false);
+                  }
                   result.put("hostStartedAt", hostStartedAt.toString());
                   result.put(
                       "hostConfigLoadedAt", Instant.ofEpochMilli(configLoadedMtime).toString());
