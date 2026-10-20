@@ -288,7 +288,9 @@ public final class MaintenanceStateStore {
             job.localBackupVerified(),
             job.remoteBackupVerified(),
             "RECOVERY_REQUIRED".equals(normalizedPhase) || job.restartRecoveryRequired());
-    if ("RECOVERY_REQUIRED".equals(finalPhase)) annotate(job, Map.of("failedStage", job.phase()));
+    if (("RECOVERY_REQUIRED".equals(finalPhase) || "FAILED".equals(finalPhase))
+        && !details(job).containsKey("failedStage"))
+      annotate(job, Map.of("failedStage", job.phase()));
     write(finished);
     Files.deleteIfExists(countdownFile);
     if (terminal(finished)) appendHistory(finished);
