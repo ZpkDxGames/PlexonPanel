@@ -25,7 +25,7 @@ class MaintenanceFullBackupFailurePolicyTest {
   @Test void localOnlyCreatesVerifiedLocalArchiveWithoutProviderOrMaintenanceLeak() throws Exception {
     try(var h=new MaintenanceHarness(temporary)) {
       String id=h.manager.startFullBackup(null,0,DestinationMode.LOCAL_ONLY,false);
-      var job=h.await(id); var point=h.backups.list().getFirst();
+      var job=h.await(id); assertEquals("COMPLETED",job.phase(),job.toString()); var point=h.backups.list().getFirst();
       assertEquals("COMPLETED",job.phase()); assertEquals("VERIFIED_LOCAL",point.verification());
       assertTrue(point.local()); assertFalse(point.offsite()); assertNotNull(point.sha256());
       assertTrue(java.nio.file.Files.exists(h.backups.archive(point.backupId())));

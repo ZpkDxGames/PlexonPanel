@@ -177,13 +177,18 @@ public final class FullRestorePointManager {
       MaintenanceSettings.FullRestorePoint settings,
       boolean uploadOffsite)
       throws Exception {
+    return createLocked(jobId,initiatedBy,automatic,emergency,settings,uploadOffsite,false);
+  }
+
+  Metadata createLocked(String jobId,String initiatedBy,boolean automatic,boolean emergency,
+      MaintenanceSettings.FullRestorePoint settings,boolean uploadOffsite,boolean keepLocal) throws Exception {
     if (!transferLock.tryLock()) throw new SecurityException("BUSY");
-    try { return createWithTransferLock(jobId,initiatedBy,automatic,emergency,settings,uploadOffsite); }
+    try { return createWithTransferLock(jobId,initiatedBy,automatic,emergency,settings,uploadOffsite,keepLocal); }
     finally { transferLock.unlock(); }
   }
 
   private Metadata createWithTransferLock(String jobId,String initiatedBy,boolean automatic,boolean emergency,
-      MaintenanceSettings.FullRestorePoint settings,boolean uploadOffsite) throws Exception {
+      MaintenanceSettings.FullRestorePoint settings,boolean uploadOffsite,boolean keepLocal) throws Exception {
     if (nodeBackups != null && !nodeBackups.heldByCurrentThread())
       throw new IllegalStateException("NODE_BACKUP_LEASE_REQUIRED");
     UUID.fromString(jobId);
@@ -329,7 +334,7 @@ public final class FullRestorePointManager {
                   jobId,
                   backupId,
                   archiveBytes,
-                  entries[0]);
+                  entries[0],keepLocal);
         } catch (Exception remoteFailure) {
           result = withRemote(local, false, "", "LOCAL_ONLY", classify(remoteFailure));
           AtomicFiles.writeUtf8(metadataFile, GSON.toJson(result));
@@ -353,6 +358,10 @@ public final class FullRestorePointManager {
 
   public Metadata retryUpload(String backupId, String jobId, MaintenanceSettings.FullRestorePoint settings)
       throws Exception {
+    return retryUpload(backupId,jobId,settings,false);
+  }
+
+  Metadata retryUpload(String backupId,String jobId,MaintenanceSettings.FullRestorePoint settings,boolean keepLocal) throws Exception {
     if (!transferLock.tryLock()) throw new SecurityException("BUSY");
     try (var nodeLease = acquireNodeBackupLease(() -> emit(jobId, backupId, "WAITING_FOR_NODE", 0, 0, 0))) {
       Metadata local = verify(backupId);
@@ -399,7 +408,7 @@ public final class FullRestorePointManager {
             jobId,
             backupId,
             archiveBytes,
-            local.entryCount());
+            local.entryCount(),keepLocal);
       } finally {
         try {
           Files.deleteIfExists(transferMetadata);
@@ -763,6 +772,11 @@ public final class FullRestorePointManager {
         value.restartPerformed, result, errorCode);
   }
 
+  private Metadata completeRemotePromotion(Metadata local,RcloneBackupProvider.Promotion promoted,
+      Path localArchive,Path metadataFile,String jobId,String backupId,long archiveBytes,int entries) throws IOException {
+    return completeRemotePromotion(local,promoted,localArchive,metadataFile,jobId,backupId,archiveBytes,entries,false);
+  }
+
   private Metadata completeRemotePromotion(
       Metadata local,
       RcloneBackupProvider.Promotion promoted,
@@ -771,7 +785,7 @@ public final class FullRestorePointManager {
       String jobId,
       String backupId,
       long archiveBytes,
-      int entries)
+      int entries, boolean keepLocal)
       throws IOException {
     if (!promoted.uploaded() || !promoted.verified())
       throw new IOException("REMOTE_VERIFY_FAILED");
@@ -779,9 +793,32 @@ public final class FullRestorePointManager {
         withRemote(local, promoted.verified(), promoted.remotePath(), "VERIFIED_REMOTE", "");
     AtomicFiles.writeUtf8(metadataFile, GSON.toJson(remoteVerified));
     emitRemoteProgress(jobId, backupId, archiveBytes, archiveBytes, entries, "VERIFIED_REMOTE");
-    // v6 destinations retain the verified local copy; rotating retention governs its lifetime.
-    emitRemoteProgress(jobId, backupId, archiveBytes, archiveBytes, entries, "LOCAL_RETAINED");
-    return remoteVerified;
+    if (keepLocal) {
+      emitRemoteProgress(jobId,backupId,archiveBytes,archiveBytes,entries,"LOCAL_RETAINED");
+      return remoteVerified;
+    }
+    emitRemoteProgress(jobId, backupId, archiveBytes, archiveBytes, entries, "CLEANING_LOCAL");
+    try {
+      Files.deleteIfExists(localArchive);
+    } catch (Exception cleanupFailure) {
+      Metadata retained =
+          withResult(remoteVerified, "SUCCESS_WITH_WARNING", "LOCAL_CLEANUP_FAILED");
+      try {
+        AtomicFiles.writeUtf8(metadataFile, GSON.toJson(retained));
+      } catch (IOException ignored) {
+      }
+      emitRemoteProgress(jobId, backupId, archiveBytes, archiveBytes, entries, "LOCAL_RETAINED");
+      return retained;
+    }
+
+    Metadata released = withLocalState(remoteVerified, false, "VERIFIED_REMOTE");
+    try {
+      AtomicFiles.writeUtf8(metadataFile, GSON.toJson(released));
+    } catch (IOException ignored) {
+      // The previously persisted off-site state remains sufficient to re-fetch this archive.
+    }
+    emitRemoteProgress(jobId, backupId, archiveBytes, archiveBytes, entries, "LOCAL_RELEASED");
+    return released;
   }
 
   private void waitForStopped(int seconds) throws Exception {

@@ -295,7 +295,7 @@ public final class MaintenanceManager implements AutoCloseable {
     if (state.blocking()!=null && state.recoveryRequired()==null || worker.getActiveCount()>0 || operationLock.isLocked())
       throw FullBackupPreflight.preflightFailure("JOB_RUNNING","A maintenance operation is running.");
     FullBackupPreflight.assertProvider(fullBackupPreflight.inspect(settings,true).provider());
-    var result=fullBackups.retryUpload(backupId,UUID.randomUUID().toString(),settings.fullRestorePoint());
+    var result=fullBackups.retryUpload(backupId,UUID.randomUUID().toString(),settings.fullRestorePoint(),true);
     audit("backup.full.retry-upload","SUCCESS",actor(device,false),false,result.jobId(),backupId,Map.of("sha256",result.sha256()));
     return result;
   }
@@ -580,7 +580,7 @@ public final class MaintenanceManager implements AutoCloseable {
         requireCommandChannel();
         List<Integer> warningSeconds =
             MaintenanceCountdown.fullBackupWarnings(
-                fullBackupCountdownSeconds == null
+                fullBackupCountdownSeconds == null || fullBackupCountdownSeconds == 0
                     ? MaintenanceCountdown.DEFAULT_FULL_BACKUP_COUNTDOWN_SECONDS
                     : fullBackupCountdownSeconds);
         if (!skipCountdown) {
@@ -653,7 +653,7 @@ public final class MaintenanceManager implements AutoCloseable {
               automatic,
               false,
               current.fullRestorePoint(),
-              uploadOffsite);
+              uploadOffsite,true);
       boolean providerConfigured = uploadOffsite;
       boolean localVerified =
           backup.sha256() != null
