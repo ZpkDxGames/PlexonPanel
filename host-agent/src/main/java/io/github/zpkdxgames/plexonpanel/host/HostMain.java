@@ -329,12 +329,12 @@ public final class HostMain {
                 case "backup.preflight" -> {
                   Map<String, Object> result =
                       new LinkedHashMap<>(
-                          fullPreflight.inspect(maintenance.settings(),p.has("fresh") && p.get("fresh").getAsBoolean()).toMap());
+                          fullPreflight.inspect(maintenance.settings(),p.has("fresh") && p.get("fresh").isJsonPrimitive() && p.getAsJsonPrimitive("fresh").isBoolean() && p.get("fresh").getAsBoolean()).toMap());
                   Path directory =
                       Path.of(config.backups().directory()).toAbsolutePath().normalize();
                   result.put("backupMode", "MANUAL_FULL_ONLY");
                   result.put("hostAuthenticated", connection.authenticated());
-                  result.put("operationBusy", operationLock.isLocked());
+                  result.put("operationBusy", operationLock.isLocked() || fullBackups.transferBusy());
                   result.put("commandChannelConfigured", commands.enabled());
                   try {
                     Map<String,Object> serviceStatus=service.status();
@@ -356,7 +356,7 @@ public final class HostMain {
                           : MaintenanceCountdown.DEFAULT_FULL_BACKUP_COUNTDOWN_SECONDS;
                   return Map.of(
                       "jobId",
-                      maintenance.fullRestorePointNow(device, countdownSeconds, DestinationMode.parse(p.has("destinationMode") ? p.get("destinationMode").getAsString() : null)),
+                      maintenance.fullRestorePointNow(device, countdownSeconds, DestinationMode.parseJson(p.get("destinationMode"))),
                       "state",
                       "QUEUED",
                       "countdownSeconds",
@@ -436,7 +436,7 @@ public final class HostMain {
                   return Map.of("jobId", maintenance.restartNow(device, skip), "state", "QUEUED");
                 }
                 case "maintenance.recovery.resolve" -> {
-                  return maintenance.resolveRecovery(device,p.has("acknowledgeRestore") && p.get("acknowledgeRestore").getAsBoolean());
+                  return maintenance.resolveRecovery(device,p.has("acknowledgeRestore") && p.get("acknowledgeRestore").isJsonPrimitive() && p.getAsJsonPrimitive("acknowledgeRestore").isBoolean() && p.get("acknowledgeRestore").getAsBoolean());
                 }
                 case "provider.status" -> {
                   var result = new LinkedHashMap<>(fullBackups.providerStatus());

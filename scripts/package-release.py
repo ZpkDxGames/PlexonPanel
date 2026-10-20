@@ -39,7 +39,7 @@ if not isinstance(dashboard_ci_run, int) or dashboard_ci_run < 1:
 certification = contract.get("certification")
 if not isinstance(certification, dict):
     raise SystemExit("Release gates require explicit certification states")
-if version == "5.0.0":
+if version in {"5.0.0", "6.0.0"}:
     if contract.get("fleetContract") != "sha256:c5c8a5d21dd6b108f63fa6ecf00683c56ddb34cfb6716a2166ae22d3d438f902" or contract.get("configurationSchemas") != {"paper": 5, "host": 5}:
         raise SystemExit("Coordinated fleet/configuration contracts do not match")
 
@@ -89,7 +89,7 @@ examples = [
     root / "CHANGELOG.md",
     root / "PRIVACY.md",
 ]
-if version == "5.0.0":
+if version in {"5.0.0", "6.0.0"}:
     # Explicit static allowlist: never recursively collect runtime config, credentials or keys.
     examples = [root / path for path in [
         "agent/src/main/resources/config.yml", "agent/examples/config-full-control.yml",
@@ -104,12 +104,12 @@ if version == "5.0.0":
             "PAPER_FLEET_BOOTSTRAP.md", "NODE_INSTANCE_REGISTRY.md", "INSTANCE_CONFIGURATION_VALIDATION.md",
             "INSTANCE_SERVICE_DEPLOYMENT.md", "INSTANCE_CLONE_REKEY.md", "INSTANCE_AUTHORIZATION.md",
             "PLUGIN_UPLOAD_PERMISSIONS.md", "HOST_LIFECYCLE_RESPONSIVENESS.md",
-            "PROVIDER_RUNTIME_STATE.md", "PROTOCOL.md", "release-5.0.0.md", "release-gates-5.0.0.json",
+            "PROVIDER_RUNTIME_STATE.md", "PROTOCOL.md", f"release-{version}.md", f"release-gates-{version}.json",
         ]],
         "scripts/verify-host-portability.py", "README.md", "CHANGELOG.md", "PRIVACY.md",
     ]]
     missing = [path.relative_to(root).as_posix() for path in examples if not path.is_file() or path.is_symlink()]
-    if missing: raise SystemExit("Required five example/document missing: " + ", ".join(missing))
+    if missing: raise SystemExit("Required coordinated example/document missing: " + ", ".join(missing))
 with zipfile.ZipFile(archive, "w") as zip_file:
     for path in (candidate for candidate in examples if candidate.is_file()):
         info = zipfile.ZipInfo(path.relative_to(root).as_posix(), (1980, 1, 1, 0, 0, 0))

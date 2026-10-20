@@ -1,0 +1,48 @@
+{
+  "version": "6.0.0",
+  "protocolVersion": 3,
+  "fleetContract": "sha256:c5c8a5d21dd6b108f63fa6ecf00683c56ddb34cfb6716a2166ae22d3d438f902",
+  "configurationSchemas": {
+    "paper": 5,
+    "host": 5
+  },
+  "dashboardCommit": "1624119193c4943d1181ef65e0324e22a960821e",
+  "dashboardCiRun": 39365402229,
+  "certification": {
+    "source": "SOURCE_IMPLEMENTED",
+    "ci": "REQUIRES_PASSING_RUN_FOR_THIS_COMMIT",
+    "security": "SOURCE_TESTED_RUNTIME_NOT_EXECUTED",
+    "runtime": "NOT_EXECUTED",
+    "backup": "NOT_EXECUTED",
+    "console": "NOT_EXECUTED",
+    "history": "NOT_EXECUTED",
+    "restartRecovery": "NOT_EXECUTED",
+    "migration": "NOT_EXECUTED",
+    "deployment": "VPS_INSTALL_AND_LIVE_SMOKE_NOT_EXECUTED",
+    "offVpsBackup": "NOT_VERIFIED",
+    "rollback": "NOT_EXECUTED",
+    "browser": "LOCAL_30_INVARIANTS_64_CONFIGURATIONS_PASSED"
+  },
+  "ociBackup": "SKIPPED_OPERATOR_DECISION",
+  "rollback": {
+    "plexonPanelVersion": "5.0.0",
+    "plexonPanelCommit": "82051f00a528b411268998755e581a9d767a9dcf",
+    "dashboardVersion": "5.3",
+    "dashboardCommit": "bd6efa6bc087e4bf05a34e41e66533e291e79db3",
+    "standaloneRelayVersion": "3.5.0",
+    "standaloneRelayCommit": "5d25671bc73569e18599be1e9034291d1f87d171",
+    "materials": "Retain original installed binaries, private configuration, service units, relay/Caddy state and off-VPS operational backup; no deletion or silent identity replacement."
+  },
+  "evidence": {
+    "source": "docs/release-6.0.0.md",
+    "ci": null,
+    "security": null,
+    "runtime": null,
+    "dashboardCi": "https://github.com/ZpkDxGames/PlexonPanel-Dashboard/actions/runs/39365402229",
+    "migration": null,
+    "backup": null,
+    "offVpsBackup": null,
+    "rollback": null,
+    "browser": null
+  }
+}

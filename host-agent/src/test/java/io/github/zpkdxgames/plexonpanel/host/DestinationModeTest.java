@@ -20,6 +20,8 @@ class DestinationModeTest {
     assertEquals(DestinationMode.AUTO,DestinationMode.parse(null));
     assertEquals(DestinationMode.AUTO,DestinationMode.parse(""));
     assertEquals(DestinationMode.LOCAL_ONLY,DestinationMode.parse(" local_only "));
+    assertEquals(DestinationMode.AUTO,DestinationMode.parseJson(com.google.gson.JsonNull.INSTANCE));
+    for(String raw:java.util.List.of("{}","[]","true","42")) assertEquals("INVALID_DESTINATION_MODE",assertThrows(OperationFailure.class,()->DestinationMode.parseJson(com.google.gson.JsonParser.parseString(raw))).code());
     assertEquals("INVALID_DESTINATION_MODE",assertThrows(OperationFailure.class,()->DestinationMode.parse("nope")).code());
   }
   @Test void realStageContractAndOffsiteRange() {

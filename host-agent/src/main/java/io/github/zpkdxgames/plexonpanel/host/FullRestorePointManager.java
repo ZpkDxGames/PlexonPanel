@@ -356,6 +356,14 @@ public final class FullRestorePointManager {
     }
   }
 
+  boolean transferBusy() { return transferLock.isLocked(); }
+
+  /** Reserve only the immutable archive transfer lane, never the world-maintenance lock. */
+  AutoCloseable reserveTransfer() {
+    if (!transferLock.tryLock()) throw FullBackupPreflight.preflightFailure("JOB_RUNNING","An archive transfer is running.");
+    return transferLock::unlock;
+  }
+
   public Metadata retryUpload(String backupId, String jobId, MaintenanceSettings.FullRestorePoint settings)
       throws Exception {
     return retryUpload(backupId,jobId,settings,false);
