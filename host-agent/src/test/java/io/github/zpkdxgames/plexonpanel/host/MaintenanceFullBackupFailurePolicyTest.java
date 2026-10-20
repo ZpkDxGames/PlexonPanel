@@ -50,6 +50,8 @@ class MaintenanceFullBackupFailurePolicyTest {
       h.probes.providerConfigured=true; h.dropDuringCountdown=true;
       var j=h.await(h.manager.startFullBackup(null,300,DestinationMode.DRIVE_AND_LOCAL,false));
       assertEquals("FAILED",j.phase()); assertEquals("PROVIDER_UNREACHABLE",j.errorCode()); assertTrue(h.actions.isEmpty());
+      assertEquals(5,h.state.snapshot(j).get("stageIndex"));
+      assertEquals("FINAL_SAVE",h.state.details(j).get("failedStage"));
     }
   }
   @Test void resolveRecoveryPreservesFailureAndBroadcastsStatus() throws Exception {
@@ -57,6 +59,7 @@ class MaintenanceFullBackupFailurePolicyTest {
       h.latch(); assertEquals(true,h.manager.resolveRecovery(null,false).get("resolved"));
       assertNull(h.state.recoveryRequired()); var j=h.state.active(); assertEquals("FAILED",j.phase());
       assertEquals("STOP_TIMEOUT",j.errorCode()); assertEquals("STOP_TIMEOUT",h.state.details(j).get("originalErrorCode"));
+      assertEquals(6,h.state.snapshot(j).get("stageIndex"));
       assertTrue(h.events.contains("maintenance.recovery.resolved")); assertTrue(h.events.contains("maintenance.status"));
       assertEquals(false,h.manager.resolveRecovery(null,false).get("resolved"));
     }
