@@ -181,7 +181,9 @@ public final class MaintenanceManager implements AutoCloseable {
     result.put("job", state.snapshot(active));
     result.put("jobStateContractVersion", 4);
     result.put("uploadActive", fullBackups.transferBusy());
-    result.put("operationBusy", fullBackups.transferBusy() || (active!=null && !MaintenanceStateStore.terminal(active) && !"RECOVERY_REQUIRED".equals(active.phase())));
+    result.put("operationBusy", fullBackups.transferBusy() || operationLock.isLocked()
+        || worker.getActiveCount()>0 || !worker.getQueue().isEmpty()
+        || (active!=null && !MaintenanceStateStore.terminal(active) && !"RECOVERY_REQUIRED".equals(active.phase())));
     result.put("countdownState", "IDLE");
     result.put("countdownKind", "");
     result.put("countdownRemainingSeconds", 0L);

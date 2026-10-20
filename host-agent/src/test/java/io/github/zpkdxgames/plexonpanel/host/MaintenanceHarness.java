@@ -70,7 +70,8 @@ final class MaintenanceHarness implements AutoCloseable {
   }
   MaintenanceStateStore.Job await(String id) throws Exception {
     long until=System.nanoTime()+TimeUnit.SECONDS.toNanos(10);
-    while(System.nanoTime()<until) { var job=state.active(); if(job!=null && id.equals(job.jobId()) && MaintenanceStateStore.terminal(job)) return job; Thread.sleep(10); }
+    while(System.nanoTime()<until) { var job=state.active(); if(job!=null && id.equals(job.jobId()) && MaintenanceStateStore.terminal(job)
+        && Boolean.FALSE.equals(manager.status().get("operationBusy"))) return job; Thread.sleep(10); }
     fail("Job did not terminate: "+state.active()); return null;
   }
   void latch() throws Exception { var j=state.begin("FULL_RESTORE_POINT",null,false,"STOPPING_SERVER"); state.finish(j,"RECOVERY_REQUIRED","STOP_TIMEOUT"); }
