@@ -6,6 +6,10 @@ import java.util.Locale;
 public enum DestinationMode {
   AUTO, DRIVE_AND_LOCAL, LOCAL_ONLY;
 
+  static DestinationMode parseJson(com.google.gson.JsonElement raw) {
+    return parse(raw==null || raw.isJsonNull() ? null : raw.isJsonPrimitive() ? raw.getAsString() : raw.toString());
+  }
+
   public static DestinationMode parse(Object raw) {
     String value = raw == null ? "" : raw.toString().trim().toUpperCase(Locale.ROOT);
     if (value.isEmpty()) return AUTO;

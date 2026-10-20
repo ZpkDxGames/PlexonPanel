@@ -90,4 +90,26 @@ class MaintenanceFullBackupFailurePolicyTest {
       assertTrue(h.actions.isEmpty());
     }
   }
+
+  @Test void promotionDoesNotHoldTheMaintenanceMonitorOrQueueALateBackup() throws Exception {
+    try(var h=new MaintenanceHarness(temporary)) {
+      h.await(h.manager.startFullBackup(null,0,DestinationMode.LOCAL_ONLY,false));
+      var point=h.backups.list().getFirst(); h.probes.providerConfigured=true; h.actions.clear();
+      var entered=new java.util.concurrent.CountDownLatch(1); var release=new java.util.concurrent.CountDownLatch(1);
+      h.uploadHook=()->{ entered.countDown(); try { release.await(5,java.util.concurrent.TimeUnit.SECONDS); } catch(InterruptedException e) {Thread.currentThread().interrupt();throw new IllegalStateException(e);} };
+      try(var pool=java.util.concurrent.Executors.newVirtualThreadPerTaskExecutor()) {
+        var upload=pool.submit(()->h.manager.promoteToDrive(null,point.backupId()));
+        try {
+          assertTrue(entered.await(3,java.util.concurrent.TimeUnit.SECONDS));
+          assertEquals(true,h.manager.status().get("operationBusy"));
+          var request=pool.submit(()->assertThrows(io.github.zpkdxgames.plexonpanel.control.OperationFailure.class,
+              ()->h.manager.startFullBackup(null,0,DestinationMode.LOCAL_ONLY,false)));
+          assertEquals("BUSY",request.get(1,java.util.concurrent.TimeUnit.SECONDS).code());
+          assertTrue(h.actions.isEmpty());
+        } finally { release.countDown(); }
+        assertTrue(upload.get(5,java.util.concurrent.TimeUnit.SECONDS).offsite());
+      }
+      assertTrue(h.actions.isEmpty()); assertFalse(h.lock.isLocked());
+    }
+  }
 }

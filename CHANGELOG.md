@@ -1,3 +1,11 @@
+## 6.0.0
+
+- Report recovery, source, disk and provider readiness independently; recheck immediately before stopping Minecraft.
+- Persist explicit backup destinations and opt-in automatic local fallback; retain local copies for destination-aware operations.
+- Rehash and promote local archives using a separate transfer lane; reject concurrent backup requests promptly while keeping Minecraft running.
+- Expose additive stage/countdown status. Resolve backup recovery only after service/readiness proof; require explicit world review for interrupted restores and preserve the original journal and failure.
+- Keep Protocol 3, settings schema 2, existing scopes and legacy archive-release overloads compatible.
+
 # Changelog
 
 ## Unreleased — backup recovery preflight consistency

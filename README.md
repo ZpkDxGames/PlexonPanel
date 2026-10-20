@@ -1,8 +1,12 @@
-# PlexonPanel 5.0.0
+# PlexonPanel 6.0 — Durability release
+
+Version 6.0 adds independent full-backup preflight gates, explicit local/Drive destinations, visible countdowns and reviewed recovery resolution. Protocol 3 and the existing configuration schemas remain compatible. See [v6 release and installation notes](docs/release-6.0.0.md). Preserve existing private configuration and instance identity when replacing JARs.
+
+## Fleet and deployment contract
 
 PlexonPanel coordinates multiple Paper 26.2 servers on Java 25 with one non-root Linux Host per instance, a browser Dashboard, and a coordination-only Worker or standalone relay. Signed Protocol 3 carries the shared fleet contract; Paper/Host configuration schemas are 5. Server UUID, node UUID and immutable instance key determine routing, authorization, paths and units. Display names can change independently.
 
-Source is prepared for 5.0.0. Stable publication and production deployment remain held by recorded migration/runtime/security gates. Preserve the original 4.0 installation and the deployed VPS relay 3.5.0 until coordinated activation and verified rollback are ready.
+Source is prepared for 6.0.0. The Dashboard deploys independently; install the updated Host through existing instance units after staging acceptance. Preserve the prior working binaries, relay configuration and instance identities until verified rollback is ready.
 
 ## Matched components
 

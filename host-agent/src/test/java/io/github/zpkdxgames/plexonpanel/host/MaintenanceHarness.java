@@ -19,6 +19,7 @@ final class MaintenanceHarness implements AutoCloseable {
   final MaintenanceStateStore state;
   final FullRestorePointManager backups;
   volatile boolean active=true,ready=true,dropDuringCountdown;
+  volatile Runnable uploadHook=()->{};
   volatile Instant now=Instant.parse("2026-10-19T12:00:00Z");
   MaintenanceHarness(Path dir) throws Exception {
     Path root=Files.createDirectories(dir.resolve("server"));
@@ -44,7 +45,7 @@ final class MaintenanceHarness implements AutoCloseable {
       String op=args.get(1), path=args.get(2); byte[] bytes=remote.get(path);
       return switch(op) {
         case "lsjson" -> new RcloneBackupProvider.ProcessResult(0,"[]");
-        case "copyto" -> { byte[] source=remote.get(path); if(source==null) source=Files.readAllBytes(Path.of(path)); remote.put(args.get(3),source); yield new RcloneBackupProvider.ProcessResult(0,""); }
+        case "copyto" -> { uploadHook.run(); byte[] source=remote.get(path); if(source==null) source=Files.readAllBytes(Path.of(path)); remote.put(args.get(3),source); yield new RcloneBackupProvider.ProcessResult(0,""); }
         case "lsl" -> new RcloneBackupProvider.ProcessResult(bytes==null?4:0,bytes==null?"not found":bytes.length+" object");
         case "lsf" -> new RcloneBackupProvider.ProcessResult(bytes==null?4:0,bytes==null?"":"object");
         case "hashsum" -> { byte[] hashed=remote.get(args.get(3)); yield new RcloneBackupProvider.ProcessResult(hashed==null?4:0,hashed==null?"":HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256").digest(hashed))+"  "+args.get(3).substring(args.get(3).lastIndexOf('/')+1)); }

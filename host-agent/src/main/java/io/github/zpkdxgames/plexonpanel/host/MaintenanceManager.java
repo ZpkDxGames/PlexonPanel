@@ -180,6 +180,8 @@ public final class MaintenanceManager implements AutoCloseable {
     result.put("stages", BackupStage.definitions());
     result.put("job", state.snapshot(active));
     result.put("jobStateContractVersion", 4);
+    result.put("uploadActive", fullBackups.transferBusy());
+    result.put("operationBusy", fullBackups.transferBusy() || (active!=null && !MaintenanceStateStore.terminal(active) && !"RECOVERY_REQUIRED".equals(active.phase())));
     result.put("countdownState", "IDLE");
     result.put("countdownKind", "");
     result.put("countdownRemainingSeconds", 0L);
@@ -291,13 +293,20 @@ public final class MaintenanceManager implements AutoCloseable {
   }
 
   /** Upload is independent of world-source/disk/recovery gates and never owns the maintenance lock. */
-  public synchronized FullRestorePointManager.Metadata promoteToDrive(DeviceRegistry.Device device,String backupId) throws Exception {
-    if (state.blocking()!=null && state.recoveryRequired()==null || worker.getActiveCount()>0 || operationLock.isLocked())
-      throw FullBackupPreflight.preflightFailure("JOB_RUNNING","A maintenance operation is running.");
+  public FullRestorePointManager.Metadata promoteToDrive(DeviceRegistry.Device device,String backupId) throws Exception {
     FullBackupPreflight.assertProvider(fullBackupPreflight.inspect(settings,true).provider());
-    var result=fullBackups.retryUpload(backupId,UUID.randomUUID().toString(),settings.fullRestorePoint(),true);
-    audit("backup.full.retry-upload","SUCCESS",actor(device,false),false,result.jobId(),backupId,Map.of("sha256",result.sha256()));
-    return result;
+    AutoCloseable reservation;
+    synchronized(this) {
+      if (closed.get()) throw new IllegalStateException("HOST_OFFLINE");
+      if ((state.blocking()!=null && state.recoveryRequired()==null) || worker.getActiveCount()>0 || operationLock.isLocked())
+        throw FullBackupPreflight.preflightFailure("JOB_RUNNING","A maintenance operation is running.");
+      reservation=fullBackups.reserveTransfer();
+    }
+    try(reservation) {
+      var result=fullBackups.retryUpload(backupId,UUID.randomUUID().toString(),settings.fullRestorePoint(),true);
+      audit("backup.full.retry-upload","SUCCESS",actor(device,false),false,result.jobId(),backupId,Map.of("sha256",result.sha256()));
+      return result;
+    } finally { publishStatus(); }
   }
 
   private synchronized String queue(
@@ -326,7 +335,7 @@ public final class MaintenanceManager implements AutoCloseable {
 
     MaintenanceStateStore.Job active = state.blocking();
     if (active != null) throw conflict("BUSY", active, true);
-    if (worker.getQueue().remainingCapacity() == 0 || operationLock.isLocked())
+    if (worker.getQueue().remainingCapacity() == 0 || operationLock.isLocked() || fullBackups.transferBusy())
       throw new OperationFailure(
           "BUSY", "QUEUED", "Another destructive Host operation is already active.", true);
 
@@ -398,7 +407,7 @@ public final class MaintenanceManager implements AutoCloseable {
   }
 
   private synchronized void tick() throws Exception {
-    if (closed.get() || state.blocking() != null || fullBackups.recoveryRequired()) return;
+    if (closed.get() || state.blocking() != null || fullBackups.recoveryRequired() || fullBackups.transferBusy()) return;
     MaintenanceSettings current = settings;
     ZoneId zone = ZoneId.of(current.timezone());
     Instant now = timeSource.instant(), windowStart = now.minus(Duration.ofMinutes(10));
