@@ -38,6 +38,7 @@ public final class BedrockRuntimeOperationsAcceptance implements BedrockContaine
   private static final Duration GRACE = Duration.ofSeconds(45);
   private static final Pattern LIST_RESPONSE = Pattern.compile("(?i).*\\b(?:there are )?0\\s*/\\s*4 players online\\b.*");
   private static final Pattern STOP_RESPONSE = Pattern.compile("(?i).*\\b(?:server stop requested|stopping server|quit correctly)\\b.*");
+  private static final Pattern START_RESPONSE = Pattern.compile(".* INFO\\] Server started\\.$");
   private static final Pattern IMAGE = Pattern.compile("(?:docker\\.io/)?itzg/minecraft-bedrock-server@sha256:[0-9a-f]{64}");
 
   private final String id;
@@ -200,7 +201,11 @@ public final class BedrockRuntimeOperationsAcceptance implements BedrockContaine
         if (("plexonpanel-phase2-" + run).equals(text(info, "name")) && LEVEL_NAME.equals(text(info, "level"))
             && Objects.equals(number(info, "players", 4), 0L) && Objects.equals(number(info, "maxPlayers", 4), 4L)
             && version != null && version.matches("[0-9]+(?:\\.[0-9]+){1,3}")) {
-          return info;
+          Container launch = inspect();
+          if (launch.phase() == Phase.RUNNING && reads.logs(launch.startedAt(), 48).stream()
+              .anyMatch(line -> !line.truncated() && START_RESPONSE.matcher(line.content()).matches())) {
+            return info;
+          }
         }
       } catch (IOException starting) {
         // The private bridge address or game listener may be unavailable during launch.

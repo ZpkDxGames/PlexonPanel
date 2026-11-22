@@ -135,6 +135,10 @@ The relay keeps Bedrock grants in its own SQLite sidecar, named by appending `.b
 
 ## Staging acceptance
 
+The Core draft's **Bedrock Phase 2 ARM64 runtime acceptance** workflow runs this gate on a disposable GitHub-hosted Ubuntu 24.04 ARM64 runner. It pins the image's Linux ARM64 manifest and the Dashboard revision, uses the official versioned BDS download, and creates its own bind mount, test keys and unpublished bridge. Run or rerun the workflow from the draft and check the `bedrock-arm64-phase2-evidence` artifact. Record the observed Docker version and the pulled manifest and image IDs separately from production parity. [Workflow](../.github/workflows/bedrock-runtime-acceptance.yml)
+
+For the isolated workflow only, `ENABLE_LAN_VISIBILITY=true` enables a response body on the NetherNet `/v1/join` probe. In a disposable x86-64 comparison using BDS 1.26.66.1, disabled visibility returned HTTP 200 with an empty body. Enabled visibility returned the expected server and level metadata. Require that metadata and the `Server started.` log for each staged launch. A 200 response alone does not demonstrate readiness. Retain the operator-approved LAN policy for any live rollout. [NetherNet probe](https://github.com/itzg/docker-minecraft-bedrock-server/blob/dbf8516038c82236210e509eae6d942a46e578fc/README.md#test-the-connection)
+
 For an all-local staging relay, run the following from the pinned Dashboard checkout. The Node process writes staging secrets directly to a mode-0600 environment file in an operator-private directory. `relay.pub` contains the public key pin for the Bedrock Host. The database and enrollment file stay in the same private directory.
 
 ```sh

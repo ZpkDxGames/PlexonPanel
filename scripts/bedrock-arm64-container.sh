@@ -58,7 +58,7 @@ case ${1:-} in
       --env EULA=TRUE --env "VERSION=$version" --env "DIRECT_DOWNLOAD_URL=$download_url" \
       --env USE_BOX64=true --env TZ=UTC --env "UID=$(id -u)" --env "GID=$(id -g)" \
       --env "SERVER_NAME=$server_name" --env "LEVEL_NAME=$level_name" --env MAX_PLAYERS=4 \
-      --env ENABLE_SSH=false --env ALLOW_LIST=true --env ENABLE_LAN_VISIBILITY=false \
+      --env ENABLE_SSH=false --env ALLOW_LIST=true --env ENABLE_LAN_VISIBILITY=true \
       --env TRANSPORT=nethernet --env SERVER_PORT=19132 --env SERVER_UDP_PORTS=19140-19155 "$image")
     [[ $container =~ ^[0-9a-f]{64}$ ]] || die 'Docker returned an invalid container ID.'
     printf '%s\n' "$container" > "$run_root/container-id"
@@ -87,7 +87,7 @@ case ${1:-} in
         javaVersion:$javaVersion, runtimeImage:$runtimeImage, imageId:$imageId, requestedVersion:$requestedVersion,
         downloadUrl:$downloadUrl, runtimeRun:$runtimeRun, coreCommit:$coreCommit, dashboardCommit:$dashboardCommit,
         logDriver:"json-file", tty:true, openStdin:true, stdinOnce:false, restartPolicy:"unless-stopped",
-        stopSignal:"SIGTERM", requestedTransport:"nethernet", gamePortsPublished:false,
+        stopSignal:"SIGTERM", requestedTransport:"nethernet", lanVisibility:true, gamePortsPublished:false,
         imageParity:"PRODUCTION_DIGEST_UNAVAILABLE", startup:"NOT_READY"}' | tee "$evidence/runtime.json"
 
     ready=false
@@ -99,7 +99,8 @@ case ${1:-} in
          jq -e --arg name "$server_name" --arg level "$level_name" '
               .name == $name and .level == $level and (.version | type == "string" and test("^[0-9]+(\\.[0-9]+){1,3}$"))
                 and .players == 0 and .maxPlayers == 4 and (.protocol | tonumber? | . > 0 and . <= 65535 and floor == .)
-            ' "$run_root/join.json" > /dev/null 2>&1; then
+            ' "$run_root/join.json" > /dev/null 2>&1 &&
+         docker logs --tail 50 "$container" 2>&1 | grep -F 'Server started.' > /dev/null; then
         ready=true
         break
       fi
