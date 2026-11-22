@@ -2,6 +2,12 @@
 
 Status: **development only**. No production installation, relay change, or remote-action activation is authorized by this document.
 
+See the [architecture decision](BEDROCK_ARCHITECTURE.md) for the Host-only identity
+and compatibility model and the [ARM64 runbook](BEDROCK_ARM64_RUNBOOK.md) for
+staging, installation and rollback. The [source audit](BEDROCK_SOURCE_AUDIT.md)
+records the original draft heads and the recovered standalone relay provenance.
+The [verification report](BEDROCK_VALIDATION.md) records executed checks and release gates.
+
 ## Goal and verified baseline
 
 Add a Bedrock Dedicated Server to the existing PlexonPanel fleet without pretending it is a Paper/Bukkit instance.
@@ -44,7 +50,7 @@ The Bedrock Host should emit signed and timestamped evidence, with unavailable r
 - Container lifecycle state (`running`, `exited`, `restarting`, `unknown`) and restart policy.
 - Exact container CPU and memory, not a host average or JVM heap. Suggested future dashboard service keys: `containerCpuPercent`, `containerMemoryBytes`, `containerStatsCapturedAt`.
 - Uptime and last-restart timing; rate-limit polling and cap the collected output.
-- A bounded, redacted Docker log stream with explicit cursor/replay semantics.
+- A bounded, redacted Docker log window refreshed on a fixed cadence. Each refresh replaces the recent window and reconnects clear prior-session data.
 - Edition/version/online players only from corroborated Bedrock-specific evidence. Container alive does **not** imply Bedrock signaling or gameplay is ready. Do not infer player count from Docker process existence.
 - Bedrock-specific metrics should never show Paper TPS/MSPT, heap, plugin list or Bukkit-only capabilities.
 
@@ -58,11 +64,11 @@ The Bedrock Host should emit signed and timestamped evidence, with unavailable r
 
 ## Proposed rollout gates
 
-- [ ] Read-only Docker snapshot collector tested with running, stopped, missing, malformed, stale and permission-denied fixtures.
-- [ ] Broker safety tests prove other containers and Docker operations cannot be targeted.
-- [ ] Relay host-only handshake, standalone owner enrollment and revocation verified under deliberate denial tests.
-- [ ] Signed fleet roster shows one BEDROCK instance while the three Paper hosts remain unchanged.
-- [ ] UI labels CPU/memory/players honestly and hides TPS/MSPT/JVM values for Bedrock.
+- [x] Read-only Docker collector validated with state, missing, malformed and stale fixtures.
+- [x] Broker fixture tests reject unauthorized peers, other targets and Docker operations outside the read set.
+- [x] Relay Host-only handshake, standalone owner enrollment and revocation verified with denial cases.
+- [x] Mixed fleet fixture shows one Bedrock room and three Paper rooms through signed, scoped sessions.
+- [x] UI labels Docker metrics and withholds Paper-only metrics from Bedrock.
 - [ ] Console, lifecycle, backups and settings individually gated behind reviewed scopes and tests.
 - [ ] Staging tests on ARM64, rollback documentation, and explicit operator approval before deployment.
 
