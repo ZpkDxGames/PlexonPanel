@@ -383,9 +383,12 @@ try {
   await systemctl("start", hostUnit);
   const resumed = await browser.next("authenticated reconnect with new signed session", (msg) => msg.type === "dashboard.ready" &&
     msg.agents.host && msg.server.hostSession !== generation);
-  const fresh = await browser.next("fresh data in new Host session", (msg) => msg.eventType === "bedrock.status" &&
-    msg.agentSession === resumed.server.hostSession && Date.now() - Date.parse(msg.body.capturedAt) < 30_000);
-  assert.ok(Math.abs(Date.parse(fresh.body.containerStartedAt) - Date.parse(before)) <= 1);
+  // The first reconnect sample can report unknown while the broker's per-operation interval clears.
+  const fresh = await browser.next("fresh running-container data in new Host session", (msg) => msg.eventType === "bedrock.status" &&
+    msg.agentSession === resumed.server.hostSession && msg.body.containerState === "running" &&
+    Math.abs(Date.now() - Date.parse(msg.body.capturedAt)) < 30_000);
+  assert.equal(await verifiedContainer(), before, "restarting the companion restarted the game");
+  assert.ok(Math.abs(Date.parse(fresh.body.containerStartedAt) - Date.parse(before)) <= 1, "wrong launch in renewed telemetry");
   pass("Host interruption, offline state and signed reconnect with fresh telemetry");
 
   const newCode = String((Number(code) + 1) % 1_000_000).padStart(6, "0");
