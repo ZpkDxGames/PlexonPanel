@@ -1,0 +1,3 @@
+# Copy the serverId and nodeId from identity-init output.
+serverId=xxxxxxxx-xxxx-4xxx-8xxx-xxxxxxxxxxxx
+nodeId=xxxxxxxx-xxxx-4xxx-9xxx-xxxxxxxxxxxx

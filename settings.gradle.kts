@@ -21,4 +21,4 @@ rootProject.name = "PlexonPanel"
 include("agent")
 include("integrations:plexonchats-api")
 
-include("protocol", "host-agent")
+include("protocol", "host-agent", "bedrock-host")

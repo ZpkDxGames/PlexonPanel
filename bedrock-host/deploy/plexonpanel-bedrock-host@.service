@@ -1,0 +1,36 @@
+[Unit]
+Description=PlexonPanel Bedrock Host Companion for %i
+Wants=network-online.target
+After=network-online.target plexonpanel-bedrock-broker@%i.service
+Requires=plexonpanel-bedrock-broker@%i.service
+ConditionPathExists=/etc/plexonpanel-bedrock/%i/host.properties
+
+[Service]
+Type=simple
+User=pph-tonimbedrock
+Group=pph-tonimbedrock
+UMask=0077
+ExecCondition=/usr/bin/test %i = tonimbedrock
+ExecStart=/usr/bin/java -Xms16m -Xmx128m -jar /opt/plexonpanel-bedrock/plexonpanel-bedrock-host.jar host /etc/plexonpanel-bedrock/%i/host.properties
+Restart=on-failure
+RestartSec=5s
+TimeoutStopSec=10s
+NoNewPrivileges=true
+CapabilityBoundingSet=
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictSUIDSGID=true
+RestrictRealtime=true
+PrivateDevices=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectControlGroups=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+InaccessiblePaths=-/run/docker.sock -/srv/plexonpanel/servers
+LockPersonality=true
+TasksMax=64
+
+[Install]
+WantedBy=multi-user.target
