@@ -330,7 +330,7 @@ try {
   assert.equal(denied.code, "BEDROCK_READ_ONLY");
   pass("one-use Owner enrollment, exact read-only scopes and remote lifecycle refusal");
 
-  let telemetryFailure;
+  const readFailures = [];
   try {
     const status = await browser.next("actual Docker CPU, memory, uptime and Bedrock version", (msg) => {
       const body = msg.body;
@@ -350,23 +350,30 @@ try {
       cpuPercent: status.body.containerCpuPercent, memoryBytes: status.body.containerMemoryBytes,
       memoryLimitBytes: status.body.containerMemoryLimitBytes, uptimeSeconds: status.body.containerUptimeSeconds });
   } catch (error) {
-    telemetryFailure = error;
+    readFailures.push(error);
     const diagnostic = { check: "fresh real Docker readings and launch-bound Bedrock version", result: "FAIL",
       received: browser.observations, directDocker: await dockerStatsEvidence() };
     receipts.push(diagnostic);
     console.log(JSON.stringify(diagnostic));
   }
 
-  // Fixed synthetic sentinel to the staged container's existing stdout. No game command or secret is involved.
-  await verifiedContainer();
-  await run("docker", ["exec", "--user", "0", BEDROCK_CONTAINER_ID, "sh", "-c",
-    "printf '\\033[32mPP_PHASE2_REDACTION\\033[0m from 192.0.2.23 xuid=1234567890123456\\n' > /proc/1/fd/1"]);
-  const logs = await browser.next("redacted marker read from the real Docker log driver", (msg) => msg.eventType === "bedrock.logs" &&
-    msg.body.lines.some((line) => line.content.includes("PP_PHASE2_REDACTION")));
-  const marker = logs.body.lines.find((line) => line.content.includes("PP_PHASE2_REDACTION"));
-  assert.doesNotMatch(marker.content, /192\.0\.2\.23|1234567890123456|\u001b/u);
-  assert.ok(logs.body.available && logs.body.recentWindow && logs.body.lines.length <= 12);
-  pass("real Docker log redaction and bounded recent window");
+  try {
+    // The fixed sentinel uses the disposable container's own TTY. No game command is involved.
+    await verifiedContainer();
+    await run("docker", ["exec", "--user", "0", BEDROCK_CONTAINER_ID, "sh", "-c",
+      "test -c /dev/pts/0 && printf '\\033[32mPP_PHASE2_REDACTION\\033[0m from 192.0.2.23 xuid=1234567890123456\\n' > /dev/pts/0"]);
+    const logs = await browser.next("redacted marker read from the real Docker log driver", (msg) => msg.eventType === "bedrock.logs" &&
+      msg.body.lines.some((line) => line.content.includes("PP_PHASE2_REDACTION")));
+    const marker = logs.body.lines.find((line) => line.content.includes("PP_PHASE2_REDACTION"));
+    assert.doesNotMatch(marker.content, /192\.0\.2\.23|1234567890123456|\u001b/u);
+    assert.ok(logs.body.available && logs.body.recentWindow && logs.body.lines.length <= 12);
+    pass("real Docker log redaction and bounded recent window");
+  } catch (error) {
+    readFailures.push(error);
+    const diagnostic = { check: "real Docker log redaction and bounded recent window", result: "FAIL", error: error.name };
+    receipts.push(diagnostic);
+    console.log(JSON.stringify(diagnostic));
+  }
 
   await systemctl("stop", hostUnit);
   await browser.next("offline Host readiness", (msg) => msg.type === "dashboard.ready" && !msg.agents.host);
@@ -408,7 +415,7 @@ try {
   await verifyLegacyRooms();
   assert.equal(await verifiedContainer(), before, "read-only rollout or rollback restarted the game");
   pass("rollback to legacy-only relay with the three rooms and game launch preserved");
-  if (telemetryFailure) throw telemetryFailure;
+  if (readFailures.length) throw new AggregateError(readFailures, "One or more read-only acceptance checks failed");
 } catch (error) {
   failure = error;
   if (installed) {
