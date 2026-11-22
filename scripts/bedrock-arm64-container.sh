@@ -109,7 +109,7 @@ case ${1:-} in
     done
     # A started game can still exercise the broker even when the independent metadata probe fails.
     # Box64 sets its process title to the game executable on some releases. Check startup output and process args.
-    docker top "$container" -eo args > "$run_root/process-titles"
+    docker top "$container" -eo pid,args > "$run_root/process-titles"
     docker logs "$container" > "$run_root/startup-logs" 2>&1
     if ! grep -Fq 'Server started.' "$run_root/startup-logs"; then
       docker inspect "$container" --format 'state={{.State.Status}} exit={{.State.ExitCode}} oom={{.State.OOMKilled}} restarts={{.RestartCount}}'
