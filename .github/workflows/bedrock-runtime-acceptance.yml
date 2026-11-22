@@ -1,4 +1,4 @@
-name: Bedrock Phase 2 ARM64 runtime acceptance
+name: Bedrock Phase 2.5 ARM64 runtime parity
 
 on:
   pull_request:
@@ -8,12 +8,12 @@ on:
     inputs:
       dashboard_commit:
         description: Exact PlexonPanel-Dashboard commit SHA
-        default: 374f8593df3ba3c96ffb15fdce18e2e3ad64b5db
+        default: 55e9871f5c23442a10d28af906d385a700335564
         required: true
         type: string
       image_digest:
-        description: itzg/minecraft-bedrock-server linux/arm64 manifest digest
-        default: sha256:2d58062df45d399ceff53ca80f49fbe6130423095846285a5bd7c3c9a52d8fc0
+        description: Immutable itzg OCI index or Linux ARM64 manifest digest
+        default: sha256:463ea4ac99a3e5b67de0fc590a61cca7ea758520f67d9e4a4512fc3afcc97044
         required: true
         type: string
 
@@ -41,8 +41,10 @@ jobs:
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 30
     env:
-      BEDROCK_IMAGE_DIGEST: ${{ inputs.image_digest || 'sha256:2d58062df45d399ceff53ca80f49fbe6130423095846285a5bd7c3c9a52d8fc0' }}
-      DASHBOARD_COMMIT: ${{ inputs.dashboard_commit || '374f8593df3ba3c96ffb15fdce18e2e3ad64b5db' }}
+      BEDROCK_IMAGE_DIGEST: ${{ inputs.image_digest || 'sha256:463ea4ac99a3e5b67de0fc590a61cca7ea758520f67d9e4a4512fc3afcc97044' }}
+      DASHBOARD_COMMIT: ${{ inputs.dashboard_commit || '55e9871f5c23442a10d28af906d385a700335564' }}
+      BEDROCK_EXPECTED_DOCKER_VERSION: '29.10.0'
+      BEDROCK_EXPECTED_EXECUTABLE_SHA256: dba89ef48dfd54b26ecaaff2554bfb0f06008a37a1645285c42d2fd62f409887
     steps:
       - name: Validate immutable staging inputs
         run: |
@@ -61,14 +63,12 @@ jobs:
           path: phase2-dashboard
           persist-credentials: false
 
-      - uses: actions/setup-java@v5
-        with:
-          distribution: temurin
-          java-version: '25'
+      - name: Install checksum-pinned production Docker and Java versions on the runner
+        run: bash scripts/bedrock-parity-runtime.sh install
 
       - uses: actions/setup-node@v7
         with:
-          node-version: '24'
+          node-version: '24.22.3'
 
       - uses: gradle/actions/setup-gradle@v6
 
@@ -116,6 +116,11 @@ jobs:
         timeout-minutes: 2
         run: bash scripts/bedrock-arm64-container.sh cleanup
 
+      - name: Stop the isolated pinned Docker daemon
+        if: ${{ always() }}
+        timeout-minutes: 2
+        run: bash scripts/bedrock-parity-runtime.sh stop
+
       - name: Record acceptance outcomes
         if: ${{ always() }}
         env:
@@ -124,12 +129,12 @@ jobs:
           OPERATIONS_RESULT: ${{ steps.operations.outcome }}
           CLEANUP_RESULT: ${{ steps.cleanup.outcome }}
         run: |
-          printf '| Phase 2 check | Outcome |\n| --- | --- |\n' >> "$GITHUB_STEP_SUMMARY"
+          printf '| Phase 2.5 check | Outcome |\n| --- | --- |\n' >> "$GITHUB_STEP_SUMMARY"
           printf '| ARM64 / Box64 and NetherNet | %s |\n' "$GAME_RESULT" >> "$GITHUB_STEP_SUMMARY"
           printf '| Host, broker and signed mixed-fleet acceptance | %s |\n' "$CONTROL_RESULT" >> "$GITHUB_STEP_SUMMARY"
           printf '| Local staged console and lifecycle | %s |\n' "$OPERATIONS_RESULT" >> "$GITHUB_STEP_SUMMARY"
           printf '| Disposable runner cleanup | %s |\n' "$CLEANUP_RESULT" >> "$GITHUB_STEP_SUMMARY"
-          printf '| Exact deployed image digest and host configuration parity | not verified |\n' >> "$GITHUB_STEP_SUMMARY"
+          printf '| Oracle host networking, effective game settings and live Paper sessions | operator preflight required |\n' >> "$GITHUB_STEP_SUMMARY"
 
       - uses: actions/upload-artifact@v7
         if: ${{ always() && env.BEDROCK_EVIDENCE != '' }}

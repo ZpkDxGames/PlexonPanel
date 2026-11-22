@@ -24,9 +24,13 @@ download_url="https://www.minecraft.net/bedrockdedicatedserver/bin-linux/bedrock
 case ${1:-} in
   start)
     [[ $# == 1 && ${BEDROCK_IMAGE_DIGEST:-} =~ ^sha256:[0-9a-f]{64}$ ]] ||
-      die 'Supply an immutable itzg ARM64 manifest digest.'
+      die 'Supply an immutable itzg image index or ARM64 manifest digest.'
     [[ $(docker version --format '{{.Server.Os}}/{{.Server.Arch}}') == linux/arm64 ]] ||
       die 'The disposable Docker daemon must run native linux/arm64.'
+    if [[ -n ${BEDROCK_EXPECTED_DOCKER_VERSION:-} ]]; then
+      [[ $(docker version --format '{{.Server.Version}}') == "$BEDROCK_EXPECTED_DOCKER_VERSION" ]] ||
+        die 'The runner Docker version differs from the parity target.'
+    fi
     [[ $(docker ps --all --quiet --filter "name=^/${container_name}$") == '' ]] ||
       die 'A container already owns the staging name.'
     image="docker.io/itzg/minecraft-bedrock-server@${BEDROCK_IMAGE_DIGEST}"
@@ -88,7 +92,7 @@ case ${1:-} in
         downloadUrl:$downloadUrl, runtimeRun:$runtimeRun, coreCommit:$coreCommit, dashboardCommit:$dashboardCommit,
         logDriver:"json-file", tty:true, openStdin:true, stdinOnce:false, restartPolicy:"unless-stopped",
         stopSignal:"SIGTERM", requestedTransport:"nethernet", lanVisibility:true, gamePortsPublished:false,
-        imageParity:"PRODUCTION_DIGEST_UNAVAILABLE", startup:"NOT_READY"}' | tee "$evidence/runtime.json"
+        startup:"NOT_READY"}' | tee "$evidence/runtime.json"
 
     ready=false
     http_status=000
@@ -124,6 +128,10 @@ case ${1:-} in
     LC_ALL=C readelf -h "$executable" | grep -Eqi 'Machine:.*x86-64' ||
       die 'The staged release did not contain the expected x86-64 Bedrock executable.'
     executable_sha=$(sha256sum "$executable")
+    if [[ -n ${BEDROCK_EXPECTED_EXECUTABLE_SHA256:-} ]]; then
+      [[ ${executable_sha%% *} == "$BEDROCK_EXPECTED_EXECUTABLE_SHA256" ]] ||
+        die 'The BDS executable differs from the verified release.'
+    fi
     printf 'started=true\n' >> "$GITHUB_OUTPUT"
 
     {
