@@ -93,13 +93,13 @@ jobs:
 
       - name: Verify Host, broker, and mixed-fleet read-only control plane
         id: control
-        if: ${{ !cancelled() && steps.game.outcome == 'success' }}
+        if: ${{ !cancelled() && steps.game.outputs.started == 'true' }}
         timeout-minutes: 8
         run: node scripts/test-bedrock-arm64-runtime.mjs "$BEDROCK_DASHBOARD_CHECKOUT" "$BEDROCK_HOST_JAR"
 
       - name: Verify local console, lifecycle, shutdown and readiness
         id: operations
-        if: ${{ !cancelled() && steps.game.outcome == 'success' }}
+        if: ${{ !cancelled() && steps.game.outputs.started == 'true' }}
         timeout-minutes: 8
         run: |
           set -euo pipefail

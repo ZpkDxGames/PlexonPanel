@@ -23,6 +23,19 @@ python3 bedrock-host/scripts/validate-docker-staging.py
 ./gradlew :bedrock-host:test --tests '*BedrockOperationTest'
 ```
 
+The native ARM64 acceptance workflow also builds and invokes the test-only `BedrockRuntimeOperationsAcceptance` class. It requires a disposable `tonimbedrock` container with the workflow's random `com.plexonpanel.staging.run` label, digest-pinned itzg image, sole writable `/data` bind, persistent TTY stdin, and private unpublished bridge. Its input flags refer only to the container created in the same staging run.
+
+```sh
+./gradlew :bedrock-host:testClasses :bedrock-host:jar
+sudo "$JAVA_HOME/bin/java" \
+  -cp "bedrock-host/build/libs/plexonpanel-bedrock-host-6.0.0.jar:bedrock-host/build/classes/java/test" \
+  io.github.zpkdxgames.plexonpanel.bedrock.BedrockRuntimeOperationsAcceptance \
+  /var/run/docker.sock "$BEDROCK_DATA" "$BEDROCK_IMAGE_ID" "$BEDROCK_CONTAINER_ID" \
+  "$BEDROCK_STAGING_RUN_ID" "$BEDROCK_PROBE_HOST" "$BEDROCK_PROBE_PORT"
+```
+
+The harness checks a fresh BDS-generated `list` response after dispatch. It requires BDS shutdown output with exit zero, stops probing the old endpoint after verifying it is unavailable, and verifies that start and restart reach NetherNet `/v1/join` with the same disposable LevelDB world and a new Docker launch time. The probe verifies the server's response on its isolated bridge. A gameplay session, external firewall reachability, and operator actions remain separate checks. [Upstream NetherNet probe and response schema](https://github.com/itzg/mc-monitor/blob/1.21.0/bedrock_nethernet.go)
+
 ## Cold backup scope and recovery
 
 The local backup operation uses a dedicated mode-0700 directory outside the Bedrock data mount, with fixed includes `worlds/`, `allowlist.json`, and `permissions.json`. The latter two may contain private player information. Restrict backup access to authorized operators and keep the enclosing directories protected. Server properties, external packs and credentials require separately scoped storage. A world depending on external packs needs those packs available during a restore rehearsal.

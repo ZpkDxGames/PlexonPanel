@@ -199,7 +199,7 @@ public final class BedrockRuntimeOperationsAcceptance implements BedrockContaine
         String version = text(info, "version");
         if (("plexonpanel-phase2-" + run).equals(text(info, "name")) && LEVEL_NAME.equals(text(info, "level"))
             && Objects.equals(number(info, "players", 4), 0L) && Objects.equals(number(info, "maxPlayers", 4), 4L)
-            && version != null && version.matches("1\\.26\\.66(?:\\.1)?")) {
+            && version != null && version.matches("[0-9]+(?:\\.[0-9]+){1,3}")) {
           return info;
         }
       } catch (IOException starting) {

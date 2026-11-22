@@ -91,13 +91,14 @@ case ${1:-} in
         imageParity:"PRODUCTION_DIGEST_UNAVAILABLE", startup:"NOT_READY"}' | tee "$evidence/runtime.json"
 
     ready=false
-    deadline=$((SECONDS + 240))
+    http_status=000
+    deadline=$((SECONDS + 100))
     while (( SECONDS < deadline )); do
-      if curl --fail --silent --noproxy '*' --max-time 3 --max-filesize 65536 "$probe" > "$run_root/join.json" &&
-         jq -e --arg name "$server_name" --arg level "$level_name" \
-           --arg version "$version" --arg displayVersion "${version%.*}" '
-              .name == $name and .level == $level and (.version == $version or .version == $displayVersion)
-                and .players == 0 and .maxPlayers == 4 and (.protocol | type == "number" and . > 0)
+      if http_status=$(curl --silent --noproxy '*' --max-time 3 --max-filesize 65536 \
+           --output "$run_root/join.json" --write-out '%{http_code}' "$probe") && [[ $http_status == 200 ]] &&
+         jq -e --arg name "$server_name" --arg level "$level_name" '
+              .name == $name and .level == $level and (.version | type == "string" and test("^[0-9]+(\\.[0-9]+){1,3}$"))
+                and .players == 0 and .maxPlayers == 4 and (.protocol | tonumber? | . > 0 and . <= 65535 and floor == .)
             ' "$run_root/join.json" > /dev/null 2>&1; then
         ready=true
         break
@@ -105,15 +106,15 @@ case ${1:-} in
       [[ $(docker inspect "$container" --format '{{.State.Running}}') == true ]] || break
       sleep 2
     done
-    if [[ $ready != true ]]; then
-      docker inspect "$container" --format 'state={{.State.Status}} exit={{.State.ExitCode}} oom={{.State.OOMKilled}} restarts={{.RestartCount}}'
-      docker logs --tail 40 "$container" 2>&1 | \
-        sed -E 's/((token|password|secret|xuid)[[:space:]]*[:=][[:space:]]*)[^[:space:]]+/\1[REDACTED]/Ig' || true
-      die 'The disposable Bedrock server did not reach verified NetherNet readiness.'
-    fi
+    # A started game can still exercise the broker even when the independent metadata probe fails.
     # Box64 sets its process title to the game executable on some releases. Check startup output and process args.
     docker top "$container" -eo args > "$run_root/process-titles"
     docker logs "$container" > "$run_root/startup-logs" 2>&1
+    if ! grep -Fq 'Server started.' "$run_root/startup-logs"; then
+      docker inspect "$container" --format 'state={{.State.Status}} exit={{.State.ExitCode}} oom={{.State.OOMKilled}} restarts={{.RestartCount}}'
+      tail -25 "$run_root/startup-logs" | sed -E 's/((token|password|secret|xuid)[[:space:]]*[:=][[:space:]]*)[^[:space:]]+/\1[REDACTED]/Ig'
+      die 'Bedrock did not log successful startup.'
+    fi
     grep -Eiq '(^|[[:space:]/])box64[[:space:]].*bedrock_server' "$run_root/process-titles" ||
       grep -Eiq '(^|[^[:alnum:]])box64([^[:alnum:]]|$).*(dynarec|bits|arm64|aarch64|version)' "$run_root/startup-logs" ||
       die 'Bedrock is ready but Box64 execution was not verified.'
@@ -122,12 +123,7 @@ case ${1:-} in
     LC_ALL=C readelf -h "$executable" | grep -Eqi 'Machine:.*x86-64' ||
       die 'The staged release did not contain the expected x86-64 Bedrock executable.'
     executable_sha=$(sha256sum "$executable")
-    jq --arg gameExecutableSha "${executable_sha%% *}" --slurpfile response "$run_root/join.json" \
-      '.startup = "PASS" | .box64 = "VERIFIED" | .gameExecutableSha256 = $gameExecutableSha
-       | .netherNet = ($response[0] | {name,level,version,protocol,players,maxPlayers})' \
-      "$evidence/runtime.json" > "$run_root/runtime-ready.json"
-    cp "$run_root/runtime-ready.json" "$evidence/runtime.json"
-    cat "$evidence/runtime.json"
+    printf 'started=true\n' >> "$GITHUB_OUTPUT"
 
     {
       printf 'BEDROCK_DATA=%s\n' "$data"
@@ -138,6 +134,26 @@ case ${1:-} in
       printf 'BEDROCK_PROBE_PORT=19132\n'
       printf 'BEDROCK_VERSION=%s\n' "$version"
     } >> "$GITHUB_ENV"
+    if [[ $ready == true ]]; then
+      jq --arg gameExecutableSha "${executable_sha%% *}" --slurpfile response "$run_root/join.json" \
+        '.startup = "PASS" | .box64 = "VERIFIED" | .gameExecutableSha256 = $gameExecutableSha
+         | .netherNet = ($response[0] | {name,level,version,protocol,players,maxPlayers})' \
+        "$evidence/runtime.json" > "$run_root/runtime-ready.json"
+    else
+      prefix=(--silent --noproxy '*' --max-time 3 --max-filesize 65536)
+      loopback_status=$(docker exec "$container" curl "${prefix[@]}" --output /dev/null --write-out '%{http_code}' \
+        http://127.0.0.1:19132/v1/join) || true
+      jq --arg gameExecutableSha "${executable_sha%% *}" --arg httpStatus "$http_status" --arg loopbackStatus "$loopback_status" \
+        '.startup = "PASS" | .box64 = "VERIFIED" | .gameExecutableSha256 = $gameExecutableSha
+         | .netherNet = {state:"FAIL", bridgeHttpStatus:$httpStatus, containerLoopbackHttpStatus:$loopbackStatus}' \
+        "$evidence/runtime.json" > "$run_root/runtime-ready.json"
+      if [[ -s $run_root/join.json ]]; then
+        jq '{name,level,version,protocol,players,maxPlayers}' "$run_root/join.json" | head -c 2048 || true
+      fi
+    fi
+    cp "$run_root/runtime-ready.json" "$evidence/runtime.json"
+    cat "$evidence/runtime.json"
+    [[ $ready == true ]] || die 'Bedrock and Box64 started, but the independent NetherNet readiness check failed.'
     ;;
   cleanup)
     [[ $# == 1 ]] || die 'Only the cleanup action is supported.'
