@@ -205,13 +205,14 @@ final class DockerReadClient {
     } catch (IOException unavailable) {
       return null;
     }
-    String id = text(stats, "id");
-    if (id != null && !target.id().equals(id)) {
+    // Docker 28 omits id in its one-shot response. The request uses the full container ID,
+    // and snapshot revalidates the named container and its launch before accepting the sample.
+    if (stats.has("id") && !target.id().equals(text(stats, "id"))) {
       throw new IOException("Docker stats did not identify the pinned Bedrock container");
     }
     Instant now = clock.instant();
     Instant capturedAt = timestamp(stats, "read", now);
-    if (id == null || !freshStats(capturedAt, now, target.startedAt())) return null;
+    if (!freshStats(capturedAt, now, target.startedAt())) return null;
 
     JsonObject cpu = object(object(stats, "cpu_stats"), "cpu_usage");
     JsonObject memory = object(stats, "memory_stats");

@@ -83,6 +83,26 @@ class DockerReadClientTest {
   }
 
   @Test
+  void acceptsDocker28OneShotStatsOnlyWhileThePinnedLaunchStillMatches() throws Exception {
+    try (var docker = new Fixture()) {
+      String running = running(ID, START, true);
+      String legacyId = "\"id\":\"" + ID + "\",";
+      docker.snapshot(running, stats(ID, NOW.minusSeconds(2), 1_000_000_000, "100", "900").replace(legacyId, ""));
+      docker.snapshot(running, stats(ID, NOW.minusSeconds(1), 2_500_000_000L, "200", "900").replace(legacyId, ""));
+      docker.json(INSPECT, running);
+      docker.json(STATS, stats(ID, NOW, 3_000_000_000L, "300", "900").replace(legacyId, ""));
+      docker.json(INSPECT, running(OTHER_ID, START, true));
+
+      DockerReadClient client = docker.client();
+      assertEquals(100, client.snapshot().containerMemoryBytes());
+      var next = client.snapshot();
+      assertEquals(150.0, next.containerCpuPercent());
+      assertEquals(200, next.containerMemoryBytes());
+      assertThrows(IOException.class, client::snapshot);
+    }
+  }
+
+  @Test
   void staleMalformedAndUnavailableStatsNeverProduceZeroReadings() throws Exception {
     try (var docker = new Fixture()) {
       String running = running(ID, START, true);
