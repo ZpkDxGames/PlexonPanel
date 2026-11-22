@@ -1,6 +1,6 @@
 # Bedrock verification and release status
 
-This page records the Phase 1 baseline. The Phase 2 workflow tests the real Box64 Bedrock runtime on a disposable Ubuntu ARM64 runner. Its artifacts record the candidate's image and executable digests, engine version, startup, control-plane checks, local operations and cleanup. See the draft PR for the Phase 2 acceptance matrix and production-parity gaps. [Core draft and native checks](https://github.com/ZpkDxGames/PlexonPanel/pull/104/checks) · [ARM64 runbook](BEDROCK_ARM64_RUNBOOK.md)
+This page records the Phase 1 baseline. The Phase 2 workflow tests the real Box64 Bedrock runtime on a disposable Ubuntu ARM64 runner. Its artifacts record the candidate's image and executable digests, engine version, startup, control-plane checks, local operations and cleanup. Phase 2.5 reproduced the reported production Docker, Java, image and BDS versions in isolated staging. The readiness matrix lists the outstanding Oracle preflight gates. [Phase 2.5 readiness](BEDROCK_PHASE25_READINESS.md) [Core draft and native checks](https://github.com/ZpkDxGames/PlexonPanel/pull/104/checks) · [ARM64 runbook](BEDROCK_ARM64_RUNBOOK.md)
 
 ## Verified locally
 

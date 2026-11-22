@@ -49,6 +49,14 @@ case ${1:-} in
       die 'The pulled manifest did not resolve to linux/arm64.'
     image_id=$(docker image inspect "$image" --format '{{.Id}}')
     [[ $image_id =~ ^sha256:[0-9a-f]{64}$ ]] || die 'Docker returned an invalid image ID.'
+    repository_digests=$(docker image inspect "$image" --format '{{json .RepoDigests}}')
+    jq -e --arg digest "$BEDROCK_IMAGE_DIGEST" \
+      'any(.[]; endswith("itzg/minecraft-bedrock-server@" + $digest))' <<< "$repository_digests" > /dev/null ||
+      die 'The requested digest is missing from the pulled repository digests.'
+    if [[ $BEDROCK_IMAGE_DIGEST == sha256:463ea4ac99a3e5b67de0fc590a61cca7ea758520f67d9e4a4512fc3afcc97044 &&
+          $image_id != "$BEDROCK_IMAGE_DIGEST" ]]; then
+      die 'Docker did not report the verified production image ID.'
+    fi
     network=$(docker network create --driver bridge --label "$label=$run_id" "plexon-phase2-$run_id")
     [[ $network =~ ^[0-9a-f]{64}$ ]] || die 'Docker returned an invalid network ID.'
     printf '%s\n' "$network" > "$run_root/network-id"
@@ -84,14 +92,17 @@ case ${1:-} in
     jq -n --arg architecture "$(uname -m)" --arg operatingSystem "$PRETTY_NAME" \
       --arg dockerVersion "$(docker version --format '{{.Server.Version}}')" \
       --arg javaVersion "$(java -version 2>&1 | head -n1)" --arg runtimeImage "$image" \
-      --arg imageId "$image_id" --arg requestedVersion "$version" --arg downloadUrl "$download_url" \
+      --arg imageId "$image_id" --argjson repositoryDigests "$repository_digests" \
+      --arg requestedVersion "$version" --arg downloadUrl "$download_url" \
       --arg runtimeRun "$run_id" --arg coreCommit "$(git rev-parse HEAD)" \
       --arg dashboardCommit "$(git -C "$BEDROCK_DASHBOARD_CHECKOUT" rev-parse HEAD)" \
       '{architecture:$architecture, operatingSystem:$operatingSystem, dockerVersion:$dockerVersion,
-        javaVersion:$javaVersion, runtimeImage:$runtimeImage, imageId:$imageId, requestedVersion:$requestedVersion,
+        javaVersion:$javaVersion, runtimeImage:$runtimeImage, imageId:$imageId, repositoryDigests:$repositoryDigests,
+        requestedVersion:$requestedVersion,
         downloadUrl:$downloadUrl, runtimeRun:$runtimeRun, coreCommit:$coreCommit, dashboardCommit:$dashboardCommit,
         logDriver:"json-file", tty:true, openStdin:true, stdinOnce:false, restartPolicy:"unless-stopped",
-        stopSignal:"SIGTERM", requestedTransport:"nethernet", lanVisibility:true, gamePortsPublished:false,
+        stopSignal:"SIGTERM", requestedTransport:"nethernet", bridgeTcpPort:19132, configuredUdpPorts:"19140-19155",
+        lanVisibility:true, gamePortsPublished:false,
         startup:"NOT_READY"}' | tee "$evidence/runtime.json"
 
     ready=false

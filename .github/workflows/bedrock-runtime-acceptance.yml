@@ -81,6 +81,7 @@ jobs:
           test "$(git -C "$dashboard" rev-parse HEAD)" = "$DASHBOARD_COMMIT"
           npm --prefix "$dashboard" ci
           npm --prefix "$dashboard" run relay:test
+          npm --prefix "$dashboard" run relay:standalone:package
           jars=("$GITHUB_WORKSPACE"/bedrock-host/build/libs/plexonpanel-bedrock-host-*.jar)
           [[ ${#jars[@]} == 1 && -f ${jars[0]} ]]
           sha256sum "${jars[0]}"
@@ -121,6 +122,46 @@ jobs:
         timeout-minutes: 2
         run: bash scripts/bedrock-parity-runtime.sh stop
 
+      - name: Rehearse packaged Relay cutover and rollback to Protocol 3 Relay 5.0.0
+        id: relay_rollback
+        timeout-minutes: 8
+        env:
+          LEGACY_RELAY_COMMIT: da691360b39435d02a8671f45f2a2c4c49e3adbe
+        run: |
+          set -euo pipefail
+          legacy="$RUNNER_TEMP/plexon-relay-5.0.0"
+          git -C "$BEDROCK_DASHBOARD_CHECKOUT" fetch --no-tags --depth=1 origin "$LEGACY_RELAY_COMMIT"
+          mkdir "$legacy"
+          git -C "$BEDROCK_DASHBOARD_CHECKOUT" archive "$LEGACY_RELAY_COMMIT" | tar -x -C "$legacy"
+          npm --prefix "$legacy" ci
+          npm --prefix "$legacy" run relay:standalone:package
+          node scripts/test-bedrock-relay-binary-rollback.mjs "$BEDROCK_DASHBOARD_CHECKOUT" \
+            "$BEDROCK_DASHBOARD_CHECKOUT/artifacts/plexonpanel-relay" "$legacy/artifacts/plexonpanel-relay" \
+            | tee "$BEDROCK_EVIDENCE/relay-binary-rollback.log"
+
+      - name: Package the tested artifacts and verify SHA-256
+        run: |
+          release="$RUNNER_TEMP/plexon-bedrock-parity-release"
+          bash scripts/package-bedrock-parity.sh "$BEDROCK_HOST_JAR" "$BEDROCK_DASHBOARD_CHECKOUT" \
+            "$BEDROCK_DASHBOARD_CHECKOUT/artifacts/plexonpanel-relay" "$release"
+          bash scripts/package-bedrock-parity.sh "$BEDROCK_HOST_JAR" "$BEDROCK_DASHBOARD_CHECKOUT" \
+            "$BEDROCK_DASHBOARD_CHECKOUT/artifacts/plexonpanel-relay" "${release}-repeat"
+          diff -rq "$release" "${release}-repeat"
+          cp "$BEDROCK_EVIDENCE/runtime.json" "$release/runtime.json"
+          (
+            cd "$release"
+            sha256sum runtime.json >> SHA256SUMS
+            sha256sum --check --strict SHA256SUMS
+          )
+          printf 'BEDROCK_RELEASE=%s\n' "$release" >> "$GITHUB_ENV"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: bedrock-phase25-tested-release
+          path: ${{ env.BEDROCK_RELEASE }}/
+          if-no-files-found: error
+          retention-days: 30
+
       - name: Record acceptance outcomes
         if: ${{ always() }}
         env:
@@ -128,12 +169,14 @@ jobs:
           CONTROL_RESULT: ${{ steps.control.outcome }}
           OPERATIONS_RESULT: ${{ steps.operations.outcome }}
           CLEANUP_RESULT: ${{ steps.cleanup.outcome }}
+          RELAY_ROLLBACK_RESULT: ${{ steps.relay_rollback.outcome }}
         run: |
           printf '| Phase 2.5 check | Outcome |\n| --- | --- |\n' >> "$GITHUB_STEP_SUMMARY"
           printf '| ARM64 / Box64 and NetherNet | %s |\n' "$GAME_RESULT" >> "$GITHUB_STEP_SUMMARY"
           printf '| Host, broker and signed mixed-fleet acceptance | %s |\n' "$CONTROL_RESULT" >> "$GITHUB_STEP_SUMMARY"
           printf '| Local staged console and lifecycle | %s |\n' "$OPERATIONS_RESULT" >> "$GITHUB_STEP_SUMMARY"
           printf '| Disposable runner cleanup | %s |\n' "$CLEANUP_RESULT" >> "$GITHUB_STEP_SUMMARY"
+          printf '| Packaged Protocol 3 relay upgrade and rollback | %s |\n' "$RELAY_ROLLBACK_RESULT" >> "$GITHUB_STEP_SUMMARY"
           printf '| Oracle host networking, effective game settings and live Paper sessions | operator preflight required |\n' >> "$GITHUB_STEP_SUMMARY"
 
       - uses: actions/upload-artifact@v7
