@@ -205,19 +205,43 @@ async function browserFor(credential) {
     headers: { origin: fleet.origin } });
   clients.add(socket);
   const events = [];
+  const observations = [];
   socket.addEventListener("message", ({ data }) => {
-    events.push(JSON.parse(data));
+    const message = JSON.parse(data);
+    events.push(message);
     if (events.length > 128) events.shift();
+    if (message.eventType === "bedrock.status") {
+      const body = message.body;
+      observations.push({ state: body.containerState, cpuPercent: body.containerCpuPercent,
+        memoryBytes: body.containerMemoryBytes, limitBytes: body.containerMemoryLimitBytes,
+        capturedAt: body.capturedAt, statsAt: body.containerStatsCapturedAt,
+        uptimeSeconds: body.containerUptimeSeconds, version: body.version });
+      if (observations.length > 12) observations.shift();
+    }
   });
   socket.addEventListener("close", () => clients.delete(socket));
   await once(socket, "open", { signal: AbortSignal.timeout(5000) });
   return {
     socket,
+    observations,
     next: (description, match, timeout) => eventually(description, () => {
       const index = events.findIndex(match);
       return index >= 0 && events.splice(index, 1)[0];
     }, timeout),
   };
+}
+
+async function dockerStatsEvidence() {
+  try {
+    await verifiedContainer();
+    const stats = JSON.parse(await run("curl", ["--fail", "--silent", "--max-time", "4", "--unix-socket", "/var/run/docker.sock",
+      `http://localhost/v1.44/containers/${BEDROCK_CONTAINER_ID}/stats?stream=false&one-shot=true`]));
+    return { idMatches: stats.id === BEDROCK_CONTAINER_ID, read: stats.read,
+      cpuNanoseconds: stats.cpu_stats?.cpu_usage?.total_usage, memoryBytes: stats.memory_stats?.usage,
+      memoryLimitBytes: stats.memory_stats?.limit };
+  } catch (error) {
+    return { error: error.name, exitCode: error.code };
+  }
 }
 
 async function verifyRevokedUpgrade(credential) {
@@ -306,23 +330,32 @@ try {
   assert.equal(denied.code, "BEDROCK_READ_ONLY");
   pass("one-use Owner enrollment, exact read-only scopes and remote lifecycle refusal");
 
-  const status = await browser.next("actual Docker CPU, memory, uptime and Bedrock version", (msg) => {
-    const body = msg.body;
-    return msg.eventType === "bedrock.status" && body.containerState === "running" &&
-      body.containerCpuPercent != null && body.containerMemoryBytes > 0 && body.containerUptimeSeconds > 0 && body.version;
-  }, 45_000);
-  assert.equal(status.agentSession, generation);
-  assert.equal(status.body.containerRestartPolicy, "unless-stopped");
-  assert.equal(status.body.cpuUnit, "PERCENT_OF_ONE_CORE");
-  assert.equal(status.body.source, "DOCKER_ENGINE");
-  assert.equal(status.body.gameplayReady, null);
-  assert.ok(Math.abs(Date.now() - Date.parse(status.body.containerStatsCapturedAt)) < 30_000);
-  assert.ok(Math.abs(Date.parse(before) - Date.parse(status.body.containerStartedAt)) <= 1);
-  assert.equal(status.body.version, process.env.BEDROCK_VERSION ?? "1.26.66.1");
-  assert.ok(status.body.containerMemoryLimitBytes >= status.body.containerMemoryBytes);
-  pass("fresh real Docker readings and launch-bound Bedrock version", { version: status.body.version,
-    cpuPercent: status.body.containerCpuPercent, memoryBytes: status.body.containerMemoryBytes,
-    memoryLimitBytes: status.body.containerMemoryLimitBytes, uptimeSeconds: status.body.containerUptimeSeconds });
+  let telemetryFailure;
+  try {
+    const status = await browser.next("actual Docker CPU, memory, uptime and Bedrock version", (msg) => {
+      const body = msg.body;
+      return msg.eventType === "bedrock.status" && body.containerState === "running" &&
+        body.containerCpuPercent != null && body.containerMemoryBytes > 0 && body.containerUptimeSeconds > 0 && body.version;
+    }, 45_000);
+    assert.equal(status.agentSession, generation);
+    assert.equal(status.body.containerRestartPolicy, "unless-stopped");
+    assert.equal(status.body.cpuUnit, "PERCENT_OF_ONE_CORE");
+    assert.equal(status.body.source, "DOCKER_ENGINE");
+    assert.equal(status.body.gameplayReady, null);
+    assert.ok(Math.abs(Date.now() - Date.parse(status.body.containerStatsCapturedAt)) < 30_000);
+    assert.ok(Math.abs(Date.parse(before) - Date.parse(status.body.containerStartedAt)) <= 1);
+    assert.equal(status.body.version, process.env.BEDROCK_VERSION ?? "1.26.66.1");
+    assert.ok(status.body.containerMemoryLimitBytes >= status.body.containerMemoryBytes);
+    pass("fresh real Docker readings and launch-bound Bedrock version", { version: status.body.version,
+      cpuPercent: status.body.containerCpuPercent, memoryBytes: status.body.containerMemoryBytes,
+      memoryLimitBytes: status.body.containerMemoryLimitBytes, uptimeSeconds: status.body.containerUptimeSeconds });
+  } catch (error) {
+    telemetryFailure = error;
+    const diagnostic = { check: "fresh real Docker readings and launch-bound Bedrock version", result: "FAIL",
+      received: browser.observations, directDocker: await dockerStatsEvidence() };
+    receipts.push(diagnostic);
+    console.log(JSON.stringify(diagnostic));
+  }
 
   // Fixed synthetic sentinel to the staged container's existing stdout. No game command or secret is involved.
   await verifiedContainer();
@@ -345,7 +378,7 @@ try {
     msg.agents.host && msg.server.hostSession !== generation);
   const fresh = await browser.next("fresh data in new Host session", (msg) => msg.eventType === "bedrock.status" &&
     msg.agentSession === resumed.server.hostSession && Date.now() - Date.parse(msg.body.capturedAt) < 30_000);
-  assert.equal(fresh.body.containerStartedAt, status.body.containerStartedAt);
+  assert.ok(Math.abs(Date.parse(fresh.body.containerStartedAt) - Date.parse(before)) <= 1);
   pass("Host interruption, offline state and signed reconnect with fresh telemetry");
 
   const newCode = String((Number(code) + 1) % 1_000_000).padStart(6, "0");
@@ -375,6 +408,7 @@ try {
   await verifyLegacyRooms();
   assert.equal(await verifiedContainer(), before, "read-only rollout or rollback restarted the game");
   pass("rollback to legacy-only relay with the three rooms and game launch preserved");
+  if (telemetryFailure) throw telemetryFailure;
 } catch (error) {
   failure = error;
   if (installed) {

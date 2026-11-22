@@ -36,6 +36,8 @@ public final class BedrockRuntimeOperationsAcceptance implements BedrockContaine
   private static final String LABEL = "com.plexonpanel.staging.run";
   private static final String LEVEL_NAME = "PhaseTwoDisposable";
   private static final Duration GRACE = Duration.ofSeconds(45);
+  // The pinned image waits up to 118 seconds for NetherNet's previous TCP listener to clear.
+  private static final Duration RELAUNCH_TIMEOUT = Duration.ofSeconds(155);
   private static final Pattern LIST_RESPONSE = Pattern.compile("(?i).*\\b(?:there are )?0\\s*/\\s*4 players online\\b.*");
   private static final Pattern STOP_RESPONSE = Pattern.compile("(?i).*\\b(?:server stop requested|stopping server|quit correctly)\\b.*");
   private static final Pattern START_RESPONSE = Pattern.compile(".* INFO\\] Server started\\.$");
@@ -212,7 +214,24 @@ public final class BedrockRuntimeOperationsAcceptance implements BedrockContaine
       }
       Thread.sleep(250);
     } while (System.nanoTime() < deadline);
-    throw new IOException("No valid NetherNet readiness response for the expected server, world and release");
+    throw new IOException("No valid NetherNet readiness response for the expected server, world and release within "
+        + timeout.toSeconds() + " seconds. " + launchProgress());
+  }
+
+  private String launchProgress() {
+    try {
+      Container launch = inspect();
+      if (launch.startedAt() == null) return "Container phase: " + launch.phase();
+      var latest = reads.logs(launch.startedAt(), 48);
+      return "Container phase: " + launch.phase() + "; last launch markers: " + latest.stream()
+          .map(BedrockLogLine::content)
+          .filter(line -> line.contains("Waiting for TCP port") || line.contains("Waiting for Minecraft services")
+              || line.contains("still in use") || line.contains("Signed in to signaling service")
+              || START_RESPONSE.matcher(line).matches())
+          .limit(8).toList();
+    } catch (IOException unavailable) {
+      return "Unable to read the current launch evidence.";
+    }
   }
 
   private boolean acceptsJoin(String address) {
@@ -276,7 +295,7 @@ public final class BedrockRuntimeOperationsAcceptance implements BedrockContaine
     Container current = inspect();
     require(current.phase() == Phase.RUNNING && current.startedAt().isAfter(previous.startedAt()),
         "Expected a new launch of the verified container");
-    JsonObject ready = waitForJoin(Duration.ofSeconds(60));
+    JsonObject ready = waitForJoin(RELAUNCH_TIMEOUT);
     require(Objects.equals(text(firstJoin, "version"), text(ready, "version")) && world.equals(verifyWorld()),
         "Ready restart did not recover the original disposable world and Bedrock release");
   }
@@ -287,7 +306,7 @@ public final class BedrockRuntimeOperationsAcceptance implements BedrockContaine
       if (current.phase() == Phase.EXITED && current.exitCode() == 0 && !current.oomKilled()
           && original.startedAt().equals(current.startedAt())) {
         start(current);
-        waitForJoin(Duration.ofSeconds(60));
+        waitForJoin(RELAUNCH_TIMEOUT);
         System.out.println("Recovery: restored only the verified intentionally stopped disposable launch");
       }
     } catch (Exception recovery) {
