@@ -14,6 +14,8 @@
 
 Reproduce the cross-repository checks using the exact revisions in the two drafts. Browser receipts and screenshots are produced by `scripts/bedrock-qa.mjs`. GitHub Actions results and artifacts are linked from the drafts. [Core draft](https://github.com/ZpkDxGames/PlexonPanel/pull/104) · [Dashboard draft](https://github.com/ZpkDxGames/PlexonPanel-Dashboard/pull/95) · [Reproduction and deployment](BEDROCK_ARM64_RUNBOOK.md)
 
+The first implementation CI run passed on ARM64. On x64 it exposed an existing lifecycle fixture that assumed its single-worker executor was idle as soon as an authorization denial reached the test. The fixture now exercises capability and confirmation on independent instances. [First implementation CI](https://github.com/ZpkDxGames/PlexonPanel/actions/runs/44965195284)
+
 ## Capability status
 
 | Capability | Status |
