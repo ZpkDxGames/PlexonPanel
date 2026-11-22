@@ -1,0 +1,140 @@
+name: Bedrock Phase 2 ARM64 runtime acceptance
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, reopened, synchronize]
+  workflow_dispatch:
+    inputs:
+      dashboard_commit:
+        description: Exact PlexonPanel-Dashboard commit SHA
+        default: 374f8593df3ba3c96ffb15fdce18e2e3ad64b5db
+        required: true
+        type: string
+      image_digest:
+        description: itzg/minecraft-bedrock-server linux/arm64 manifest digest
+        default: sha256:2d58062df45d399ceff53ca80f49fbe6130423095846285a5bd7c3c9a52d8fc0
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+concurrency:
+  group: bedrock-phase2-acceptance
+  cancel-in-progress: true
+
+jobs:
+  runtime:
+    if: >-
+      github.repository == 'ZpkDxGames/PlexonPanel' &&
+      ((github.event_name == 'pull_request' &&
+        github.event.pull_request.number == 104 &&
+        github.event.pull_request.head.repo.full_name == github.repository &&
+        github.head_ref == 'development/bedrock-host-integration-v1') ||
+       (github.event_name == 'workflow_dispatch' &&
+        github.ref == 'refs/heads/development/bedrock-host-integration-v1'))
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 30
+    env:
+      BEDROCK_IMAGE_DIGEST: ${{ inputs.image_digest || 'sha256:2d58062df45d399ceff53ca80f49fbe6130423095846285a5bd7c3c9a52d8fc0' }}
+      DASHBOARD_COMMIT: ${{ inputs.dashboard_commit || '374f8593df3ba3c96ffb15fdce18e2e3ad64b5db' }}
+    steps:
+      - name: Validate immutable staging inputs
+        run: |
+          [[ "$DASHBOARD_COMMIT" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$BEDROCK_IMAGE_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
+
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - uses: actions/checkout@v7
+        with:
+          repository: ZpkDxGames/PlexonPanel-Dashboard
+          ref: ${{ env.DASHBOARD_COMMIT }}
+          path: phase2-dashboard
+          persist-credentials: false
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '25'
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+
+      - uses: gradle/actions/setup-gradle@v6
+
+      - name: Build Java 25 Host and standalone Relay
+        run: |
+          set -euo pipefail
+          ./gradlew --no-daemon :bedrock-host:test :bedrock-host:jar
+          java -XshowSettings:properties -version 2>&1 | grep -E 'os\.arch|java\.version'
+          dashboard="$GITHUB_WORKSPACE/phase2-dashboard"
+          test "$(git -C "$dashboard" rev-parse HEAD)" = "$DASHBOARD_COMMIT"
+          npm --prefix "$dashboard" ci
+          npm --prefix "$dashboard" run relay:test
+          jars=("$GITHUB_WORKSPACE"/bedrock-host/build/libs/plexonpanel-bedrock-host-*.jar)
+          [[ ${#jars[@]} == 1 && -f ${jars[0]} ]]
+          sha256sum "${jars[0]}"
+          printf 'BEDROCK_DASHBOARD_CHECKOUT=%s\nBEDROCK_HOST_JAR=%s\n' "$dashboard" "${jars[0]}" >> "$GITHUB_ENV"
+
+      - name: Start disposable Bedrock and verify native Box64 and NetherNet
+        id: game
+        timeout-minutes: 8
+        run: bash scripts/bedrock-arm64-container.sh start
+
+      - name: Verify Host, broker, and mixed-fleet read-only control plane
+        id: control
+        if: ${{ !cancelled() && steps.game.outcome == 'success' }}
+        timeout-minutes: 8
+        run: node scripts/test-bedrock-arm64-runtime.mjs "$BEDROCK_DASHBOARD_CHECKOUT" "$BEDROCK_HOST_JAR"
+
+      - name: Verify local console, lifecycle, shutdown and readiness
+        id: operations
+        if: ${{ !cancelled() && steps.game.outcome == 'success' }}
+        timeout-minutes: 8
+        run: |
+          set -euo pipefail
+          sudo "$JAVA_HOME/bin/java" \
+            -cp "$BEDROCK_HOST_JAR:$GITHUB_WORKSPACE/bedrock-host/build/classes/java/test" \
+            io.github.zpkdxgames.plexonpanel.bedrock.BedrockRuntimeOperationsAcceptance \
+            /var/run/docker.sock "$BEDROCK_DATA" "$BEDROCK_IMAGE_ID" "$BEDROCK_CONTAINER_ID" \
+            "$BEDROCK_STAGING_RUN_ID" "$BEDROCK_PROBE_HOST" "$BEDROCK_PROBE_PORT" \
+            | tee "$BEDROCK_EVIDENCE/local-operations.log"
+
+      - name: Remove exact disposable Bedrock container and network
+        id: cleanup
+        if: ${{ always() }}
+        timeout-minutes: 2
+        run: bash scripts/bedrock-arm64-container.sh cleanup
+
+      - name: Record acceptance outcomes
+        if: ${{ always() }}
+        env:
+          GAME_RESULT: ${{ steps.game.outcome }}
+          CONTROL_RESULT: ${{ steps.control.outcome }}
+          OPERATIONS_RESULT: ${{ steps.operations.outcome }}
+          CLEANUP_RESULT: ${{ steps.cleanup.outcome }}
+        run: |
+          printf '| Phase 2 check | Outcome |\n| --- | --- |\n' >> "$GITHUB_STEP_SUMMARY"
+          printf '| ARM64 / Box64 and NetherNet | %s |\n' "$GAME_RESULT" >> "$GITHUB_STEP_SUMMARY"
+          printf '| Host, broker and signed mixed-fleet acceptance | %s |\n' "$CONTROL_RESULT" >> "$GITHUB_STEP_SUMMARY"
+          printf '| Local staged console and lifecycle | %s |\n' "$OPERATIONS_RESULT" >> "$GITHUB_STEP_SUMMARY"
+          printf '| Disposable runner cleanup | %s |\n' "$CLEANUP_RESULT" >> "$GITHUB_STEP_SUMMARY"
+          printf '| Exact deployed image digest and host configuration parity | not verified |\n' >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v7
+        if: ${{ always() && env.BEDROCK_EVIDENCE != '' }}
+        with:
+          name: bedrock-arm64-phase2-evidence
+          path: ${{ env.BEDROCK_EVIDENCE }}/
+          if-no-files-found: warn
+          retention-days: 14
