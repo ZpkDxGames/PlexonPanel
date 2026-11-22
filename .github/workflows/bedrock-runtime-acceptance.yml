@@ -1,0 +1,188 @@
+name: Bedrock Phase 2.5 ARM64 runtime parity
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, reopened, synchronize]
+  workflow_dispatch:
+    inputs:
+      dashboard_commit:
+        description: Exact PlexonPanel-Dashboard commit SHA
+        default: 55e9871f5c23442a10d28af906d385a700335564
+        required: true
+        type: string
+      image_digest:
+        description: Immutable itzg OCI index or Linux ARM64 manifest digest
+        default: sha256:463ea4ac99a3e5b67de0fc590a61cca7ea758520f67d9e4a4512fc3afcc97044
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+concurrency:
+  group: bedrock-phase2-acceptance-${{ github.event.pull_request.head.sha || github.sha }}
+  cancel-in-progress: true
+
+jobs:
+  runtime:
+    if: >-
+      github.repository == 'ZpkDxGames/PlexonPanel' &&
+      ((github.event_name == 'pull_request' &&
+        github.event.pull_request.number == 104 &&
+        github.event.pull_request.head.repo.full_name == github.repository &&
+        github.head_ref == 'development/bedrock-host-integration-v1') ||
+       (github.event_name == 'workflow_dispatch' &&
+        github.ref == 'refs/heads/development/bedrock-host-integration-v1'))
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 30
+    env:
+      BEDROCK_IMAGE_DIGEST: ${{ inputs.image_digest || 'sha256:463ea4ac99a3e5b67de0fc590a61cca7ea758520f67d9e4a4512fc3afcc97044' }}
+      DASHBOARD_COMMIT: ${{ inputs.dashboard_commit || '55e9871f5c23442a10d28af906d385a700335564' }}
+      BEDROCK_EXPECTED_DOCKER_VERSION: '29.10.0'
+      BEDROCK_EXPECTED_EXECUTABLE_SHA256: dba89ef48dfd54b26ecaaff2554bfb0f06008a37a1645285c42d2fd62f409887
+    steps:
+      - name: Validate immutable staging inputs
+        run: |
+          [[ "$DASHBOARD_COMMIT" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$BEDROCK_IMAGE_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
+
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - uses: actions/checkout@v7
+        with:
+          repository: ZpkDxGames/PlexonPanel-Dashboard
+          ref: ${{ env.DASHBOARD_COMMIT }}
+          path: phase2-dashboard
+          persist-credentials: false
+
+      - name: Install checksum-pinned production Docker and Java versions on the runner
+        run: bash scripts/bedrock-parity-runtime.sh install
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24.22.3'
+
+      - uses: gradle/actions/setup-gradle@v6
+
+      - name: Build Java 25 Host and standalone Relay
+        run: |
+          set -euo pipefail
+          ./gradlew --no-daemon :bedrock-host:test :bedrock-host:jar
+          java -XshowSettings:properties -version 2>&1 | grep -E 'os\.arch|java\.version'
+          dashboard="$GITHUB_WORKSPACE/phase2-dashboard"
+          test "$(git -C "$dashboard" rev-parse HEAD)" = "$DASHBOARD_COMMIT"
+          npm --prefix "$dashboard" ci
+          npm --prefix "$dashboard" run relay:test
+          npm --prefix "$dashboard" run relay:standalone:package
+          jars=("$GITHUB_WORKSPACE"/bedrock-host/build/libs/plexonpanel-bedrock-host-*.jar)
+          [[ ${#jars[@]} == 1 && -f ${jars[0]} ]]
+          sha256sum "${jars[0]}"
+          printf 'BEDROCK_DASHBOARD_CHECKOUT=%s\nBEDROCK_HOST_JAR=%s\n' "$dashboard" "${jars[0]}" >> "$GITHUB_ENV"
+
+      - name: Start disposable Bedrock and verify native Box64 and NetherNet
+        id: game
+        timeout-minutes: 8
+        run: bash scripts/bedrock-arm64-container.sh start
+
+      - name: Verify Host, broker, and mixed-fleet read-only control plane
+        id: control
+        if: ${{ !cancelled() && steps.game.outputs.started == 'true' }}
+        timeout-minutes: 8
+        run: node scripts/test-bedrock-arm64-runtime.mjs "$BEDROCK_DASHBOARD_CHECKOUT" "$BEDROCK_HOST_JAR"
+
+      - name: Verify local console, lifecycle, shutdown and readiness
+        id: operations
+        if: ${{ !cancelled() && steps.game.outputs.started == 'true' }}
+        timeout-minutes: 8
+        run: |
+          set -euo pipefail
+          sudo "$JAVA_HOME/bin/java" \
+            -cp "$BEDROCK_HOST_JAR:$GITHUB_WORKSPACE/bedrock-host/build/classes/java/test" \
+            io.github.zpkdxgames.plexonpanel.bedrock.BedrockRuntimeOperationsAcceptance \
+            /var/run/docker.sock "$BEDROCK_DATA" "$BEDROCK_IMAGE_ID" "$BEDROCK_CONTAINER_ID" \
+            "$BEDROCK_STAGING_RUN_ID" "$BEDROCK_PROBE_HOST" "$BEDROCK_PROBE_PORT" \
+            | tee "$BEDROCK_EVIDENCE/local-operations.log"
+
+      - name: Remove exact disposable Bedrock container and network
+        id: cleanup
+        if: ${{ always() }}
+        timeout-minutes: 2
+        run: bash scripts/bedrock-arm64-container.sh cleanup
+
+      - name: Stop the isolated pinned Docker daemon
+        if: ${{ always() }}
+        timeout-minutes: 2
+        run: bash scripts/bedrock-parity-runtime.sh stop
+
+      - name: Rehearse packaged Relay cutover and rollback to Protocol 3 Relay 5.0.0
+        id: relay_rollback
+        timeout-minutes: 8
+        env:
+          LEGACY_RELAY_COMMIT: da691360b39435d02a8671f45f2a2c4c49e3adbe
+        run: |
+          set -euo pipefail
+          legacy="$RUNNER_TEMP/plexon-relay-5.0.0"
+          git -C "$BEDROCK_DASHBOARD_CHECKOUT" fetch --no-tags --depth=1 origin "$LEGACY_RELAY_COMMIT"
+          mkdir "$legacy"
+          git -C "$BEDROCK_DASHBOARD_CHECKOUT" archive "$LEGACY_RELAY_COMMIT" | tar -x -C "$legacy"
+          npm --prefix "$legacy" ci
+          npm --prefix "$legacy" run relay:standalone:package
+          node scripts/test-bedrock-relay-binary-rollback.mjs "$BEDROCK_DASHBOARD_CHECKOUT" \
+            "$BEDROCK_DASHBOARD_CHECKOUT/artifacts/plexonpanel-relay" "$legacy/artifacts/plexonpanel-relay" \
+            | tee "$BEDROCK_EVIDENCE/relay-binary-rollback.log"
+
+      - name: Package the tested artifacts and verify SHA-256
+        run: |
+          release="$RUNNER_TEMP/plexon-bedrock-parity-release"
+          bash scripts/package-bedrock-parity.sh "$BEDROCK_HOST_JAR" "$BEDROCK_DASHBOARD_CHECKOUT" \
+            "$BEDROCK_DASHBOARD_CHECKOUT/artifacts/plexonpanel-relay" "$release"
+          bash scripts/package-bedrock-parity.sh "$BEDROCK_HOST_JAR" "$BEDROCK_DASHBOARD_CHECKOUT" \
+            "$BEDROCK_DASHBOARD_CHECKOUT/artifacts/plexonpanel-relay" "${release}-repeat"
+          diff -rq "$release" "${release}-repeat"
+          cp "$BEDROCK_EVIDENCE/runtime.json" "$release/runtime.json"
+          (
+            cd "$release"
+            sha256sum runtime.json >> SHA256SUMS
+            sha256sum --check --strict SHA256SUMS
+          )
+          printf 'BEDROCK_RELEASE=%s\n' "$release" >> "$GITHUB_ENV"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: bedrock-phase25-tested-release
+          path: ${{ env.BEDROCK_RELEASE }}/
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Record acceptance outcomes
+        if: ${{ always() }}
+        env:
+          GAME_RESULT: ${{ steps.game.outcome }}
+          CONTROL_RESULT: ${{ steps.control.outcome }}
+          OPERATIONS_RESULT: ${{ steps.operations.outcome }}
+          CLEANUP_RESULT: ${{ steps.cleanup.outcome }}
+          RELAY_ROLLBACK_RESULT: ${{ steps.relay_rollback.outcome }}
+        run: |
+          printf '| Phase 2.5 check | Outcome |\n| --- | --- |\n' >> "$GITHUB_STEP_SUMMARY"
+          printf '| ARM64 / Box64 and NetherNet | %s |\n' "$GAME_RESULT" >> "$GITHUB_STEP_SUMMARY"
+          printf '| Host, broker and signed mixed-fleet acceptance | %s |\n' "$CONTROL_RESULT" >> "$GITHUB_STEP_SUMMARY"
+          printf '| Local staged console and lifecycle | %s |\n' "$OPERATIONS_RESULT" >> "$GITHUB_STEP_SUMMARY"
+          printf '| Disposable runner cleanup | %s |\n' "$CLEANUP_RESULT" >> "$GITHUB_STEP_SUMMARY"
+          printf '| Packaged Protocol 3 relay upgrade and rollback | %s |\n' "$RELAY_ROLLBACK_RESULT" >> "$GITHUB_STEP_SUMMARY"
+          printf '| Oracle host networking, effective game settings and live Paper sessions | operator preflight required |\n' >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v7
+        if: ${{ always() && env.BEDROCK_EVIDENCE != '' }}
+        with:
+          name: bedrock-arm64-phase2-evidence
+          path: ${{ env.BEDROCK_EVIDENCE }}/
+          if-no-files-found: warn
+          retention-days: 14

@@ -125,11 +125,17 @@ class ResponsiveHostControlTest {
   @Test
   void independentWorkersStillEnforceCapabilityConfirmationGenerationAndReplay() throws Exception {
     var calls = new AtomicInteger();
-    try (var fixture = new Fixture((action, parameters, actor) -> {
-      calls.incrementAndGet(); return Map.of();
-    }, Map.of("server.start", false, "server.stop", true, "server.status", true))) {
+    ControlEngine.Backend backend = (action, parameters, actor) -> {
+      calls.incrementAndGet();
+      return Map.of();
+    };
+    try (var fixture = new Fixture(backend, Map.of("server.start", false))) {
       fixture.send("server.start");
       assertEquals("CAPABILITY_DISABLED", fixture.reply().get("code").getAsString());
+    }
+
+    // The lifecycle worker can still be returning from its rejection when the reply is observed.
+    try (var fixture = new Fixture(backend, Map.of("server.stop", true, "server.status", true))) {
       fixture.engine.accept(ControlEngineTest.request(fixture.server, fixture.device,
           fixture.devices.snapshot().generation(), UUID.randomUUID().toString(), "server.stop", new JsonObject()));
       assertEquals("CONFIRMATION_REQUIRED", fixture.reply().get("code").getAsString());

@@ -1,0 +1,8 @@
+# Generate the real file with identity-init and install it root:pph-tonimbedrock 0640.
+serverId=xxxxxxxx-xxxx-4xxx-8xxx-xxxxxxxxxxxx
+nodeId=xxxxxxxx-xxxx-4xxx-9xxx-xxxxxxxxxxxx
+serverName=TonimBedrock
+relayUrl=wss://your-staging-relay.example/v1/agent
+relayPublicKey=REPLACE_WITH_RELAY_SPKI_DER_BASE64
+publicKey=REPLACE_WITH_HOST_SPKI_DER_BASE64
+privateKey=REPLACE_WITH_HOST_PKCS8_DER_BASE64
